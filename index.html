@@ -2230,6 +2230,64 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var dayNightState = { sunOffset: sunOffset, sunDirNorm: sunDirNorm, moonDirNorm: new THREE.Vector3(0, -1, 0) };
     updateDayNightCycle(dayTimeOfDay);
 
+    /* ---- SEA SURFACE MODEL — Gerstner (trochoidal) waves shared by the water shader and
+       everything that floats. Each wave follows the deep-water dispersion relation
+       w = sqrt(g*k), so long swells travel fast and short chop slowly, crests are sharp and
+       troughs broad, and surface water moves in orbits (horizontal displacement) rather than
+       just bobbing up and down. Sea state follows the weather: calm on a clear day, a heavy
+       breaking sea in a storm. Waves die out in shallow water (rivers, beaches). ---- */
+    var SEA_G = 9.81;
+    var SEA_SWELL_DIR = 0.62;           // radians — prevailing swell heading (fixed, so the sea never "rotates")
+    var SEA_WAVE_DEFS = [               // [wavelength m, base amplitude m, direction offset rad]
+      [152, 0.95, 0.00], [97, 0.62, 0.52], [63, 0.40, -0.41],
+      [41, 0.24, 1.05], [27, 0.14, -0.88], [17, 0.08, 0.27]
+    ];
+    var SEA_N = SEA_WAVE_DEFS.length;
+    var SEA_MESH_HALF = 3000, SEA_MESH_LIN = 0.1;
+    var SEA_MESH_SEG = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 192 : 256;
+    var seaWaves = [];                  // per-wave live state (JS copy of what the shader sees)
+    var seaWaveD = [], seaWaveP = [];   // shader uniform arrays: D = (dirX, dirZ, k, amp), P = (phase, Q, fadeStart, fadeEnd)
+    // the water mesh is denser near the player (x = S*(a*u + (1-a)*u^3)): radius at which the grid
+    // spacing reaches `sp` metres — waves shorter than a few grid cells are faded out past there
+    function seaRadiusForSpacing(sp) {
+      var a = SEA_MESH_LIN, du = 2 / SEA_MESH_SEG;
+      var q = (sp / (SEA_MESH_HALF * du) - a) / (3 * (1 - a));
+      if (q <= 0) return 0;
+      var u = Math.sqrt(q);
+      if (u >= 1) return 1e6;
+      return SEA_MESH_HALF * (a * u + (1 - a) * u * u * u);
+    }
+    for (var swi = 0; swi < SEA_N; swi++) {
+      var sdef = SEA_WAVE_DEFS[swi], sk = 2 * Math.PI / sdef[0], sang = SEA_SWELL_DIR + sdef[2];
+      seaWaves.push({
+        dx: Math.sin(sang), dz: Math.cos(sang), k: sk, w: Math.sqrt(SEA_G * sk), base: sdef[1],
+        amp: sdef[1], q: 0, phase: swi * 1.7,
+        f0: seaRadiusForSpacing(sdef[0] / 7), f1: Math.max(seaRadiusForSpacing(sdef[0] / 3.5), 40)
+      });
+      seaWaveD.push(new THREE.Vector4());
+      seaWaveP.push(new THREE.Vector4());
+    }
+    var seaState = 0.8, seaSteep = 0.6, seaAmpSum = 1;
+    // advance the wave phases (kept in double precision on the CPU, so there's no float drift in
+    // the shader after hours of play) and ease the sea state toward the weather
+    function seaUpdateWaves(dt, t, wind, rain) {
+      var target = THREE.MathUtils.clamp(0.8 + wind * 0.6 + rain * 0.15, 0.4, 1.5);
+      seaState += (target - seaState) * Math.min(1, dt * 0.08);
+      seaSteep = THREE.MathUtils.clamp(0.5 + (seaState - 0.5) * 0.45, 0.45, 0.9);
+      seaAmpSum = 0;
+      for (var i = 0; i < SEA_N; i++) {
+        var W = seaWaves[i];
+        // short waves build up faster with wind than the long swell does
+        W.amp = W.base * seaState * (1 + (i / (SEA_N - 1)) * (seaState - 0.5) * 0.8);
+        W.q = seaSteep / (W.k * W.amp * SEA_N);
+        W.phase = (-W.w * t) % (Math.PI * 2);
+        seaAmpSum += W.amp;
+        seaWaveD[i].set(W.dx, W.dz, W.k, W.amp);
+        seaWaveP[i].set(W.phase, W.q, W.f0, W.f1);
+      }
+    }
+    seaUpdateWaves(100, 0, 0, 0);
+
     // water plane — animated waves + sun sparkle, fixed level, follows player's XZ only
     var waterMaterial = new THREE.ShaderMaterial({
       defines: {
@@ -2240,6 +2298,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         THREE.UniformsLib.fog,
         {
           time: { value: 0 },
+          uWaveD: { value: seaWaveD },
+          uWaveP: { value: seaWaveP },
+          uAmpSum: { value: 1 },
+          uFoamAmt: { value: 0.5 },
           baseColor: { value: new THREE.Color(0x1166c0) },
           crestColor: { value: new THREE.Color(0x60d4f8) }
         }
@@ -2325,9 +2387,22 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       transparent: false,
       fog: false
     });
-    var water = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000, 96, 96), waterMaterial);
+    // radially graded grid: ~2.3 m cells under the player for the short chop, stretching to ~80 m
+    // at the horizon where only the long swell is left
+    var waterGeo = new THREE.PlaneGeometry(2, 2, SEA_MESH_SEG, SEA_MESH_SEG);
+    (function() {
+      var pa = waterGeo.attributes.position, a = SEA_MESH_LIN;
+      for (var i = 0; i < pa.count; i++) {
+        var u = pa.getX(i), v = pa.getY(i);
+        pa.setXY(i, SEA_MESH_HALF * (a * u + (1 - a) * u * u * u), SEA_MESH_HALF * (a * v + (1 - a) * v * v * v));
+      }
+      pa.needsUpdate = true;
+      waterGeo.computeBoundingSphere();
+    })();
+    var water = new THREE.Mesh(waterGeo, waterMaterial);
     water.rotation.x = -Math.PI / 2;
     water.position.y = WATER_LEVEL;
+    water.frustumCulled = false; // vertices are displaced in the shader
     scene.add(water);
 
 
@@ -4964,28 +5039,102 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var SEA_FLOAT_X = 1.25 * SEA_SCALE;             // float centreline, local x
     var SEA_FLOAT_BOW_Z = -3.0 * SEA_SCALE, SEA_FLOAT_STERN_Z = 2.8 * SEA_SCALE;
 
-    // the rendered swell at a point — same sum of sines the water vertex shader uses
-    function seaWaveHeight(x, z) {
-      var t = waterMaterial.uniforms.time.value;
-      return Math.sin(x * 0.018 + t * 2.2) * 1.1 + Math.sin(z * 0.015 - t * 1.6) * 0.9 +
-             Math.sin((x + z) * 0.008 + t * 1.1) * 0.7 + Math.sin((x * 0.6 - z) * 0.031 + t * 2.9) * 0.35;
+    // wave damping in shallow water — reads the same baked shoreline map the water shader does
+    // (G channel = depth / SHORE_WAVE_DEPTH), so rivers and beaches stay calm in both
+    function seaShoreDamp(x, z) {
+      if (typeof gfxShore === 'undefined' || !gfxShore.valid) return 1;
+      var n = SHORE_RES, u = (x - gfxShore.cx) / SHORE_SPAN + 0.5, v = (z - gfxShore.cz) / SHORE_SPAN + 0.5;
+      var edge = Math.max(Math.abs(u - 0.5), Math.abs(v - 0.5));
+      if (edge >= 0.5) return 1;
+      var fx = THREE.MathUtils.clamp(u * n - 0.5, 0, n - 1.001), fz = THREE.MathUtils.clamp(v * n - 0.5, 0, n - 1.001);
+      var ix = fx | 0, iz = fz | 0; fx -= ix; fz -= iz;
+      var d = gfxShore.tex.image.data, o = (iz * n + ix) * 4 + 1;
+      var g = ((d[o] * (1 - fx) + d[o + 4] * fx) * (1 - fz) + (d[o + n * 4] * (1 - fx) + d[o + n * 4 + 4] * fx) * fz) / 255;
+      var damp = 0.12 + 0.88 * seaSmooth(0, 1, g);
+      var ef = 1 - seaSmooth(0.42, 0.5, edge);
+      return 1 + (damp - 1) * ef;
     }
-    // ...but the water mesh is a 62.5 m triangle grid re-centred on the player, so anything
-    // sitting on the surface away from the grid points (wake foam, spray) uses the height of the
-    // actual rendered triangle instead, or it would float above / sink into the swell
-    var SEA_GRID = 6000 / 96;
-    function seaMeshWaveHeight(x, z) {
+    function seaSmooth(e0, e1, x) { var t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); }
+    // Gerstner displacement of the surface point that started at (x0, z0) on the flat sea
+    var _seaD = { x: 0, y: 0, z: 0 };
+    function seaDisplace(x0, z0, damp) {
       var ox = water.position.x, oz = water.position.z;
-      var gx = (x - ox) / SEA_GRID, gz = (z - oz) / SEA_GRID;
-      var ix = Math.floor(gx), iz = Math.floor(gz), fx = gx - ix, fz = gz - iz;
-      var x0 = ox + ix * SEA_GRID, z0 = oz + iz * SEA_GRID;
-      var ha = seaWaveHeight(x0, z0), hb = seaWaveHeight(x0, z0 + SEA_GRID);
-      var hc = seaWaveHeight(x0 + SEA_GRID, z0 + SEA_GRID), hd = seaWaveHeight(x0 + SEA_GRID, z0);
-      if (fx + fz <= 1) return ha + (hd - ha) * fx + (hb - ha) * fz;
-      return hc + (hb - hc) * (1 - fx) + (hd - hc) * (1 - fz);
+      var r = Math.sqrt((x0 - ox) * (x0 - ox) + (z0 - oz) * (z0 - oz));
+      _seaD.x = 0; _seaD.y = 0; _seaD.z = 0;
+      for (var i = 0; i < SEA_N; i++) {
+        var W = seaWaves[i];
+        var A = W.amp * damp * (1 - seaSmooth(W.f0, W.f1, r));
+        if (A <= 0) continue;
+        var f = W.k * (W.dx * x0 + W.dz * z0) + W.phase, c = Math.cos(f), qa = W.q * A;
+        _seaD.x += qa * W.dx * c; _seaD.z += qa * W.dz * c; _seaD.y += A * Math.sin(f);
+      }
+      return _seaD;
+    }
+    // surface height above WATER_LEVEL at a world point: Gerstner waves move water sideways, so
+    // first find which flat-sea point got carried here (a few fixed-point steps), then its height
+    function seaMeshWaveHeight(x, z) {
+      var damp = seaShoreDamp(x, z), px = x, pz = z;
+      for (var it = 0; it < 4; it++) {
+        var D = seaDisplace(px, pz, damp);
+        px = x - D.x; pz = z - D.z;
+      }
+      return seaDisplace(px, pz, damp).y;
+    }
+    var seaWaveHeight = seaMeshWaveHeight;
+    // horizontal orbital velocity of the surface water at a point (m/s) — floating things drift with it
+    function seaOrbitalVel(x, z, out) {
+      var damp = seaShoreDamp(x, z);
+      out.x = 0; out.z = 0;
+      for (var i = 0; i < SEA_N; i++) {
+        var W = seaWaves[i], A = W.amp * damp;
+        var s = Math.sin(W.k * (W.dx * x + W.dz * z) + W.phase) * W.q * A * W.w;
+        out.x += W.dx * s; out.z += W.dz * s;
+      }
+      return out;
     }
     var SEA_HULL_DRAFT = 0.3; // how deep the float keels sit in the water when afloat
     function seaSurfaceY(x, z) { return WATER_LEVEL + seaMeshWaveHeight(x, z) - SEA_HULL_DRAFT; }
+
+    // buoyant hull: heave, pitch and roll as damped springs toward the attitude the swell under the
+    // four float corners asks for. Planing fast, the hull skims (stiffer, less pitch from the waves)
+    // and slams into oncoming crests
+    var seaHull = { init: false, y: 0, vy: 0, p: 0, vp: 0, r: 0, vr: 0, lastTp: 0, out: { y: 0, pitch: 0, roll: 0, slopePitch: 0 } };
+    var _seaOrb = { x: 0, z: 0 };
+    var SEA_HULL_HALF_LEN = 2.9, SEA_HULL_HALF_W = 1.35;
+    function seaHullStep(dt, spd) {
+      var cH = Math.cos(heading), sH = Math.sin(heading);
+      var fx = -sH, fz = -cH, rx = cH, rz = -sH;   // nose and right-wing directions on the water
+      var x = position.x, z = position.z, L = SEA_HULL_HALF_LEN, Wd = SEA_HULL_HALF_W;
+      var hBL = seaMeshWaveHeight(x + fx * L - rx * Wd, z + fz * L - rz * Wd);
+      var hBR = seaMeshWaveHeight(x + fx * L + rx * Wd, z + fz * L + rz * Wd);
+      var hSL = seaMeshWaveHeight(x - fx * L - rx * Wd, z - fz * L - rz * Wd);
+      var hSR = seaMeshWaveHeight(x - fx * L + rx * Wd, z - fz * L + rz * Wd);
+      var tY = WATER_LEVEL + (hBL + hBR + hSL + hSR) * 0.25;
+      var tP = Math.atan(((hBL + hBR) - (hSL + hSR)) * 0.5 / (2 * L));
+      var tR = Math.atan(((hBR + hSR) - (hBL + hSL)) * 0.5 / (2 * Wd));
+      var H = seaHull;
+      if (!H.init) { H.init = true; H.y = tY; H.vy = 0; H.p = tP; H.vp = 0; H.r = tR; H.vr = 0; H.lastTp = tP; }
+      var plan = THREE.MathUtils.clamp((spd - 8) / 22, 0, 1);           // 0 = displacement, 1 = on the step
+      var tpRate = (tP - H.lastTp) / Math.max(dt, 1e-3); H.lastTp = tP;
+      // slamming: running fast into a rising wave face kicks the nose up
+      if (plan > 0 && tpRate > 0) H.vp += tpRate * plan * Math.min(1, spd / 35) * 0.9 * dt * 10;
+      var wy = 4.2 + plan * 3, zy = 0.32 + plan * 0.25;                  // heave: natural freq (rad/s), damping ratio
+      var wp = 3.4 + plan * 2.5, zp = 0.38 + plan * 0.2;
+      var wr = 2.8, zr = 0.22;                                           // twin floats: lightly damped roll
+      var sub = Math.max(1, Math.ceil(dt / 0.012)), h = dt / sub;
+      for (var i = 0; i < sub; i++) {
+        H.vy += (wy * wy * (tY - H.y) - 2 * zy * wy * H.vy) * h; H.y += H.vy * h;
+        H.vp += (wp * wp * (tP * (1 - plan * 0.45) - H.p) - 2 * zp * wp * H.vp) * h; H.p += H.vp * h;
+        H.vr += (wr * wr * (tR - H.r) - 2 * zr * wr * H.vr) * h; H.r += H.vr * h;
+      }
+      // never let the springs push the floats through the surface or leave them hanging in the air
+      var surf = WATER_LEVEL + seaMeshWaveHeight(x, z);
+      if (H.y < surf - 0.6) { H.y = surf - 0.6; if (H.vy < 0) H.vy = 0; }
+      if (H.y > surf + 0.5) { H.y = surf + 0.5; if (H.vy > 0) H.vy = 0; }
+      H.p = THREE.MathUtils.clamp(H.p, -0.35, 0.35); H.r = THREE.MathUtils.clamp(H.r, -0.3, 0.3);
+      var o = H.out; o.y = H.y; o.pitch = H.p; o.roll = H.r; o.slopePitch = tP;
+      return o;
+    }
 
     /* ============================================================
        NPC TRAFFIC — simplified jets that fly in, land, and taxi to the apron
@@ -6379,7 +6528,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           any = 1;
           w.life += dt;
           var t = Math.min(1, w.life / w.maxLife);
-          w.mesh.position.x += w.vel.x * dt; w.mesh.position.z += w.vel.z * dt;
+          // foam rides the orbital current of the swell as well as its own spreading motion
+          seaOrbitalVel(w.mesh.position.x, w.mesh.position.z, _seaOrb);
+          w.mesh.position.x += (w.vel.x + _seaOrb.x) * dt; w.mesh.position.z += (w.vel.z + _seaOrb.z) * dt;
           w.vel.multiplyScalar(Math.max(0, 1 - dt * 0.6));
           w.mesh.position.y = WATER_LEVEL + seaMeshWaveHeight(w.mesh.position.x, w.mesh.position.z) + 0.12;
           var s = w.s0 + (w.s1 - w.s0) * (1 - (1 - t) * (1 - t));
@@ -11528,16 +11679,22 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           var propRate = (outOfFuel || samEngineKilled) ? 2 : 14 + THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1) * 55;
           for (var spi = 0; spi < seaProps.length; spi++) seaProps[spi].rotation.z += propRate * dt;
           if (seaAfloatHere && wasGrounded && !crashing) {
-            // bob with the swell: pitch and roll follow the local slope of the rendered waves
-            var sx = position.x, sz = position.z, sh = seaMeshWaveHeight(sx, sz);
-            var slopeX = (seaMeshWaveHeight(sx + 10, sz) - sh) / 10, slopeZ = (seaMeshWaveHeight(sx, sz + 10) - sh) / 10;
-            var cH = Math.cos(heading), sH = Math.sin(heading);
-            var alongNose = -(slopeX * sH + slopeZ * cH);     // rise ahead of the nose
-            var acrossRight = slopeX * cH - slopeZ * sH;       // rise to the right wing
-            plane.rotation.x += Math.atan(alongNose) * 0.8;
-            plane.rotation.z += Math.atan(acrossRight) * 0.8;
-            plane.rotation.x += seaBouncePitch;
-            plane.position.y = position.y + seaBounceY;
+            // ride the swell as a buoyant hull: the surface is sampled under each float's bow and
+            // stern, and heave / pitch / roll chase that attitude through damped springs, so the
+            // plane lags, overshoots and rocks on the waves instead of being glued to the surface
+            var hs = seaHullStep(dt, speed);
+            // drift with the orbital current of the waves (and the wind) when slow on the water
+            var slowF = 1 - THREE.MathUtils.clamp(speed / 12, 0, 1);
+            seaOrbitalVel(position.x, position.z, _seaOrb);
+            position.x += (_seaOrb.x * 0.6 + windPush.x * 0.12) * slowF * dt;
+            position.z += (_seaOrb.z * 0.6 + windPush.z * 0.12) * slowF * dt;
+            // gravity pulls it down the face of a wave (surfing) — small, but you feel it taxiing
+            speed = Math.max(0, speed - 9.81 * Math.sin(hs.slopePitch) * 0.35 * dt);
+            plane.rotation.x += hs.pitch + seaBouncePitch;
+            plane.rotation.z += hs.roll;
+            plane.position.y = hs.y + (PLANE_GROUND_OFFSET - SEA_HULL_DRAFT) + seaBounceY;
+          } else {
+            seaHull.init = false;
           }
         }
         seaUpdateFx(dt, isSeaplaneMode && seaAfloatHere && wasGrounded && !crashing, speed);
@@ -11574,6 +11731,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         sky.position.set(position.x, 0, position.z);
         water.position.x = position.x; water.position.z = position.z;
         waterMaterial.uniforms.time.value = elapsedSeconds;
+        seaUpdateWaves(dt, elapsedSeconds, currentWind, currentRainIntensity);
+        waterMaterial.uniforms.uAmpSum.value = seaAmpSum;
+        waterMaterial.uniforms.uFoamAmt.value = THREE.MathUtils.clamp((seaState - 0.45) / 0.9, 0, 1);
         starField.position.set(position.x, 0, position.z);
         if (window.__distantMountains) {
           window.__distantMountains.position.set(position.x, 0, position.z);
@@ -11864,7 +12024,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     // Shoreline depth map: terrain height baked around the player (a few rows per frame, so it
     // never hitches) into a small texture the water shader reads for shallow tint + surf lines.
-    var SHORE_RES = 192, SHORE_SPAN = 3072, SHORE_DEPTH_SCALE = 3.0;
+    var SHORE_RES = 192, SHORE_SPAN = 3072, SHORE_DEPTH_SCALE = 3.0, SHORE_WAVE_DEPTH = 22.0;
     var gfxShore = {
       tex: new THREE.DataTexture(new Uint8Array(SHORE_RES * SHORE_RES * 4), SHORE_RES, SHORE_RES, THREE.RGBAFormat),
       buf: new Uint8Array(SHORE_RES * SHORE_RES * 4), job: null, cx: 0, cz: 0, valid: 0, wet: 0, jobWet: 0
@@ -11892,7 +12052,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (d > 0) gfxShore.jobWet++;
           var s = Math.max(-1, Math.min(1, d / SHORE_DEPTH_SCALE));
           var o = (base + i) * 4, v8 = Math.round((s * 0.5 + 0.5) * 255);
-          gfxShore.buf[o] = v8; gfxShore.buf[o + 1] = v8; gfxShore.buf[o + 2] = v8; gfxShore.buf[o + 3] = 255;
+          // G = depth for wave shoaling (0 at the waterline, 1 in water deeper than SHORE_WAVE_DEPTH)
+          var g8 = Math.round(Math.max(0, Math.min(1, d / SHORE_WAVE_DEPTH)) * 255);
+          gfxShore.buf[o] = v8; gfxShore.buf[o + 1] = g8; gfxShore.buf[o + 2] = v8; gfxShore.buf[o + 3] = 255;
         }
         j.row++;
       }
@@ -11929,9 +12091,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     waterMaterial.vertexShader = [
       'uniform float time;',
       'uniform mat4 reflMat;',
+      'uniform vec4 uWaveD[6]; uniform vec4 uWaveP[6];',
+      'uniform sampler2D tShore; uniform vec2 shoreCenter; uniform float shoreSpan; uniform float shoreValid;',
       'varying vec3 vWorldPos;',
-      'varying float vWaveHeight;',
-      'varying vec3 vNormalW;',
+      'varying vec2 vFlat;',
+      'varying float vDamp;',
+      'varying float vMeshR;',
       'varying vec3 vViewDir;',
       'varying vec4 vReflUv;',
       '#include <common>',
@@ -11939,22 +12104,28 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       '#include <logdepthbuf_pars_vertex>',
       'void main() {',
       '  vec4 worldFlat = modelMatrix * vec4(position, 1.0);',
+      '  vec2 p0 = worldFlat.xz;',
       '  vReflUv = reflMat * vec4(worldFlat.xyz, 1.0);',
-      '  float a1 = worldFlat.x * 0.018 + time * 2.2;',
-      '  float a2 = worldFlat.z * 0.015 - time * 1.6;',
-      '  float a3 = (worldFlat.x + worldFlat.z) * 0.008 + time * 1.1;',
-      '  float a4 = (worldFlat.x * 0.6 - worldFlat.z) * 0.031 + time * 2.9;',
-      '  float wave = sin(a1) * 1.1 + sin(a2) * 0.9 + sin(a3) * 0.7 + sin(a4) * 0.35;',
-      '  vec3 displaced = position;',
-      '  displaced.z += wave;',
-      '  vWaveHeight = wave;',
-      '  float dWdx = cos(a1) * 0.018 * 1.1 + cos(a3) * 0.008 * 0.7 + cos(a4) * 0.031 * 0.6 * 0.35;',
-      '  float dWdz = cos(a2) * 0.015 * 0.9 + cos(a3) * 0.008 * 0.7 - cos(a4) * 0.031 * 0.35;',
-      '  vNormalW = normalize(vec3(-dWdx, 1.0, -dWdz));',
-      '  vec4 mvPosition = modelViewMatrix * vec4(displaced, 1.0);',
+      // shoaling: waves die down over the shallows so rivers and beaches don't slosh over the banks
+      '  vec2 suv = (p0 - shoreCenter) / shoreSpan + 0.5;',
+      '  float edgeF = shoreValid * (1.0 - smoothstep(0.42, 0.5, max(abs(suv.x - 0.5), abs(suv.y - 0.5))));',
+      '  float damp = mix(1.0, 0.12 + 0.88 * smoothstep(0.0, 1.0, texture2D(tShore, clamp(suv, 0.0, 1.0)).g), edgeF);',
+      // Gerstner waves: water particles move in circles, so crests bunch up sharp and troughs flatten
+      '  float r = length(p0 - modelMatrix[3].xz);',
+      '  vec3 disp = vec3(0.0);',
+      '  for (int i = 0; i < 6; i++) {',
+      '    vec4 D = uWaveD[i]; vec4 P = uWaveP[i];',
+      '    float A = D.w * damp * (1.0 - smoothstep(P.z, P.w, r));',
+      '    float f = D.z * dot(D.xy, p0) + P.x;',
+      '    float qa = P.y * A * cos(f);',
+      '    disp += vec3(D.x * qa, A * sin(f), D.y * qa);',
+      '  }',
+      '  vec3 wp = worldFlat.xyz + disp;',
+      '  vFlat = p0; vDamp = damp; vMeshR = r;',
+      '  vec4 mvPosition = viewMatrix * vec4(wp, 1.0);',
       '  gl_Position = projectionMatrix * mvPosition;',
-      '  vWorldPos = (modelMatrix * vec4(displaced, 1.0)).xyz;',
-      '  vViewDir = cameraPosition - vWorldPos;',
+      '  vWorldPos = wp;',
+      '  vViewDir = cameraPosition - wp;',
       '  #include <logdepthbuf_vertex>',
       '  #include <fog_vertex>',
       '}'
@@ -11968,16 +12139,40 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       'uniform sampler2D tShore; uniform vec2 shoreCenter; uniform float shoreSpan; uniform float shoreValid;',
       'uniform float rough;',
       'uniform vec4 uRip[4];',
-      'varying vec3 vWorldPos; varying float vWaveHeight; varying vec3 vNormalW; varying vec3 vViewDir; varying vec4 vReflUv;',
+      'uniform vec4 uWaveD[6]; uniform vec4 uWaveP[6]; uniform float uAmpSum; uniform float uFoamAmt;',
+      'varying vec3 vWorldPos; varying vec2 vFlat; varying float vDamp; varying float vMeshR; varying vec3 vViewDir; varying vec4 vReflUv;',
       '#include <fog_pars_fragment>',
       '#include <logdepthbuf_pars_fragment>',
       'vec2 wg(vec2 p, vec2 d, float f, float s, float a) { return d * cos(dot(p, d) * f + time * s) * f * a; }',
       'float wHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }',
+      'float wNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+      '  return mix(mix(wHash(i), wHash(i + vec2(1.0, 0.0)), f.x), mix(wHash(i + vec2(0.0, 1.0)), wHash(i + vec2(1.0, 1.0)), f.x), f.y); }',
       'void main() {',
       '  #include <logdepthbuf_fragment>',
       '  vec3 V = normalize(vViewDir);',
       '  float dist = length(vViewDir);',
       '  vec2 p = vWorldPos.xz;',
+      // per-pixel Gerstner normal + surface Jacobian. Short waves that the mesh can no longer carry
+      // as geometry keep shading the surface as normal detail further out, filtered by pixel footprint
+      '  vec3 nAcc = vec3(0.0, 1.0, 0.0);',
+      '  float jxx = 1.0, jzz = 1.0, jxz = 0.0, wh = 0.0;',
+      '  for (int i = 0; i < 6; i++) {',
+      '    vec4 D = uWaveD[i]; vec4 P = uWaveP[i];',
+      '    float lambda = 6.2832 / D.z;',
+      '    float geo = 1.0 - smoothstep(P.z, P.w, vMeshR);',
+      '    float A = D.w * vDamp;',
+      '    float An = A * (1.0 - smoothstep(lambda * 8.0, lambda * 30.0, dist));',
+      '    float f = D.z * dot(D.xy, vFlat) + P.x;',
+      '    float sf = sin(f), cf = cos(f);',
+      '    float wa = D.z * An;',
+      '    nAcc.x -= D.x * wa * cf; nAcc.z -= D.y * wa * cf; nAcc.y -= P.y * wa * sf;',
+      '    float qs = P.y * D.z * A * geo * sf;',
+      '    jxx -= qs * D.x * D.x; jzz -= qs * D.y * D.y; jxz -= qs * D.x * D.y;',
+      '    wh += A * geo * sf;',
+      '  }',
+      '  vec3 vNormalW = normalize(nAcc);',
+      '  float jac = jxx * jzz - jxz * jxz;',
+      '  float vWaveHeight = wh / max(uAmpSum * 0.55, 0.2);',
       // capillary/ripple detail on top of the swell, faded out with distance to avoid shimmer;
       // rain and overcast chop the surface up
       '  vec2 g = wg(p, vec2(0.958, 0.287), 0.21, 1.9, 0.30)',
@@ -12022,7 +12217,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       '  vec3 planar = texture2D(tRefl, clamp(ruv, vec2(0.002), vec2(0.998))).rgb;',
       '  refl = mix(refl, planar, reflStrength * (1.0 - rough * 0.45));',
       '  float light = clamp(ambI * 0.9 + sunI * max(L.y, 0.0) * 0.6, 0.03, 1.3);',
-      '  float crest = clamp(vWaveHeight * 0.33 + 0.5, 0.0, 1.0);',
+      '  float crest = clamp(vWaveHeight * 0.5 + 0.5, 0.0, 1.0);',
       // shallows go turquoise over the sandbar, deep water stays dark blue-green
       '  vec3 tint = mix(shallowColor, deepColor, smoothstep(0.05, 0.95, s));',
       '  vec3 body = tint * light * (0.88 + 0.24 * max(dot(N, L), 0.0) * sunUp);',
@@ -12039,22 +12234,26 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       '  float spec = pow(NdotH, tight) * 6.0 * (1.0 - rough * 0.7) + pow(NdotH, mix(110.0, 80.0, far)) * 0.36;',
       '  vec2 cell = floor(p * 3.1);',
       '  float tw = wHash(cell + floor(time * 7.0 + wHash(cell) * 7.0));',
-      '  spec += step(0.965, tw) * pow(NdotH, 220.0) * 3.0 * (1.0 - smoothstep(15.0, 140.0, dist)) * (1.0 - rough);',
+      '  float dotMask = 1.0 - smoothstep(0.12, 0.42, length(fract(p * 3.1) - 0.5));',
+      '  spec += step(0.965, tw) * dotMask * pow(NdotH, 220.0) * 3.0 * (1.0 - smoothstep(15.0, 140.0, dist)) * (1.0 - rough);',
       '  color += sunColor * spec * sunI * sunUp;',
       // moon glint and moon path at night
       '  vec3 Lm = normalize(moonDir);',
       '  float mH = max(dot(N, normalize(Lm + V)), 0.0);',
       '  color += moonColor * (pow(mH, mix(900.0, 350.0, far)) * 1.3 + pow(mH, 60.0) * 0.14) * moonI * clamp(Lm.y * 5.0, 0.0, 1.0);',
-      // whitecaps only on the steepest crests
-      '  float steep = 1.0 - clamp(vNormalW.y, 0.0, 1.0);',
+      // whitecaps where the Gerstner surface is being squeezed together (Jacobian drops toward
+      // zero = the crest is about to break) — more of them the rougher the sea gets
       '  float fn = sin(p.x * 1.3 + time * 1.7) * sin(p.y * 1.1 - time * 1.3) + sin(p.x * 0.37 - p.y * 0.41 + time * 2.3) * 0.6;',
-      '  float foam = smoothstep(0.72, 0.95, crest) * smoothstep(0.02, 0.1, steep) * smoothstep(0.15, 0.9, fn * 0.5 + 0.5);',
+      '  float fn2 = wNoise(p * 0.21 + vec2(time * 0.05, 0.0)) * 0.6 + wNoise(p * 0.73 - vec2(0.0, time * 0.11)) * 0.4;',
+      '  float squeeze = 1.0 - jac;',
+      '  float foam = smoothstep(0.62 - uFoamAmt * 0.3, 0.95 - uFoamAmt * 0.25, squeeze + crest * 0.25 * uFoamAmt)',
+      '             * smoothstep(0.1, 0.85, fn * 0.35 + 0.35 + fn2 * 0.45);',
       // shoreline surf: a broken foam edge where water meets land, and wave lines rolling in
       '  float edge = (1.0 - smoothstep(0.02, 0.16, s)) * (0.65 + 0.35 * (fn * 0.5 + 0.5));',
       '  float lines = smoothstep(0.6, 0.97, sin(s * 24.0 - time * 1.35 + fn * 1.4)) * (1.0 - smoothstep(0.08, 0.42, s));',
       '  float surf = clamp(edge + lines * 0.55, 0.0, 1.0) * edgeF;',
       '  vec3 foamCol = vec3(0.9) * light + sunColor * 0.08 * sunI;',
-      '  color = mix(color, foamCol, max(max(foam * 0.5 * detailFade, surf * 0.8), clamp(ripFoam, 0.0, 1.0) * 0.55));',
+      '  color = mix(color, foamCol, max(max(foam * (0.35 + 0.35 * detailFade), surf * 0.8), clamp(ripFoam, 0.0, 1.0) * 0.55));',
       '  gl_FragColor = vec4(color, 1.0);',
       '  #include <fog_fragment>',
       '}'
