@@ -1957,8 +1957,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
        SCENE SETUP
        ============================================================ */
     var canvasEl = document.getElementById('canvas');
-    var renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
-    renderer.setPixelRatio(2);
+    // antialiasing comes from the multisampled scene target in the post chain, so the canvas itself
+    // doesn't need its own MSAA buffer
+    var renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: false, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
+    // checking every shader for errors forces a synchronous compile + link (a visible hitch each time
+    // a new material shows up); let the driver compile in the background instead
+    renderer.debug.checkShaderErrors = false;
+    renderer.setPixelRatio(1);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -2244,7 +2249,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     ];
     var SEA_N = SEA_WAVE_DEFS.length;
     var SEA_MESH_HALF = 3000, SEA_MESH_LIN = 0.1;
-    var SEA_MESH_SEG = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 192 : 256;
+    var SEA_MESH_SEG = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 128 : 160;
     var seaWaves = [];                  // per-wave live state (JS copy of what the shader sees)
     var seaWaveD = [], seaWaveP = [];   // shader uniform arrays: D = (dirX, dirZ, k, amp), P = (phase, Q, fadeStart, fadeEnd)
     // the water mesh is denser near the player (x = S*(a*u + (1-a)*u^3)): radius at which the grid
@@ -2387,7 +2392,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       transparent: false,
       fog: false
     });
-    // radially graded grid: ~2.3 m cells under the player for the short chop, stretching to ~80 m
+    // radially graded grid: ~4 m cells under the player for the short chop, stretching to ~80 m
     // at the horizon where only the long swell is left
     var waterGeo = new THREE.PlaneGeometry(2, 2, SEA_MESH_SEG, SEA_MESH_SEG);
     (function() {
@@ -11859,8 +11864,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var gfxTimeU = { value: 0 };
     var gfxWindU = { value: 0 };
     var GFX_IS_TOUCH = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-    var gfxMaxPR = Math.min(window.devicePixelRatio || 1, 2);
-    var gfxPR = GFX_IS_TOUCH ? Math.min(gfxMaxPR, 1.5) : gfxMaxPR;
+    // start at 1x and let the adaptive scaler raise it only when there's frame time to spare
+    var gfxMaxPR = Math.min(window.devicePixelRatio || 1, GFX_IS_TOUCH ? 1.25 : 1.5);
+    var gfxMinPR = GFX_IS_TOUCH ? 0.6 : 0.7;
+    var gfxPR = Math.min(gfxMaxPR, 1);
     var gfxReady = false;
     var gfxAniso = Math.min(8, renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 1);
     renderer.setPixelRatio(gfxPR);
@@ -11870,7 +11877,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     // ---------- sun shadows: higher resolution, less peter-panning, no acne on smooth terrain ----------
     (function() {
-      var sz = GFX_IS_TOUCH ? 2048 : 4096;
+      var sz = GFX_IS_TOUCH ? 1024 : 2048;
       sunLight.shadow.mapSize.set(sz, sz);
       if (sunLight.shadow.map) { sunLight.shadow.map.dispose(); sunLight.shadow.map = null; }
       sunLight.shadow.radius = 3;
@@ -12001,7 +12008,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     // plane into a reduced-resolution target, with an oblique near plane so nothing below the
     // surface leaks in. Terrain, the city, aircraft and night lights all show up on the water.
     var gfxRefl = {
-      enabled: true, div: GFX_IS_TOUCH ? 3 : 2, rt: null, active: false,
+      enabled: true, div: GFX_IS_TOUCH ? 4 : 3, rt: null, active: false, frame: 0,
       cam: new THREE.PerspectiveCamera(), texMat: new THREE.Matrix4(),
       n: new THREE.Vector3(0, 1, 0), rp: new THREE.Vector3(), camPos: new THREE.Vector3(),
       rot: new THREE.Matrix4(), look: new THREE.Vector3(), target: new THREE.Vector3(), view: new THREE.Vector3(),
@@ -12018,7 +12025,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     gfxReflCreate();
     function gfxReflDegrade() {
       if (!gfxRefl.enabled) return;
-      if (gfxRefl.div < 4) { gfxRefl.div++; gfxReflCreate(); }
+      if (gfxRefl.div < 5) { gfxRefl.div++; gfxReflCreate(); }
       else { gfxRefl.enabled = false; }
     }
 
@@ -12277,6 +12284,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var want = R.enabled && alt > 0.4 && alt < 1600 && (!gfxShore.valid || gfxShore.wet > 0);
       U.reflStrength.value += ((want ? 1 : 0) - U.reflStrength.value) * 0.12;
       if (!want) return;
+      // the mirror is re-rendered every other frame: its texture matrix is only updated together with
+      // it, so a one-frame-old reflection still lines up with the world — it's just a frame late
+      R.frame++;
+      if ((R.frame & 1) && R.hasFrame) return;
+      R.hasFrame = true;
 
       R.rp.set(R.camPos.x, WATER_LEVEL, R.camPos.z);
       R.rot.extractRotation(cam.matrixWorld);
@@ -12287,7 +12299,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       rc.position.copy(R.view);
       rc.up.set(0, 1, 0).applyMatrix4(R.rot).reflect(R.n);
       rc.lookAt(R.target);
-      rc.near = cam.near; rc.far = cam.far; rc.layers.mask = cam.layers.mask;
+      rc.near = cam.near; rc.far = cam.far; rc.layers.mask = 1; // layer 0 only: small props stay out of the mirror
       rc.updateMatrixWorld();
       rc.projectionMatrix.copy(cam.projectionMatrix);
       R.texMat.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
@@ -12846,19 +12858,39 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     /* ---------------- per-frame driving + adaptive resolution ---------------- */
     var _gfxSunWorld = new THREE.Vector3(), _gfxSunNdc = new THREE.Vector3(), _gfxCamDir = new THREE.Vector3();
     var gfxLastT = performance.now(), gfxFrameAcc = 0, gfxFrameN = 0, gfxGoodWindows = 0;
+    // Adaptive quality: every ~40 frames look at the average frame time and step resolution,
+    // mirror-reflection resolution and shadow-map size down (or back up) to hold ~60 fps
+    var gfxShadowLevel = 0;
+    function gfxSetShadowLevel(lv) {
+      gfxShadowLevel = lv;
+      var base = GFX_IS_TOUCH ? 1024 : 2048, sz = lv >= 1 ? base / 2 : base;
+      if (sunLight.shadow.mapSize.x !== sz) {
+        sunLight.shadow.mapSize.set(sz, sz);
+        if (sunLight.shadow.map) { sunLight.shadow.map.dispose(); sunLight.shadow.map = null; }
+      }
+    }
     function gfxAdaptResolution() {
       var now = performance.now(), ms = now - gfxLastT;
       gfxLastT = now;
       if (ms > 120) return; // tab switch / hitch — not a real frame-time sample
       gfxFrameAcc += ms; gfxFrameN++;
-      if (gfxFrameN < 90) return;
+      if (gfxFrameN < 40) return;
       var avg = gfxFrameAcc / gfxFrameN;
       gfxFrameAcc = 0; gfxFrameN = 0;
       var next = gfxPR;
-      if (avg > 26 && gfxPR > 1) { next = Math.max(1, gfxPR - 0.25); gfxGoodWindows = 0; }
-      else if (avg > 28) { gfxReflDegrade(); gfxGoodWindows = 0; }
-      else if (avg < 17.8) { gfxGoodWindows++; if (gfxGoodWindows >= 4 && gfxPR < gfxMaxPR) { next = Math.min(gfxMaxPR, gfxPR + 0.25); gfxGoodWindows = 0; } }
-      else gfxGoodWindows = 0;
+      if (avg > 19) {
+        gfxGoodWindows = 0;
+        if (gfxPR > gfxMinPR) next = Math.max(gfxMinPR, gfxPR - (avg > 30 ? 0.2 : 0.1));
+        else if (gfxRefl.enabled) gfxReflDegrade();
+        else if (gfxShadowLevel < 1) gfxSetShadowLevel(1);
+      } else if (avg < 13.5) {
+        gfxGoodWindows++;
+        if (gfxGoodWindows >= 3) {
+          gfxGoodWindows = 0;
+          if (gfxShadowLevel > 0) gfxSetShadowLevel(0);
+          else if (gfxPR < gfxMaxPR) next = Math.min(gfxMaxPR, gfxPR + 0.1);
+        }
+      } else gfxGoodWindows = 0;
       if (next !== gfxPR) {
         gfxPR = next;
         renderer.setPixelRatio(gfxPR);
@@ -12866,6 +12898,63 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         gfxResizePost();
       }
     }
+
+    // Detail culling: thousands of small props (airport lights, signs, city clutter, carrier deck
+    // gear) each cost a draw call — and another in the water mirror, and another in the shadow map.
+    // Anything that would cover only a pixel or two is dropped from the view, and anything smaller
+    // than a few pixels is left out of the (low-res, rippled) reflection. Uses layers, so it never
+    // fights the game's own .visible toggling: mask 1 = everywhere, 4 = main view only, 0 = culled.
+    // Particle pools (contrails, spray, smoke, splashes, steam, flares...) park their idle sprites in
+    // the scene at opacity 0 — still visible, so each one still cost a draw call, twice with the mirror.
+    // Fully transparent things are dropped from rendering until they fade back in.
+    var GFX_CULL = { list: [], fade: [], idx: 0, scanAt: 0, c: new THREE.Vector3(), cam: new THREE.Vector3() };
+    function gfxCullScan() {
+      var L = GFX_CULL.list, F = GFX_CULL.fade; L.length = 0; F.length = 0;
+      scene.traverse(function(o) {
+        if (!(o.isMesh || o.isLine || o.isPoints || o.isSprite) || o.isInstancedMesh || o === water) return;
+        var m = o.material;
+        if (m && !Array.isArray(m) && m.transparent) F.push(o);
+        if (o.frustumCulled === false || (o.isSprite && m && m.sizeAttenuation === false)) return;
+        var g = o.geometry;
+        if (!g || !g.attributes || !g.attributes.position) return;
+        if (!g.boundingSphere) g.computeBoundingSphere();
+        if (!g.boundingSphere || !(g.boundingSphere.radius > 0) || !isFinite(g.boundingSphere.radius)) return;
+        var unlit = !!(m && (m.isMeshBasicMaterial || m.isPointsMaterial || m.isLineBasicMaterial || m.isSpriteMaterial));
+        o.userData.gfxUnlit = unlit;  // lamps, glows and light beads stay visible much further (they shine at night)
+        L.push(o);
+      });
+    }
+    function gfxCullUpdate(cam) {
+      var C = GFX_CULL, now = performance.now();
+      if (now > C.scanAt) { gfxCullScan(); C.scanAt = now + 2500; C.idx = 0; }
+      var L = C.list, n = L.length, F = C.fade, i, o;
+      C.cam.setFromMatrixPosition(cam.matrixWorld);
+      // radius / distance -> size on screen in pixels
+      var pxK = renderer.getDrawingBufferSize(_gfxCullSz).y * 0.5 / Math.tan(THREE.MathUtils.degToRad(cam.fov * 0.5));
+      var budget = Math.min(n, 700);
+      for (i = 0; i < budget; i++) {
+        if (C.idx >= n) C.idx = 0;
+        o = L[C.idx++];
+        if (!o.parent) continue;
+        var bs = o.geometry.boundingSphere;
+        C.c.copy(bs.center).applyMatrix4(o.matrixWorld);
+        var r = bs.radius * o.matrixWorld.getMaxScaleOnAxis();
+        var d = Math.max(C.c.distanceTo(C.cam) - r, 0.01);
+        var px = r / d * pxK;
+        var mask = o.userData.gfxUnlit ? (px < 0.35 ? 0 : px < 3 ? 4 : 1) : (px < 1.2 ? 0 : px < 5 ? 4 : 1);
+        o.userData.gfxMask = mask;
+        if (!o.userData.gfxFaded && o.layers.mask !== mask) o.layers.mask = mask;
+      }
+      // every frame: invisible-by-opacity objects out, faded-in ones back
+      for (i = 0; i < F.length; i++) {
+        o = F[i];
+        var faded = o.material.opacity < 0.004;
+        if (faded) { if (o.layers.mask !== 0) o.layers.mask = 0; o.userData.gfxFaded = true; }
+        else if (o.userData.gfxFaded) { o.userData.gfxFaded = false; o.layers.mask = o.userData.gfxMask !== undefined ? o.userData.gfxMask : 1; }
+      }
+    }
+    var _gfxCullSz = new THREE.Vector2();
+
     function gfxRender(cam, time) {
       gfxTimeU.value = time;
       gfxWindU.value = typeof currentWind === 'number' ? currentWind : 0;
@@ -12876,6 +12965,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       waterMaterial.uniforms.ambI.value = hemiLight.intensity;
       gfxUpdateCloudLighting();
       gfxAdaptResolution();
+      cam.layers.mask = 5;   // layers 0 + 2: everything except detail-culled props
+      cam.updateMatrixWorld();
+      gfxCullUpdate(cam);
       gfxWaterPrepass(cam);
 
       // time-of-day lighting: golden hour warmth, night-time eye adaptation, stronger glow on lights
