@@ -4212,48 +4212,109 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     /* ---------- car body (visible only in car mode) ---------- */
     var carBody = new THREE.Group();
     plane.add(carBody);
-    var carBodyMat = new THREE.MeshStandardMaterial({ color: 0xc23b2e, flatShading: true, roughness: 0.45, metalness: 0.35 });
-    var carGlassMat = new THREE.MeshStandardMaterial({ color: 0x1c2430, flatShading: true, roughness: 0.15, metalness: 0.7 });
-    var carTrimMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, flatShading: true, roughness: 0.6, metalness: 0.2 });
-    var carWheelMat = new THREE.MeshStandardMaterial({ color: 0x18191c, flatShading: true, roughness: 0.85, metalness: 0.1 });
+    var carBodyMat = new THREE.MeshPhysicalMaterial({ color: 0xc23b2e, roughness: 0.32, metalness: 0.45, clearcoat: 1, clearcoatRoughness: 0.08 });
+    var carGlassMat = new THREE.MeshStandardMaterial({ color: 0x141b24, roughness: 0.05, metalness: 0.85 });
+    var carTrimMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.6, metalness: 0.2 });
+    var carWheelMat = new THREE.MeshStandardMaterial({ color: 0x18191c, roughness: 0.85, metalness: 0.1 });
     var carHeadlightMat = new THREE.MeshPhongMaterial({ color: 0xfff8e0, emissive: 0xfff2c0, emissiveIntensity: 1.3, flatShading: true });
     var carTaillightMat = new THREE.MeshPhongMaterial({ color: 0xff3b30, emissive: 0xd6221a, emissiveIntensity: 1.1, flatShading: true });
 
-    var carBodyLow = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.5, 3.6), carBodyMat);
-    carBodyLow.position.set(0, -0.55, 0);
-    carBodyLow.castShadow = true;
-    carBody.add(carBodyLow);
-    var carCabin = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.55, 1.9), carGlassMat);
-    carCabin.position.set(0, -0.05, -0.15);
-    carCabin.castShadow = true;
-    carBody.add(carCabin);
-    var carBumperF = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.28, 0.28), carTrimMat);
-    carBumperF.position.set(0, -0.62, 1.78);
-    carBody.add(carBumperF);
-    var carBumperR = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.28, 0.28), carTrimMat);
-    carBumperR.position.set(0, -0.62, -1.78);
-    carBody.add(carBumperR);
-    var carHeadlightL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.08), carHeadlightMat);
-    carHeadlightL.position.set(0.6, -0.5, 1.79);
-    carBody.add(carHeadlightL);
-    var carHeadlightR = carHeadlightL.clone();
-    carHeadlightR.position.x = -0.6;
-    carBody.add(carHeadlightR);
-    var carTailL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.08), carTaillightMat);
-    carTailL.position.set(0.6, -0.5, -1.79);
-    carBody.add(carTailL);
-    var carTailR = carTailL.clone();
-    carTailR.position.x = -0.6;
-    carBody.add(carTailR);
+    var carChromeMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd1, roughness: 0.25, metalness: 0.9 });
+    var carCaliperMat = new THREE.MeshStandardMaterial({ color: 0xe0a21a, roughness: 0.5, metalness: 0.3 });
+    var carDRLMat = new THREE.MeshBasicMaterial({ color: 0xeaf6ff });
 
-    var carWheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.26, 12);
-    [[0.82, 1.15], [-0.82, 1.15], [0.82, -1.15], [-0.82, -1.15]].forEach(function(wp) {
-      var wheel = new THREE.Mesh(carWheelGeo, carWheelMat);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(wp[0], -0.98, wp[1]);
-      wheel.castShadow = true;
-      carBody.add(wheel);
+    /* Sports coupe, nose toward -z. Body and greenhouse are lofted from side profiles (extruded across
+       the car, bevelled so the edges catch light) with real wheel arches cut into the sills. Wheels sit
+       on the ground at y = -1 like every other vehicle; front wheels steer, all four spin. */
+    function carProfileGeo(pts, width, bevel, arches) {
+      var sh = new THREE.Shape();
+      sh.moveTo(pts[0][0], pts[0][1]);
+      for (var i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]);
+      if (arches) {
+        // bottom edge from the rear back to the front, dipping up around each wheel
+        sh.lineTo(-1.78, -0.72); sh.absarc(-1.3, -0.72, 0.48, Math.PI, 0, true);
+        sh.lineTo(0.82, -0.72); sh.absarc(1.3, -0.72, 0.48, Math.PI, 0, true);
+        sh.lineTo(2.08, -0.72);
+      }
+      sh.closePath();
+      var g = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: true, bevelThickness: bevel,
+        bevelSize: bevel * 0.8, bevelSegments: 3, curveSegments: 18 });
+      g.rotateY(-Math.PI / 2);
+      g.translate((width - bevel * 2) / 2, 0, 0);
+      g.computeVertexNormals();
+      return g;
+    }
+    function carAdd(geo, mat, x, y, z, shadow) {
+      var m = new THREE.Mesh(geo, mat); m.position.set(x || 0, y || 0, z || 0);
+      if (shadow !== false) m.castShadow = true;
+      carBody.add(m); return m;
+    }
+    // main shell: low nose, long bonnet, fastback deck, short tail
+    var carShell = carAdd(carProfileGeo([
+      [2.08, -0.72], [2.16, -0.5], [2.12, -0.22], [1.95, -0.12], [1.45, -0.06], [0.95, -0.08],
+      [-0.75, -0.14], [-1.7, -0.26], [-2.12, -0.36], [-2.2, -0.5], [-2.12, -0.72]
+    ], 1.84, 0.1, true), carBodyMat);
+    carShell.receiveShadow = true;
+    // glasshouse: raked windscreen, low roof, long rear glass
+    carAdd(carProfileGeo([[-0.78, -0.1], [-0.05, 0.3], [0.62, 0.3], [1.5, -0.04]], 1.5, 0.08), carGlassMat);
+    // roof panel in body colour over the glass, plus A-/C-pillar strips
+    carAdd(new THREE.BoxGeometry(1.3, 0.05, 0.6), carBodyMat, 0, 0.36, 0.28);
+    // side skirts, front splitter, rear diffuser
+    [-1, 1].forEach(function(sd) { carAdd(new THREE.BoxGeometry(0.08, 0.12, 1.5), carTrimMat, sd * 0.93, -0.68, 0); });
+    carAdd(new THREE.BoxGeometry(1.8, 0.05, 0.3), carTrimMat, 0, -0.74, -2.08);
+    carAdd(new THREE.BoxGeometry(1.5, 0.14, 0.24), carTrimMat, 0, -0.64, 2.08);
+    // grille + intakes
+    carAdd(new THREE.BoxGeometry(0.9, 0.14, 0.05), carTrimMat, 0, -0.56, -2.3, false);
+    [-1, 1].forEach(function(sd) { carAdd(new THREE.BoxGeometry(0.34, 0.12, 0.05), carTrimMat, sd * 0.66, -0.62, -2.27, false); });
+    // headlights: swept clusters with a daytime-running-light strip
+    [-1, 1].forEach(function(sd) {
+      var hl = carAdd(new THREE.BoxGeometry(0.42, 0.08, 0.16), carHeadlightMat, sd * 0.58, -0.4, -2.2, false);
+      hl.rotation.y = sd * 0.25; hl.rotation.x = 0.35;
+      var drl = carAdd(new THREE.BoxGeometry(0.4, 0.025, 0.04), carDRLMat, sd * 0.58, -0.47, -2.27, false);
+      drl.rotation.y = sd * 0.25;
     });
+    // full-width tail light bar and exhausts
+    carAdd(new THREE.BoxGeometry(1.5, 0.05, 0.05), carTaillightMat, 0, -0.26, 2.27, false);
+    [-1, 1].forEach(function(sd) {
+      carAdd(new THREE.BoxGeometry(0.26, 0.12, 0.05), carTaillightMat, sd * 0.66, -0.3, 2.265, false);
+      var ex = carAdd(new THREE.CylinderGeometry(0.06, 0.06, 0.16, 12), carChromeMat, sd * 0.45, -0.66, 2.16, false);
+      ex.rotation.x = Math.PI / 2;
+    });
+    // ducktail spoiler
+    var carSpoiler = carAdd(new THREE.BoxGeometry(1.5, 0.04, 0.26), carTrimMat, 0, -0.03, 1.92);
+    carSpoiler.rotation.x = -0.18;
+    // side mirrors and door handles
+    [-1, 1].forEach(function(sd) {
+      carAdd(new THREE.BoxGeometry(0.05, 0.05, 0.08), carTrimMat, sd * 0.86, -0.06, -0.62, false);
+      carAdd(new THREE.BoxGeometry(0.16, 0.1, 0.2), carBodyMat, sd * 0.98, -0.04, -0.64);
+      carAdd(new THREE.BoxGeometry(0.02, 0.03, 0.18), carChromeMat, sd * 0.93, -0.22, 0.25, false);
+    });
+    // wheels: tyre, multi-spoke rim, brake disc + caliper; front pair on steering pivots
+    var carWheels = [];
+    var carTyreGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.26, 24);
+    var carRimGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.27, 20);
+    var carSpokeGeo = new THREE.BoxGeometry(0.28, 0.035, 0.44);
+    var carDiscGeo = new THREE.CylinderGeometry(0.19, 0.19, 0.03, 18);
+    [[0.8, -1.3, true], [-0.8, -1.3, true], [0.8, 1.3, false], [-0.8, 1.3, false]].forEach(function(wp) {
+      var pivot = new THREE.Group(); pivot.position.set(wp[0], -0.66, wp[1]); carBody.add(pivot);
+      var sd = Math.sign(wp[0]);
+      var disc = new THREE.Mesh(carDiscGeo, carChromeMat); disc.rotation.z = Math.PI / 2; disc.position.x = -sd * 0.04; pivot.add(disc);
+      var cal = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.1), carCaliperMat); cal.position.set(sd * 0.02, 0.12, -0.08); pivot.add(cal);
+      var spin = new THREE.Group(); pivot.add(spin);
+      var tyre = new THREE.Mesh(carTyreGeo, carWheelMat); tyre.rotation.z = Math.PI / 2; tyre.castShadow = true; spin.add(tyre);
+      var rim = new THREE.Mesh(carRimGeo, carChromeMat); rim.rotation.z = Math.PI / 2; spin.add(rim);
+      for (var k = 0; k < 5; k++) {
+        var sp = new THREE.Mesh(carSpokeGeo, carTrimMat); sp.position.x = sd * 0.12; sp.rotation.x = k * Math.PI / 5; spin.add(sp);
+      }
+      carWheels.push({ pivot: pivot, spin: spin, front: wp[2] });
+    });
+    function carAnimateWheels(dt, spd, steer) {
+      for (var i = 0; i < carWheels.length; i++) {
+        var w = carWheels[i];
+        w.spin.rotation.x -= spd / 0.34 * dt;
+        if (w.front) w.pivot.rotation.y += (THREE.MathUtils.clamp(steer, -0.5, 0.5) - w.pivot.rotation.y) * Math.min(1, dt * 10);
+      }
+    }
 
     carBody.visible = false;
 
@@ -11452,6 +11513,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           var carTurnFactor = THREE.MathUtils.clamp(0.25 + Math.abs(speed) / 12, 0.25, 1);
           var carSteerSign = speed < 0 ? -1 : 1;
           heading += rollInput * carSteerSign * TURN_RATE * carTurnFactor * dt;
+          carAnimateWheels(dt, speed, rollInput * carSteerSign * 0.45);
 
           forwardVec.set(0, 0, -1).applyQuaternion(plane.quaternion).normalize();
           position.addScaledVector(forwardVec, speed * dt);
@@ -12713,7 +12775,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     (function() {
       var geoCache = new Map(), seen = new Set();
-      [jetBody, heliBody, carBody, droneBody].forEach(function(b) { if (b) gfxUpgradeAircraft(b, geoCache, seen); });
+      [jetBody, heliBody, droneBody].forEach(function(b) { if (b) gfxUpgradeAircraft(b, geoCache, seen); });
+      // the car keeps its smooth clear-coated paint (no riveted aircraft panels), but gets proper shadows
+      carBody.traverse(function(o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       // the stealth jet keeps its faceted shading on purpose — flat facets are how real
       // low-observable airframes are built — but it still gets proper shadows
       if (stealthBody) stealthBody.traverse(function(o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
