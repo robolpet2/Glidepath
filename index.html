@@ -902,6 +902,28 @@
   #bombBtn:active, #bombBtn.active{ background:rgba(255,50,10,.60); transform:scale(.91); }
   #bombBtn.cooling{ opacity:.38; }
 
+  /* ---------- helicopter flight panel (inside the HUD card) ---------- */
+  #heliHudBox{ margin:2px 0 8px; padding-top:7px; border-top:1px solid rgba(255,255,255,.08); }
+  #heliHudBox.hidden{ display:none; }
+  #heliHudBox .hh-grid{ display:grid; grid-template-columns:1fr 1fr; gap:3px 10px; }
+  #heliHudBox .hh-grid div{ display:flex; justify-content:space-between; align-items:baseline; }
+  #heliHudBox .hh-grid span{ font-size:8px; letter-spacing:.12em; color:#9aa3ad; font-weight:600; }
+  #heliHudBox .hh-grid b{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:13px; color:var(--off); font-weight:600; }
+  #heliHudBox .hh-grid b.warn{ color:var(--red); text-shadow:0 0 8px var(--red-glow); }
+  #heliHudBox .hh-row{ display:flex; gap:8px; align-items:center; margin-top:6px; }
+  #heliHudBox canvas{ width:64px; height:64px; flex:none; }
+  #heliHudBox .hh-side{ flex:1; min-width:0; }
+  #hhMode{ font-size:9px; letter-spacing:.1em; font-weight:700; color:#7de0ff; }
+  #hhWarn{ font-size:9px; letter-spacing:.06em; font-weight:800; color:var(--red); margin-top:4px; min-height:11px; line-height:1.25; }
+  #hhWarn.amber{ color:#ffb02a; }
+  @media (orientation: landscape) and (max-height: 500px), (orientation: portrait) and (max-width: 500px) {
+    #heliHudBox{ grid-column:1 / -1; margin:0 0 4px; padding-top:4px; }
+    #heliHudBox .hh-grid b{ font-size:11px; }
+    #heliHudBox canvas{ width:48px; height:48px; }
+  }
+  .dpadBtn span{ display:block; font-size:7.5px; letter-spacing:.1em; font-weight:800; opacity:.8; margin-top:1px; }
+  .dpadBtn{ flex-direction:column; line-height:1; }
+
   /* ---------- helicopter d-pad ---------- */
   #heliDpad{
     position:fixed; z-index:12;
@@ -1132,7 +1154,7 @@
         </button>
         <button type="button" class="planeOpt" data-plane="helicopter">
           <span class="pName">Helicopter</span>
-          <span class="pStat">260 km/h · hovers, no stall</span>
+          <span class="pStat">250 km/h · rotor physics, hover assist, autorotation</span>
         </button>
         <button type="button" class="planeOpt" data-plane="car">
           <span class="pName">Car</span>
@@ -1200,6 +1222,15 @@
     <div class="gauge" id="throttleGauge">
       <div class="row1"><span class="label">THROTTLE</span><span class="value"><span id="throttleReadout">0</span><span class="unit">km/h</span></span></div>
       <div class="track"><div class="marker" id="throttleMarker"></div></div>
+    </div>
+    <div id="heliHudBox" class="hidden">
+      <div class="hh-grid">
+        <div><span>ROTOR</span><b id="hhRpm">0%</b></div>
+        <div><span>TORQUE</span><b id="hhTq">0%</b></div>
+        <div><span>V/S</span><b id="hhVs">0.0</b></div>
+        <div><span>R-ALT</span><b id="hhAgl">0</b></div>
+      </div>
+      <div class="hh-row"><canvas id="hhHover" width="128" height="128"></canvas><div class="hh-side"><div id="hhMode">ALT HOLD</div><div id="hhWarn"></div></div></div>
     </div>
     <div class="stats">
       <span>DIST <b id="distVal">0.00</b> km</span>
@@ -1380,10 +1411,10 @@
   <div id="bombBtn" class="hidden">💣 BOMBS</div>
 
   <div id="heliDpad" class="hidden">
-    <div class="dpadBtn" id="dpadUp">▲</div>
-    <div class="dpadBtn" id="dpadLeft">◀</div>
-    <div class="dpadBtn" id="dpadRight">▶</div>
-    <div class="dpadBtn" id="dpadDown">▼</div>
+    <div class="dpadBtn" id="dpadUp">▲<span>LIFT</span></div>
+    <div class="dpadBtn" id="dpadLeft">◀<span>YAW</span></div>
+    <div class="dpadBtn" id="dpadRight">▶<span>YAW</span></div>
+    <div class="dpadBtn" id="dpadDown">▼<span>SINK</span></div>
   </div>
 
   <div id="throttleWrap" class="hidden">
@@ -1509,7 +1540,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
       },
       helicopter: {
-        name: 'Helicopter', tagline: 'hovers, vertical takeoff, no stall',
+        name: 'Helicopter', tagline: 'real rotor physics — hover assist, autorotation, land anywhere flat',
         maxSpeedKmh: 250, engineAccel: 14, boostAccel: 20,
         // stall/takeoff speeds are irrelevant in helicopter mode (rotor lift never fades with
         // speed), kept here only so the fields exist uniformly across all presets
@@ -4120,91 +4151,264 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     /* ============================================================
-       HELICOPTER MODEL — separate body, hidden unless the Helicopter
-       preset is active (toggled alongside jetBody in applySelectedPlaneType)
+       HELICOPTER MODEL — a modern twin-engine utility helicopter (H145 / Bell 429 class).
+       The fuselage is lofted from superellipse cross-sections resampled along a spline, and the
+       windscreen, chin windows and cabin windows are cut out of that same surface as glass (so
+       the pillars and frames fall out naturally), with a livery cheatline and a darker belly.
+       Engine cowling with intakes and exhausts, tapering boom, ducted fenestron fan in a swept
+       fin, stabiliser with endplates, tubular skids, a rescue hoist, nav lights and beacons, and
+       a four-blade rotor (hub, swashplate, pitch links, coning blades) with a motion-blur disc.
+       Nose toward -z; the skids rest on y = -1 like every other airframe's wheels.
        ============================================================ */
     var heliBody = new THREE.Group();
     plane.add(heliBody);
 
-    var rotorMat = new THREE.MeshStandardMaterial({ color: 0x14161a, flatShading: true, roughness: 0.4, metalness: 0.4 });
+    var heliMetalMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.35, metalness: 0.85 });
+    var heliGearMat = new THREE.MeshStandardMaterial({ color: 0x2b2e33, roughness: 0.5, metalness: 0.6 });
+    // blades fade toward a blur as the rotor comes up to speed (the disc below takes over)
+    var rotorMat = new THREE.MeshStandardMaterial({ color: 0x1b1d21, roughness: 0.55, metalness: 0.3, transparent: true, opacity: 1 });
+    var heliTipMat = new THREE.MeshStandardMaterial({ color: 0xe8c43a, roughness: 0.5, metalness: 0.2, transparent: true, opacity: 1 });
+    var heliNavRed = new THREE.MeshBasicMaterial({ color: 0xff2a1a });
+    var heliNavGreen = new THREE.MeshBasicMaterial({ color: 0x2aff5a });
+    var heliNavWhite = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    var heliBeaconMat = new THREE.MeshBasicMaterial({ color: 0x3a0806 });
+    var heliLandLightMat = new THREE.MeshBasicMaterial({ color: 0xfff6dc });
 
-    // angular cabin/cockpit pod up front — low-poly faceted sphere instead of a smooth bubble
-    var heliCabin = new THREE.Mesh(new THREE.SphereGeometry(0.68, 7, 5), matWhite);
-    heliCabin.scale.set(1, 0.92, 1.25);
-    heliCabin.position.set(0, -0.08, -1.0);
-    heliCabin.castShadow = true;
-    heliBody.add(heliCabin);
-
-    // faceted glass windshield wrapping the front of the cabin
-    var heliCanopy = new THREE.Mesh(new THREE.SphereGeometry(0.56, 7, 5), matGlass);
-    heliCanopy.scale.set(1, 0.85, 1.05);
-    heliCanopy.position.set(0, 0.02, -1.35);
-    heliBody.add(heliCanopy);
-
-    // belly fairing under the cabin
-    var heliBelly = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.3, 0.9, 6), matRed);
-    heliBelly.rotation.x = Math.PI / 2;
-    heliBelly.position.set(0, -0.42, -0.75);
-    heliBelly.castShadow = true;
-    heliBody.add(heliBelly);
-
-    // tail boom tapering back from the cabin to a sharp point at the tail rotor
-    var heliTailBoom = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.05, 3.1, 6), matWhite);
-    heliTailBoom.rotation.x = Math.PI / 2;
-    heliTailBoom.position.set(0, 0.05, 1.1);
-    heliTailBoom.castShadow = true;
-    heliBody.add(heliTailBoom);
-
-    // small upswept tail fin at the end of the boom, tapered to a raked point, plus a stubby horizontal stabilizer
-    var heliFinGeo = new THREE.BoxGeometry(0.08, 0.62, 0.5, 1, 1, 1);
-    var heliFinPos = heliFinGeo.attributes.position;
-    for (var hfi = 0; hfi < heliFinPos.count; hfi++) {
-      if (heliFinPos.getY(hfi) > 0) heliFinPos.setZ(hfi, heliFinPos.getZ(hfi) < 0 ? -0.05 : 0.32);
-    }
-    heliFinGeo.computeVertexNormals();
-    var heliTailFin = new THREE.Mesh(heliFinGeo, matRed);
-    heliTailFin.position.set(0, 0.42, 2.55);
-    heliTailFin.rotation.z = -0.12;
-    heliTailFin.castShadow = true;
-    heliBody.add(heliTailFin);
-    var heliTailStab = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.06, 0.34), matWhite);
-    heliTailStab.position.set(0, 0.08, 2.35);
-    heliTailStab.castShadow = true;
-    heliBody.add(heliTailStab);
-
-    // skid landing gear — two tube skids with cross struts, no wheels
-    function addHeliSkid(xSide) {
-      var skid = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.5, 6), matDark);
-      skid.rotation.z = Math.PI / 2;
-      skid.position.set(xSide, -0.95, -0.5);
-      heliBody.add(skid);
-      function strut(z) {
-        var s = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.55, 6), matDark);
-        s.position.set(xSide, -0.68, z);
-        s.rotation.z = xSide > 0 ? -0.25 : 0.25;
-        heliBody.add(s);
+    // Loft: stations are [z, halfWidth, halfHeight, centreY, squareness]. classify(zMid, cos, sin)
+    // returns which material bucket each face belongs to; all buckets share one vertex buffer
+    // (so normals are smooth across the glass/paint boundaries) but get their own index list.
+    function heliLoft(st, rings, seg, classify) {
+      function cr(k, i, t) {
+        var a = st[Math.max(0, i - 1)][k], b = st[i][k], c = st[Math.min(st.length - 1, i + 1)][k], d = st[Math.min(st.length - 1, i + 2)][k];
+        return 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t);
       }
-      strut(-1.05); strut(0.15);
+      var pos = [], uv = [], ringZ = [];
+      for (var r = 0; r <= rings; r++) {
+        var u = r / rings * (st.length - 1), i = Math.min(st.length - 2, Math.floor(u)), t = u - i;
+        var z = st[i][0] + (st[i + 1][0] - st[i][0]) * t;
+        var w = Math.max(0.004, cr(1, i, t)), h = Math.max(0.004, cr(2, i, t)), yc = cr(3, i, t), n = cr(4, i, t);
+        ringZ.push(z);
+        for (var j = 0; j <= seg; j++) {
+          var a = j / seg * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+          pos.push(w * Math.sign(c) * Math.pow(Math.abs(c), 2 / n), yc + h * Math.sign(s) * Math.pow(Math.abs(s), 2 / n), z);
+          uv.push(j / seg * 3, z * 0.6);
+        }
+      }
+      var all = [], buckets = {};
+      for (var r2 = 0; r2 < rings; r2++) {
+        for (var j2 = 0; j2 < seg; j2++) {
+          var aI = r2 * (seg + 1) + j2, bI = aI + seg + 1;
+          var am = (j2 + 0.5) / seg * Math.PI * 2, zm = (ringZ[r2] + ringZ[r2 + 1]) * 0.5;
+          var key = classify ? classify(zm, Math.cos(am), Math.sin(am)) : 'body';
+          var q = [aI, bI, aI + 1, bI, bI + 1, aI + 1];
+          (buckets[key] = buckets[key] || []).push.apply(buckets[key], q);
+          all.push.apply(all, q);
+        }
+      }
+      var base = new THREE.BufferGeometry();
+      base.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      base.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      base.setIndex(all);
+      base.computeVertexNormals();
+      var out = {};
+      Object.keys(buckets).forEach(function(k) {
+        var g = new THREE.BufferGeometry();
+        g.setAttribute('position', base.attributes.position);
+        g.setAttribute('normal', base.attributes.normal);
+        g.setAttribute('uv', base.attributes.uv);
+        g.setIndex(buckets[k]);
+        g.computeBoundingSphere();
+        out[k] = g;
+      });
+      return out;
     }
-    addHeliSkid(-0.62);
-    addHeliSkid(0.62);
+    function heliMesh(geo, mat, parent, shadow) {
+      var m = new THREE.Mesh(geo, mat);
+      if (shadow !== false) m.castShadow = true;
+      (parent || heliBody).add(m);
+      return m;
+    }
+    // side-profile extrusion (profile drawn in z/y, extruded across x and centred)
+    function heliProfile(pts, depth, bevel, holes) {
+      var sh = new THREE.Shape();
+      sh.moveTo(pts[0][0], pts[0][1]);
+      for (var i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]);
+      sh.closePath();
+      (holes || []).forEach(function(hc) { var p = new THREE.Path(); p.absarc(hc[0], hc[1], hc[2], 0, Math.PI * 2, true); sh.holes.push(p); });
+      var d = depth - bevel * 2;
+      var g = new THREE.ExtrudeGeometry(sh, { depth: d, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8, bevelSegments: 2, curveSegments: 28 });
+      g.rotateY(-Math.PI / 2);
+      g.translate(d / 2, 0, 0);
+      g.computeVertexNormals();
+      return g;
+    }
 
-    // main + tail rotor — shared visuals for the heli body, spun during flight
+    // ---- fuselage pod ----
+    var heliPod = heliLoft([
+      [-3.32, 0.02, 0.02, -0.06, 2.2],
+      [-3.18, 0.40, 0.36, -0.06, 2.2],
+      [-2.92, 0.62, 0.56, -0.02, 2.3],
+      [-2.52, 0.75, 0.72, 0.05, 2.5],
+      [-2.02, 0.81, 0.82, 0.11, 2.7],
+      [-1.40, 0.83, 0.87, 0.15, 2.9],
+      [-0.55, 0.83, 0.88, 0.17, 3.0],
+      [ 0.45, 0.81, 0.86, 0.18, 3.0],
+      [ 1.10, 0.70, 0.74, 0.23, 2.8],
+      [ 1.62, 0.50, 0.52, 0.35, 2.5],
+      [ 2.00, 0.32, 0.34, 0.46, 2.3]
+    ], 84, 56, function(z, c, s) {
+      var ac = Math.abs(c);
+      if (z < -1.72 && z > -3.02 && s > 0.04 && !(ac < 0.05 && z > -2.45)) return 'glass';                 // wraparound windscreen
+      if (z > -1.62 && z < -0.9 && s > 0.12 && s < 0.7 && ac > 0.55) return 'glass';                        // cockpit door windows
+      if (z > -3.08 && z < -2.38 && s < -0.12 && s > -0.58 && ac > 0.25 && ac < 0.92) return 'glass';       // chin windows
+      if (z > -0.62 && z < 0.78 && s > 0.14 && s < 0.62 && ac > 0.6 && !(z > 0.04 && z < 0.14)) return 'glass'; // cabin windows
+      if (s > -0.34 && s < -0.19 && z > -2.35) return 'stripe';
+      if (s < -0.62) return 'belly';
+      return 'body';
+    });
+    heliMesh(heliPod.body, matWhite).receiveShadow = true;
+    heliMesh(heliPod.stripe, matRed);
+    heliMesh(heliPod.belly, matWingWhite);
+    heliMesh(heliPod.glass, matGlass, heliBody, false);
+
+    // ---- engine cowling on the roof, with intakes and twin exhausts ----
+    var heliCowl = heliLoft([
+      [-1.08, 0.02, 0.02, 0.97, 2.4],
+      [-0.86, 0.40, 0.18, 0.99, 2.5],
+      [-0.40, 0.56, 0.28, 1.03, 2.8],
+      [ 0.62, 0.58, 0.30, 1.05, 2.8],
+      [ 1.42, 0.46, 0.24, 1.01, 2.6],
+      [ 1.98, 0.20, 0.12, 0.93, 2.4],
+      [ 2.18, 0.02, 0.02, 0.91, 2.2]
+    ], 36, 40, function(z, c, s) { return (s < 0.35 && s > 0.15 && z > -0.7 && z < 1.6) ? 'stripe' : 'body'; });
+    heliMesh(heliCowl.body, matWhite);
+    heliMesh(heliCowl.stripe, matRed);
+    [-1, 1].forEach(function(sd) {
+      var intake = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.4), heliGearMat);
+      intake.position.set(sd * 0.56, 1.08, -0.3); heliBody.add(intake);
+      for (var gi = 0; gi < 4; gi++) {
+        var bar = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.012, 0.38), heliMetalMat);
+        bar.position.set(sd * 0.57, 1.02 + gi * 0.04, -0.3); heliBody.add(bar);
+      }
+      var ex = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.4, 16, 1, true), heliGearMat);
+      ex.rotation.set(Math.PI / 2, 0, 0); ex.rotation.y = sd * 0.45;
+      ex.position.set(sd * 0.38, 1.12, 1.62); heliBody.add(ex);
+    });
+
+    // ---- tail boom ----
+    var heliBoom = heliLoft([
+      [1.45, 0.38, 0.40, 0.44, 2.4],
+      [2.40, 0.26, 0.28, 0.50, 2.2],
+      [3.60, 0.17, 0.19, 0.56, 2.1],
+      [4.80, 0.13, 0.15, 0.60, 2.1],
+      [5.30, 0.12, 0.14, 0.62, 2.1]
+    ], 30, 24, null);
+    heliMesh(heliBoom.body, matWhite);
+    // blade antenna + tail bumper
+    heliMesh(new THREE.BoxGeometry(0.02, 0.2, 0.14), heliGearMat).position.set(0, 0.84, 2.7);
+
+    // ---- fenestron: a ducted fan in a thick shroud, with a swept fin above ----
+    var HELI_FAN = { y: 0.66, z: 5.62, r: 0.42 };
+    heliMesh(heliProfile([[4.98, 0.98], [4.98, 0.42], [5.30, 0.08], [5.72, 0.0], [6.12, 0.2], [6.26, 0.66], [6.1, 1.16], [5.6, 1.34], [5.2, 1.28]],
+      0.34, 0.035, [[HELI_FAN.z, HELI_FAN.y, HELI_FAN.r]]), matWhite);
+    heliMesh(heliProfile([[5.3, 1.2], [6.08, 1.1], [6.66, 2.28], [6.4, 2.36], [5.96, 1.86]], 0.12, 0.03), matRed);
+    // duct lining + stator vanes behind the fan
+    var heliDuct = new THREE.Mesh(new THREE.CylinderGeometry(HELI_FAN.r, HELI_FAN.r, 0.3, 32, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0x2b2e33, roughness: 0.6, metalness: 0.5, side: THREE.DoubleSide }));
+    heliDuct.rotation.z = Math.PI / 2; heliDuct.position.set(0, HELI_FAN.y, HELI_FAN.z); heliBody.add(heliDuct);
+    for (var hsv = 0; hsv < 3; hsv++) {
+      var vane = new THREE.Mesh(new THREE.BoxGeometry(0.03, HELI_FAN.r * 1.9, 0.05), heliGearMat);
+      vane.position.set(-0.1, HELI_FAN.y, HELI_FAN.z); vane.rotation.x = hsv * Math.PI / 3 + 0.3; heliBody.add(vane);
+    }
+    // stabiliser with endplates
+    heliMesh(new THREE.BoxGeometry(2.3, 0.06, 0.46), matWhite).position.set(0, 0.62, 4.72);
+    [-1, 1].forEach(function(sd) {
+      var ep = heliMesh(new THREE.BoxGeometry(0.05, 0.52, 0.44), matRed);
+      ep.position.set(sd * 1.16, 0.7, 4.76);
+      var nav = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), sd < 0 ? heliNavRed : heliNavGreen);
+      nav.position.set(sd * 1.2, 0.72, 4.6); heliBody.add(nav);
+    });
+    var heliTailNav = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), heliNavWhite);
+    heliTailNav.position.set(0, 1.0, 6.3); heliBody.add(heliTailNav);
+    var heliBeaconTop = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8), heliBeaconMat);
+    heliBeaconTop.position.set(0, 2.38, 6.5); heliBody.add(heliBeaconTop);
+    var heliBeaconBelly = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8), heliBeaconMat);
+    heliBeaconBelly.position.set(0, -0.72, 0.2); heliBody.add(heliBeaconBelly);
+
+    // ---- skids and cross tubes ----
+    [-1, 1].forEach(function(sd) {
+      var x = sd * 0.98;
+      var skid = new THREE.CatmullRomCurve3([new THREE.Vector3(x, -0.945, 1.35), new THREE.Vector3(x, -0.945, -1.5),
+        new THREE.Vector3(x, -0.9, -1.95), new THREE.Vector3(x, -0.74, -2.14)]);
+      heliMesh(new THREE.TubeGeometry(skid, 28, 0.055, 8, false), heliGearMat);
+      var step = heliMesh(new THREE.BoxGeometry(0.32, 0.03, 0.26), heliGearMat); step.position.set(sd * 0.86, -0.72, -0.35);
+    });
+    [-1.2, 0.6].forEach(function(z) {
+      var cross = new THREE.CatmullRomCurve3([new THREE.Vector3(-0.98, -0.945, z), new THREE.Vector3(-0.95, -0.8, z), new THREE.Vector3(-0.72, -0.63, z),
+        new THREE.Vector3(0, -0.6, z), new THREE.Vector3(0.72, -0.63, z), new THREE.Vector3(0.95, -0.8, z), new THREE.Vector3(0.98, -0.945, z)]);
+      heliMesh(new THREE.TubeGeometry(cross, 24, 0.05, 8, false), heliGearMat);
+    });
+
+    // ---- nose details: pitot tubes, landing light; rescue hoist over the right-hand door ----
+    [-1, 1].forEach(function(sd) {
+      var pit = heliMesh(new THREE.CylinderGeometry(0.012, 0.012, 0.36, 6), heliMetalMat, heliBody, false);
+      pit.rotation.x = Math.PI / 2; pit.position.set(sd * 0.2, 0.05, -3.3);
+    });
+    var heliLandLight = new THREE.Mesh(new THREE.CircleGeometry(0.09, 16), heliLandLightMat);
+    heliLandLight.rotation.x = Math.PI / 2 + 0.3; heliLandLight.position.set(0, -0.56, -2.72); heliBody.add(heliLandLight);
+    var heliHoist = new THREE.Group(); heliHoist.position.set(0.86, 0.92, -0.3); heliBody.add(heliHoist);
+    heliMesh(new THREE.BoxGeometry(0.34, 0.08, 0.1), heliGearMat, heliHoist).position.set(0.1, 0, 0);
+    var hoistDrum = heliMesh(new THREE.CylinderGeometry(0.09, 0.09, 0.32, 14), matRed, heliHoist); hoistDrum.rotation.x = Math.PI / 2; hoistDrum.position.set(0.3, -0.02, 0);
+
+    // ---- rotor head: mast, swashplate, hub; blades on coning hinges; blur disc ----
+    heliMesh(new THREE.CylinderGeometry(0.085, 0.1, 0.36, 14), heliMetalMat).position.set(0, 1.46, 0);
+    heliMesh(new THREE.CylinderGeometry(0.23, 0.23, 0.05, 20), heliMetalMat).position.set(0, 1.38, 0);
+    var heliRotorTilt = new THREE.Group(); heliRotorTilt.position.set(0, 1.66, 0); heliBody.add(heliRotorTilt);
     var mainRotorPivot = new THREE.Group();
-    mainRotorPivot.position.set(0, 0.75, -0.2);
-    var mainRotorBlades = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.05, 0.22), rotorMat);
-    mainRotorPivot.add(mainRotorBlades);
-    var mainRotorBlades2 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 5.4), rotorMat);
-    mainRotorPivot.add(mainRotorBlades2);
-    var rotorMast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.35, 6), matDark);
-    rotorMast.position.set(0, 0.58, -0.2);
-    heliBody.add(rotorMast);
-    heliBody.add(mainRotorPivot);
+    heliRotorTilt.add(mainRotorPivot);
+    heliMesh(new THREE.CylinderGeometry(0.17, 0.2, 0.16, 16), heliGearMat, mainRotorPivot);
+    heliMesh(new THREE.CylinderGeometry(0.06, 0.06, 0.14, 10), heliMetalMat, mainRotorPivot).position.y = 0.14;
+    var heliBladeHinges = [];
+    var heliBladeGeo = new THREE.BoxGeometry(3.9, 0.04, 0.3);
+    (function() {   // taper the chord and thin the tip a little
+      var p = heliBladeGeo.attributes.position;
+      for (var i = 0; i < p.count; i++) { if (p.getX(i) > 0) { p.setZ(i, p.getZ(i) * 0.78); p.setY(i, p.getY(i) * 0.7); } }
+      heliBladeGeo.computeVertexNormals();
+    })();
+    for (var hb = 0; hb < 4; hb++) {
+      var arm = new THREE.Group(); arm.rotation.y = hb * Math.PI / 2 + Math.PI / 4; mainRotorPivot.add(arm);
+      var grip = heliMesh(new THREE.BoxGeometry(0.46, 0.09, 0.15), heliGearMat, arm); grip.position.x = 0.36;
+      var link = heliMesh(new THREE.CylinderGeometry(0.015, 0.015, 0.28, 6), heliMetalMat, arm, false); link.position.set(0.3, -0.16, 0.1);
+      var hinge = new THREE.Group(); hinge.position.x = 0.55; arm.add(hinge);
+      var blade = heliMesh(heliBladeGeo, rotorMat, hinge); blade.position.x = 1.95 + 0.05;
+      var tip = heliMesh(new THREE.BoxGeometry(0.3, 0.03, 0.235), heliTipMat, hinge, false); tip.position.x = 3.82;
+      heliBladeHinges.push(hinge);
+    }
+    var heliDiscTex = (function() {
+      var cv = document.createElement('canvas'); cv.width = cv.height = 256;
+      var c = cv.getContext('2d'), g = c.createRadialGradient(128, 128, 0, 128, 128, 128);
+      g.addColorStop(0.0, 'rgba(30,32,36,0)'); g.addColorStop(0.12, 'rgba(30,32,36,0.35)');
+      g.addColorStop(0.8, 'rgba(30,32,36,0.55)'); g.addColorStop(0.9, 'rgba(232,196,58,0.45)'); g.addColorStop(0.97, 'rgba(232,196,58,0.12)'); g.addColorStop(1, 'rgba(30,32,36,0)');
+      c.fillStyle = g; c.fillRect(0, 0, 256, 256);
+      c.globalCompositeOperation = 'destination-out';
+      for (var k = 0; k < 7; k++) { c.strokeStyle = 'rgba(0,0,0,0.12)'; c.lineWidth = 3; c.beginPath(); c.arc(128, 128, 30 + k * 13, 0, Math.PI * 2); c.stroke(); }
+      var t = new THREE.CanvasTexture(cv); t.encoding = THREE.sRGBEncoding; return t;
+    })();
+    var heliDiscMat = new THREE.MeshBasicMaterial({ map: heliDiscTex, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+    var heliDisc = new THREE.Mesh(new THREE.CircleGeometry(4.45, 48), heliDiscMat);
+    heliDisc.rotation.x = -Math.PI / 2; heliDisc.position.y = 0.02; heliDisc.renderOrder = 3;
+    heliRotorTilt.add(heliDisc);
 
+    // ---- fenestron fan ----
     var tailRotorPivot = new THREE.Group();
-    tailRotorPivot.position.set(0.14, 0.42, 2.72);
-    var tailRotorBlades = new THREE.Mesh(new THREE.BoxGeometry(0.03, 1.1, 0.14), rotorMat);
-    tailRotorPivot.add(tailRotorBlades);
+    tailRotorPivot.position.set(0.02, HELI_FAN.y, HELI_FAN.z);
+    heliMesh(new THREE.CylinderGeometry(0.08, 0.08, 0.12, 12), heliGearMat, tailRotorPivot).rotation.z = Math.PI / 2;
+    for (var hf = 0; hf < 9; hf++) {
+      var fb = heliMesh(new THREE.BoxGeometry(0.02, HELI_FAN.r - 0.1, 0.075), rotorMat, tailRotorPivot, false);
+      var fa = hf / 9 * Math.PI * 2;
+      fb.position.set(0, Math.cos(fa) * (HELI_FAN.r * 0.5 + 0.03), Math.sin(fa) * (HELI_FAN.r * 0.5 + 0.03));
+      fb.rotation.x = -fa; fb.rotation.y = 0.35;
+    }
     heliBody.add(tailRotorPivot);
 
     heliBody.visible = false;
@@ -7512,15 +7716,18 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       ckParts.prop = P; g.visible = false; ckGroup.add(g);
     })();
 
-    // ---- helicopter: chin bubble, low panel, cyclic + collective ----
+    // ---- helicopter: wraparound glass, low panel and slim glare shield (so the view over the nose
+    // and down through the chin windows stays open), pillars, overhead console, cyclic + collective ----
     (function() {
-      var g = new THREE.Group(), P = { group: g, eye: new THREE.Vector3(0.25, 0.7, -0.9), hud: false, panel: 'analog' };
-      ckBox(g, 0.9, 0.24, 0.08, -0.25, -0.38, -0.6, CKM.panel, -0.35);
-      ckScreen(g, 0.84, 0.22, -0.25, -0.375, -0.555, -0.35, 0, 1);
-      ckBox(g, 0.94, 0.05, 0.22, -0.25, -0.24, -0.6, CKM.dark);
-      [-0.72, 0.22].forEach(function(x) { ckRod(g, [x, -0.3, -0.62], [x * 0.9, 0.45, -0.3], 0.02, CKM.frame); });
-      ckRod(g, [-0.25, -0.22, -0.64], [-0.25, 0.47, -0.25], 0.015, CKM.frame);
-      ckBox(g, 1.1, 0.03, 1.0, -0.25, 0.49, 0.2, CKM.panel);
+      var g = new THREE.Group(), P = { group: g, eye: new THREE.Vector3(0.36, 0.55, -1.55), hud: false, panel: 'analog' };
+      ckBox(g, 0.9, 0.24, 0.08, -0.25, -0.35, -0.6, CKM.panel, -0.35);
+      ckScreen(g, 0.84, 0.22, -0.25, -0.345, -0.555, -0.35, 0, 1);
+      ckBox(g, 0.94, 0.03, 0.16, -0.25, -0.22, -0.62, CKM.dark);
+      [-0.78, 0.28].forEach(function(x) { ckRod(g, [x, -0.42, -0.85], [x * 0.95, 0.46, -0.32], 0.018, CKM.frame); });
+      ckRod(g, [-0.25, -0.36, -0.7], [-0.25, 0.47, -0.3], 0.011, CKM.frame);
+      ckBox(g, 1.2, 0.03, 0.95, -0.25, 0.49, 0.15, CKM.panel);
+      ckBox(g, 0.26, 0.05, 0.5, -0.25, 0.45, 0.05, CKM.dark);
+      ckButtons(g, -0.34, -0.16, 0.42, -0.1, 5, 0);
       var cyc = new THREE.Group(); cyc.position.set(0, -0.7, -0.22); g.add(cyc);
       ckRod(cyc, [0, 0, 0], [0, 0.36, 0], 0.012, CKM.metal); ckBox(cyc, 0.04, 0.09, 0.05, 0, 0.4, 0, CKM.knob);
       var col = new THREE.Group(); col.position.set(-0.2, -0.55, 0.05); g.add(col);
@@ -7635,7 +7842,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function ckDrawPanel(kind) {
       var c = ckPanelCtx, W = 1024, H = 320;
       var kmh = Math.round(speed * 3.6), alt = Math.round(position.y - WATER_LEVEL), vs = verticalVel;
-      var hdg = ckHeadingDeg(), thrPct = Math.round(THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1) * 100);
+      var hdg = ckHeadingDeg(), thrPct = Math.round((isHelicopterMode ? heliTorque : THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1)) * 100);
       c.fillStyle = '#1b1d21'; c.fillRect(0, 0, W, H);
       if (kind === 'mfd') {
         // left MFD: attitude
@@ -7896,7 +8103,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       camera.quaternion.copy(plane.quaternion);
       if (!ckLook.held) { ckLook.yaw *= Math.max(0, 1 - dt * 5); ckLook.pitch *= Math.max(0, 1 - dt * 5); }
       camera.rotateY(-rollAngle * 0.05 + ckLook.yaw);
-      camera.rotateX(-0.03 + ckLook.pitch);
+      // a helicopter flies nose-down to go fast — the pilot's eyes stay nearer the horizon
+      camera.rotateX(-0.03 + ckLook.pitch - (isHelicopterMode ? pitchAngle * 0.4 : 0));
       // night: dim flood lighting on the consoles so the pit doesn't go pitch black
       var ckNight = typeof cityNightFactor === 'function' ? cityNightFactor() : 0;
       CKM.panel.emissive.setRGB(0.05 * ckNight, 0.04 * ckNight, 0.03 * ckNight);
@@ -7904,7 +8112,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // controls follow the pilot's inputs
       var rx = (keys.right ? 1 : 0) - (keys.left ? 1 : 0), py = (keys.down ? 1 : 0) - (keys.up ? 1 : 0);
       if (touchActive && !droneCamActive) { rx = THREE.MathUtils.clamp(touchDX / DRAG_RANGE, -1, 1); py = THREE.MathUtils.clamp(touchDY / DRAG_RANGE, -1, 1); }
-      var tf = THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1);
+      var tf = isHelicopterMode ? heliColl : THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1);
+      if (isHelicopterMode) { rx = heliLatIn; py = -heliFwdIn; }
       if (P.stick) { P.stick.rotation.z = -rx * 0.28; P.stick.rotation.x = py * 0.22; }
       if (P.yoke) { P.yoke.rotation.z = -rx * 0.6; P.yoke.position.z = -0.4 + py * 0.06; }
       if (P.wheel) { P.wheel.rotation.z = -rx * 1.4; }
@@ -9071,6 +9280,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function updateFeelShake(dt, isGrounded, speedRatio, throttleRatio) {
       feelShakeOffset.set(0, 0, 0);
       var t = elapsedSeconds;
+      if (isHelicopterMode) {
+        // rotor vibration: a blade-pass buzz, the shudder through translational lift, vortex-ring
+        // buffet and low-RPM roughness (heliShake is built in heliStep)
+        feelShakeOffset.x += Math.sin(t * 61.0 + rumbleSeed) * Math.sin(t * 7.3) * heliShake;
+        feelShakeOffset.y += Math.sin(t * 67.3 + rumbleSeed * 2) * Math.sin(t * 9.1 + 1) * heliShake;
+        return 0;
+      }
 
       // --- ground rumble: bumpy runway/taxi feel while wheels are down and rolling ---
       if (isGrounded && Math.abs(speed) > RUMBLE_MIN_SPEED) {
@@ -9121,7 +9337,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     /* ============================================================
        INPUT
        ============================================================ */
-    var keys = { up: false, down: false, left: false, right: false, boost: false, throttleUp: false, throttleDown: false, rollLeft: false, rollRight: false };
+    var keys = { up: false, down: false, left: false, right: false, boost: false, throttleUp: false, throttleDown: false, rollLeft: false, rollRight: false, collUp: false, collDown: false };
     function setKey(code, val) {
       switch (code) {
         case 'ArrowUp': case 'KeyW': keys.up = val; return true;
@@ -9131,8 +9347,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         case 'ShiftLeft': case 'ShiftRight': case 'Space': keys.boost = val; return true;
         case 'Equal': case 'NumpadAdd': case 'PageUp': keys.throttleUp = val; return true;
         case 'Minus': case 'NumpadSubtract': case 'PageDown': keys.throttleDown = val; return true;
-        case 'KeyQ': if (val) triggerBarrelRoll(-1); return true;
-        case 'KeyE': if (val) triggerBarrelRoll(1); return true;
+        case 'KeyQ': keys.rollLeft = val; if (val) triggerBarrelRoll(-1); return true;   // helicopter: lateral cyclic
+        case 'KeyE': keys.rollRight = val; if (val) triggerBarrelRoll(1); return true;
+        case 'KeyZ': keys.collDown = val; return true;                                      // helicopter: collective down
         case 'KeyF': if (val) toggleFlaps(); return true;
         case 'KeyC': if (val) toggleCruise(); return true;
         case 'KeyV': if (val) toggleDroneCam(); return true;
@@ -9228,8 +9445,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     window.addEventListener('mouseup', function() { ejectOrbitEnd(); });
 
     // helicopter d-pad: press-and-hold buttons that drive the same keys.* flags the keyboard
-    // uses, so no separate input path is needed — up/down pitch the craft to translate
-    // forward/back, left/right yaw it, exactly like the arrow keys do in heli mode
+    // uses — ▲/▼ are the collective (climb / sink, like Space / Z), ◀/▶ the yaw pedals (A / D);
+    // the drag stick is the cyclic
     function dpadKey(btnId, key) {
       var btn = document.getElementById(btnId);
       function on(e) { keys[key] = true; btn.classList.add('active'); if (e) e.preventDefault(); }
@@ -9241,8 +9458,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       btn.addEventListener('mouseup', off);
       btn.addEventListener('mouseleave', off);
     }
-    dpadKey('dpadUp', 'up');
-    dpadKey('dpadDown', 'down');
+    dpadKey('dpadUp', 'collUp');
+    dpadKey('dpadDown', 'collDown');
     dpadKey('dpadLeft', 'left');
     dpadKey('dpadRight', 'right');
 
@@ -9327,11 +9544,20 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }, { passive: true });
     // stop the flight joystick from grabbing touches that start on the slider
     throttleSlider.addEventListener('touchstart', function(e) { e.stopPropagation(); }, { passive: true });
+    // with the helicopter's hover assist on, the lever is spring-centred: push up to climb,
+    // pull down to sink, let go and it snaps back to the middle and holds that altitude
+    function heliLeverRelease() {
+      if (!isHelicopterMode || !heliAssist) return;
+      throttle = MAX_SPEED * 0.5;
+      throttleSlider.value = Math.round(throttle * 3.6);
+    }
+    ['change', 'touchend', 'touchcancel', 'mouseup', 'pointerup'].forEach(function(ev) { throttleSlider.addEventListener(ev, heliLeverRelease); });
 
     /* ============================================================
        AUDIO (synthesized engine drone)
        ============================================================ */
     var audioCtx = null, engineOsc = null, engineOsc2 = null, engineGain = null, engineFilter = null, soundEnabled = true;
+    var rotorGain = null, rotorChop = null, rotorLfo = null;
     function initAudio() {
       if (audioCtx) return;
       try {
@@ -9355,6 +9581,18 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         engineFilter.connect(engineGain).connect(audioCtx.destination);
         engineOsc.start();
         engineOsc2.start();
+        // helicopter rotor: filtered noise chopped at the blade-passing frequency
+        var nb = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate), nd = nb.getChannelData(0);
+        for (var ni = 0; ni < nd.length; ni++) nd[ni] = Math.random() * 2 - 1;
+        var noise = audioCtx.createBufferSource(); noise.buffer = nb; noise.loop = true;
+        var rotorFilter = audioCtx.createBiquadFilter(); rotorFilter.type = 'lowpass'; rotorFilter.frequency.value = 420; rotorFilter.Q.value = 0.8;
+        rotorChop = audioCtx.createGain(); rotorChop.gain.value = 0.5;
+        rotorLfo = audioCtx.createOscillator(); rotorLfo.type = 'sine'; rotorLfo.frequency.value = 18;
+        var lfoDepth = audioCtx.createGain(); lfoDepth.gain.value = 0.5;
+        rotorLfo.connect(lfoDepth).connect(rotorChop.gain);
+        rotorGain = audioCtx.createGain(); rotorGain.gain.value = 0.0001;
+        noise.connect(rotorFilter).connect(rotorChop).connect(rotorGain).connect(audioCtx.destination);
+        noise.start(); rotorLfo.start();
       } catch (err) {
         audioCtx = null;
       }
@@ -9364,6 +9602,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var now = audioCtx.currentTime;
       var freq = 46 + speedRatio * 130;
       var gain = 0.05 + speedRatio * 0.09;
+      if (rotorGain) {
+        var heliOn = isHelicopterMode && started && !crashing;
+        rotorGain.gain.setTargetAtTime(heliOn ? 0.02 + 0.2 * heliRpm * (0.45 + 0.8 * heliColl) : 0.0001, now, 0.15);
+        rotorLfo.frequency.setTargetAtTime(Math.max(1, heliRpm * 18.5), now, 0.2);
+        if (heliOn) {
+          // turbine whine follows the engine spool and load instead of airspeed
+          freq = 70 + heliSpool * 150 + heliTorque * 45;
+          gain = 0.015 + heliSpool * 0.045;
+        }
+      }
       engineOsc.frequency.setTargetAtTime(freq, now, 0.12);
       engineOsc2.frequency.setTargetAtTime(freq * 1.5, now, 0.12);
       engineGain.gain.setTargetAtTime(gain, now, 0.18);
@@ -9492,6 +9740,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       soundEnabled = !soundEnabled;
       this.textContent = soundEnabled ? '🔊' : '🔇';
       if (!soundEnabled && engineGain) engineGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.1);
+      if (!soundEnabled && rotorGain) rotorGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.1);
     });
 
     /* ============================================================
@@ -9586,7 +9835,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (on) cruiseTargetAlt = position.y; // lock in altitude at the moment of engaging
       cruiseActive = on;
     }
-    function toggleCruise() { setCruise(!cruiseActive); }
+    function toggleCruise() { if (isHelicopterMode) { heliSetAssist(!heliAssist); return; } setCruise(!cruiseActive); }
+    function heliSetAssist(on) {
+      heliAssist = on;
+      heliHoldAlt = null; heliHoldSpeed = null; heliCollI = 0;
+      // assisted: the lever becomes a spring-centred climb-rate lever; manual: it is the collective
+      throttle = on ? MAX_SPEED * 0.5 : heliColl * MAX_SPEED;
+      samToast(on ? 'HOVER ASSIST ON' : 'HOVER ASSIST OFF — MANUAL COLLECTIVE', on ? '#7de0ff' : '#ffb02a', 1.8);
+    }
 
     /* ---------- drone sensor-ball camera view ---------- */
     // Switches the render camera to the MQ-9's belly-mounted sensor turret, like a real
@@ -9635,17 +9891,402 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
 
-    // --- helicopter-only flight state ---
-    var heliVelX = 0, heliVelZ = 0; // m/s — local-frame horizontal drift velocity (rotor-disc tilt driven)
-    var heliYawRate = 0;        // rad/s — smoothed yaw rate, damped separately from the tilt used for translation
-    var HELI_YAW_LERP = 5;    // 1/s — how quickly the yaw rate catches up to the input (adds inertia so
-                                 // turning doesn't feel instant/twitchy while also translating)
-    var HOVER_THRUST = 13.5;   // m/s^2 of vertical thrust at full collective — a bit above GRAVITY so the
-                                // craft can climb, but needs real throttle (not just idle) to hold a hover
-    var HELI_TILT_ACCEL = 38.2;  // m/s^2 of horizontal accel produced at max rotor-disc tilt — sized so
-                                  // actual terminal speed (accel/HELI_DRAG) comes out to 250 km/h
-    var HELI_DRAG = 0.55;       // 1/s — horizontal drag coefficient; caps top translational speed and
-                                 // brakes quickly once the stick is centered, instead of coasting/drifting
+    /* ---------- HELICOPTER FLIGHT MODEL ----------
+       Thrust acts along the rotor-disc normal, so tilting the airframe is what moves you, and the
+       collective sets how hard the rotor pulls. Rotor speed is a real state: the engine governs it,
+       blade drag loads it and air flowing up through a descending disc drives it — so with the
+       engine out you can autorotate down and flare to land. Also modelled: ground effect,
+       translational lift, vortex-ring state (sinking fast with no airspeed), inflow (climb rate
+       tops out, descent is cushioned), weathervaning and coordinated turns in forward flight,
+       torque kick on collective changes, wind and gusts, and skid contact with hard landings and
+       rotor strikes.
+       The stability assist (on by default — C key / HOVER button) turns the collective into a
+       climb-rate lever that holds altitude when centred, brakes to a hover when you let go of
+       the cyclic at low speed and holds your cruise speed when you let go above it. */
+    var heliVel = new THREE.Vector3();     // world velocity, m/s
+    var heliRpm = 0;                       // main rotor speed, fraction of nominal (1 = 100 %)
+    var heliSpool = 0;                     // engine start-up / run-down, 0..1
+    var heliColl = 0, heliCollI = 0;       // actual collective pitch 0..1, and the assist's integral trim
+    var heliTorque = 0;                    // engine power in use, 0..1 (HUD, fuel burn, sound)
+    var heliPitchRate = 0, heliRollRate = 0, heliYawRate = 0;
+    var heliAssist = true, heliHoldAlt = null, heliHoldSpeed = null;
+    var heliVrs = 0, heliEtl = 0, heliGE = 1, heliAgl = 0, heliThrust = 0, heliShake = 0;
+    var heliFwdIn = 0, heliLatIn = 0, heliPedalIn = 0, heliVsCmd = 0;
+    var heliMode = '', heliWarn = '';
+    var heliWasEngineOn = true;
+    var HELI = {
+      THRUST: 20.5,          // m/s^2 at full collective and 100 % rotor speed (hover needs ~48 %)
+      INFLOW_CLIMB: 0.9,     // thrust lost per m/s of climb through the disc — caps climb near 11 m/s
+      INFLOW_DESC: 0.55,     // thrust gained per m/s of descent (windmill state) — autorotation lives here
+      MAX_PITCH: 0.42, MAX_ROLL: 0.6,
+      ATT_W: 4.6, ATT_Z: 0.9, // attitude response: natural frequency (rad/s), damping ratio
+      YAW_RATE: 1.35,        // rad/s at full pedal in the hover
+      DRAG_L: 0.02, DRAG_Q: 0.00062,   // airframe drag — top speed ~250 km/h with the nose right down
+      VDRAG: 0.08,
+      CLIMB: 10, DESC: 8,    // assisted climb / descent rates at full lever (m/s)
+      ROTOR_I: 0.9           // rotor inertia (how quickly RPM responds)
+    };
+    var _hUp = new THREE.Vector3(), _hFwd = new THREE.Vector3(), _hRight = new THREE.Vector3();
+    var _hAcc = new THREE.Vector3(), _hAir = new THREE.Vector3(), _hTip = new THREE.Vector3();
+    function hSmooth(e0, e1, x) { var t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); }
+    function hClamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+    // rotor thrust (m/s^2 along the disc normal) for a given collective, in the current flow state
+    function heliInflow(vn, inPlane) {
+      return vn > 0 ? -HELI.INFLOW_CLIMB * vn / (1 + inPlane / 12)
+                    : HELI.INFLOW_DESC * (-vn) * (1 - heliVrs);
+    }
+    function heliThrustGain(airH) {
+      heliEtl = hSmooth(6, 16, airH);
+      return heliGE * (1 + 0.1 * heliEtl - 0.3 * hSmooth(74, 88, airH)) * (1 - 0.45 * heliVrs);
+    }
+    function heliResetState(airborne, vel) {
+      heliVel.copy(vel || new THREE.Vector3());
+      heliRpm = airborne ? 1 : 0; heliSpool = airborne ? 1 : 0;
+      heliColl = airborne ? 0.5 : 0; heliCollI = 0; heliTorque = 0;
+      heliPitchRate = heliRollRate = heliYawRate = 0;
+      heliHoldAlt = null; heliHoldSpeed = null; heliVrs = 0; heliShake = 0;
+      heliWasEngineOn = true;
+      if (heliAssist) throttle = MAX_SPEED * 0.5;
+    }
+
+    function heliStep(dt) {
+      var t = elapsedSeconds;
+      // ---- inputs: W/S + drag = cyclic fore/aft, Q/E + drag = cyclic left/right, A/D = pedals,
+      // Space/Shift/+ = collective up, Z/- = collective down (also the ▲▼◀▶ pad and the lever) ----
+      var fwd = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
+      var lat = (keys.rollRight ? 1 : 0) - (keys.rollLeft ? 1 : 0);
+      var pedal = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+      if (touchActive && !droneCamActive) {
+        fwd += hClamp(-touchDY / DRAG_RANGE, -1, 1);
+        lat += hClamp(touchDX / DRAG_RANGE, -1, 1);
+      }
+      fwd = hClamp(fwd, -1, 1); lat = hClamp(lat, -1, 1);
+      // smooth keyboard steps a little so the airframe isn't kicked by on/off keys
+      heliFwdIn += (fwd - heliFwdIn) * Math.min(1, dt * 9);
+      heliLatIn += (lat - heliLatIn) * Math.min(1, dt * 9);
+      heliPedalIn += (pedal - heliPedalIn) * Math.min(1, dt * 8);
+      fwd = heliFwdIn; lat = heliLatIn; pedal = heliPedalIn;
+      var collUp = keys.boost || keys.collUp || keys.throttleUp, collDn = keys.collDown || keys.throttleDown;
+      var engineOn = !outOfFuel && !samEngineKilled;
+      if (heliWasEngineOn && !engineOn && !wasGrounded) samToast('ENGINE OUT — LOWER COLLECTIVE, AUTOROTATE', '#ffb02a', 3.5);
+      heliWasEngineOn = engineOn;
+
+      // ---- flow state ----
+      var ch = Math.cos(heading), sh = Math.sin(heading);
+      _hFwd.set(-sh, 0, -ch); _hRight.set(ch, 0, -sh);
+      _hUp.set(0, 1, 0).applyQuaternion(plane.quaternion);
+      _hAir.copy(heliVel); if (currentWind > 0.01) _hAir.sub(windPush);
+      var airH = Math.sqrt(_hAir.x * _hAir.x + _hAir.z * _hAir.z);
+      var vn = _hAir.dot(_hUp);
+      var inPlane = Math.sqrt(Math.max(0, _hAir.lengthSq() - vn * vn));
+      var vF = heliVel.dot(_hFwd), vR = heliVel.dot(_hRight);
+      var vH = Math.sqrt(heliVel.x * heliVel.x + heliVel.z * heliVel.z);
+      var gH = Math.max(getEffectiveGroundHeight(position.x, position.z), WATER_LEVEL);
+      heliAgl = position.y - PLANE_GROUND_OFFSET - gH;
+      heliGE = 1 + 0.16 * Math.pow(Math.max(0, 1 - Math.max(0, heliAgl) / 9), 2);
+      // vortex ring: sinking into your own downwash with little airspeed and power applied
+      var vrsT = hSmooth(3.5, 7, -vn) * (1 - hSmooth(12, 17, -vn)) * (1 - hSmooth(5, 13, airH)) * hSmooth(0.25, 0.4, heliColl);
+      heliVrs += (vrsT - heliVrs) * Math.min(1, dt * 2.5);
+      var rpm2 = heliRpm * heliRpm, rotorLive = hSmooth(0.55, 0.8, heliRpm);
+      var gain = heliThrustGain(airH), inflow = heliInflow(vn, inPlane);
+
+      // ---- collective ----
+      var collTarget;
+      if (heliAssist) {
+        var cmd = (collUp ? 1 : 0) - (collDn ? 1 : 0);
+        var lever = throttle / MAX_SPEED * 2 - 1;            // the slider is spring-centred: middle = hold
+        if (Math.abs(lever) > 0.08) cmd += lever;
+        cmd = hClamp(cmd, -1, 1);
+        var vCmd;
+        if (Math.abs(cmd) > 0.04) {
+          vCmd = cmd * (cmd > 0 ? HELI.CLIMB : HELI.DESC);
+          // assisted descents stay out of the vortex ring at low airspeed and ease off near the
+          // ground, so holding "down" all the way sets you on the skids instead of into them
+          if (vCmd < 0) vCmd = Math.max(vCmd, -(4 + 4 * hSmooth(5, 13, airH)), -(1.2 + Math.max(0, heliAgl) * 0.45));
+          heliHoldAlt = null;
+        }
+        else {
+          if (heliHoldAlt === null) heliHoldAlt = position.y + heliVel.y * 0.5;   // lead the capture so it doesn't sag back
+          vCmd = hClamp((heliHoldAlt - position.y) * 0.9, -4, 4);
+        }
+        heliVsCmd = vCmd;
+        if (wasGrounded && cmd <= 0.04) {
+          collTarget = 0.08; heliCollI = 0; heliHoldAlt = null;   // sitting on the skids: flat pitch
+        } else {
+          // required acceleration -> thrust -> collective (exact inverse of the thrust model)
+          var aReq = (vCmd - heliVel.y) * 1.9 + GRAVITY;
+          var tReq = aReq / Math.max(0.4, _hUp.y);
+          collTarget = (tReq / Math.max(0.05, rpm2 * rotorLive) - inflow) / (HELI.THRUST * gain);
+          heliCollI = hClamp(heliCollI + (vCmd - heliVel.y) * 0.05 * dt, -0.15, 0.15);
+          collTarget += heliCollI;
+          // engine out: the assist trades collective for rotor speed and keeps the rotor alive
+          // (in the last few metres it spends the rotor's stored energy to cushion the touchdown)
+          if (!engineOn && heliAgl > 5) collTarget = Math.min(collTarget, hClamp(0.25 + (heliRpm - 0.97) * 4, 0.03, 1));
+        }
+      } else {
+        // manual: the lever IS the collective; Space/Z (or ±) move it
+        if (collUp) throttle = Math.min(MAX_SPEED, throttle + MAX_SPEED * 0.5 * dt);
+        if (collDn) throttle = Math.max(0, throttle - MAX_SPEED * 0.5 * dt);
+        collTarget = throttle / MAX_SPEED;
+        heliVsCmd = 0;
+      }
+      collTarget = hClamp(collTarget, 0, 1);
+      var dColl = hClamp(collTarget - heliColl, -1.6 * dt, 1.6 * dt);   // the lever moves at a human rate
+      heliColl += dColl;
+
+      // ---- rotor speed: engine governor vs blade drag vs autorotative inflow ----
+      heliSpool = engineOn ? Math.min(1, heliSpool + dt / 3.2) : Math.max(0, heliSpool - dt * 0.6);
+      var load = (0.035 + 0.1 * heliColl + 0.26 * heliColl * heliColl) * rpm2;
+      var drive = engineOn ? Math.max(0, Math.min(0.62 * heliSpool, load + (1 - heliRpm) * 2.2)) : 0;
+      var windmill = Math.max(0, -vn) * 0.011 * (1 - 0.6 * heliColl);
+      heliRpm = hClamp(heliRpm + (drive - load + windmill) * dt / HELI.ROTOR_I, 0, 1.18);
+      heliTorque = drive / 0.62;
+      rpm2 = heliRpm * heliRpm; rotorLive = hSmooth(0.55, 0.8, heliRpm);
+
+      // ---- attitude: the cyclic commands an attitude; the assist trims for hover / cruise ----
+      var tPitch = -fwd * HELI.MAX_PITCH, tRoll = lat * HELI.MAX_ROLL;
+      heliMode = heliAssist ? 'ALT HOLD' : 'MANUAL';
+      if (heliAssist && !wasGrounded) {
+        if (Math.abs(fwd) < 0.06) {
+          if (Math.abs(vF) < 12 && (heliHoldSpeed === null || heliHoldSpeed < 12)) {
+            heliHoldSpeed = null;
+            tPitch = hClamp(vF * 0.045, -0.28, 0.28);                        // nose up to brake to a hover
+          } else {
+            if (heliHoldSpeed === null) heliHoldSpeed = vF;
+            var dragAcc = HELI.DRAG_L * heliHoldSpeed + HELI.DRAG_Q * heliHoldSpeed * heliHoldSpeed;
+            tPitch = hClamp(-Math.atan(dragAcc / GRAVITY) - (heliHoldSpeed - vF) * 0.03, -HELI.MAX_PITCH, 0.3);
+          }
+        } else heliHoldSpeed = null;
+        if (Math.abs(lat) < 0.06 && vH < 14) tRoll = hClamp(-vR * 0.045, -0.28, 0.28);   // stop sideways drift
+        // engine out: flare near the ground to trade airspeed for rotor speed and a slower sink
+        if (!engineOn && Math.abs(fwd) < 0.06 && heliAgl < 28 && vF > 5) tPitch = hClamp(0.1 + vF * 0.012, 0, 0.38);
+        if (Math.abs(fwd) < 0.06 && Math.abs(lat) < 0.06 && vH < 12) heliMode = 'HOVER HOLD';
+        else if (heliHoldSpeed !== null) heliMode = 'SPEED HOLD ' + Math.round(heliHoldSpeed * 3.6);
+      }
+      if (!engineOn) heliMode = 'AUTOROTATION';
+      // weight on the skids pins the airframe to the ground's slope
+      var skidLoad = wasGrounded ? hClamp(1 - heliThrust * _hUp.y / GRAVITY, 0, 1) : 0;
+      if (wasGrounded) {
+        var gx1 = getEffectiveGroundHeight(position.x + _hFwd.x * 2, position.z + _hFwd.z * 2);
+        var gx2 = getEffectiveGroundHeight(position.x - _hFwd.x * 2, position.z - _hFwd.z * 2);
+        var gy1 = getEffectiveGroundHeight(position.x + _hRight.x * 1.5, position.z + _hRight.z * 1.5);
+        var gy2 = getEffectiveGroundHeight(position.x - _hRight.x * 1.5, position.z - _hRight.z * 1.5);
+        var slopeP = Math.atan2(gx1 - gx2, 4), slopeR = Math.atan2(gy2 - gy1, 3);
+        tPitch += (slopeP - tPitch) * skidLoad; tRoll += (slopeR - tRoll) * skidLoad;
+      }
+      var auth = 0.35 + 0.65 * rotorLive;                  // a slow rotor has little control power
+      var aw = HELI.ATT_W * auth * (1 + skidLoad), az = HELI.ATT_Z;
+      heliPitchRate += (aw * aw * (tPitch - pitchAngle) - 2 * az * aw * heliPitchRate) * dt;
+      heliRollRate += (aw * aw * (tRoll - rollAngle) - 2 * az * aw * heliRollRate) * dt;
+      if (currentWind > 0.01 && !wasGrounded) {             // gusts rock the airframe
+        heliPitchRate += Math.sin(t * 2.3 + windDirAngle) * Math.sin(t * 0.7) * 0.5 * currentWind * dt;
+        heliRollRate += Math.sin(t * 2.9 + 1.7) * Math.sin(t * 0.9 + windDirAngle) * 0.7 * currentWind * dt;
+      }
+      pitchAngle = hClamp(pitchAngle + heliPitchRate * dt, -0.8, 0.8);
+      rollAngle = hClamp(rollAngle + heliRollRate * dt, -1.2, 1.2);
+
+      // ---- yaw: pedals in the hover; in forward flight the fin weathervanes the nose into the
+      // airflow and a bank turns you like an aeroplane ----
+      var yawCmd = -pedal * HELI.YAW_RATE * (1 - 0.55 * hSmooth(10, 40, airH));
+      var cruiseBlend = hSmooth(12, 25, vF);
+      if (cruiseBlend > 0) {
+        yawCmd += -Math.tan(rollAngle) * GRAVITY / Math.max(vF, 12) * cruiseBlend;
+        yawCmd += -Math.atan2(vR, Math.max(vF, 1)) * 2.2 * cruiseBlend;
+      }
+      yawCmd *= 1 - skidLoad * 0.95;
+      if (engineOn && !wasGrounded) heliYawRate += dColl * 0.35;      // torque reaction when the collective moves
+      var tailAuth = 0.25 + 0.75 * rotorLive;
+      heliYawRate += (yawCmd - heliYawRate) * Math.min(1, (heliAssist ? 5 : 2.4) * tailAuth * dt);
+      heading += heliYawRate * dt;
+
+      plane.rotation.set(pitchAngle, heading, -rollAngle);
+      _hUp.set(0, 1, 0).applyQuaternion(plane.quaternion);
+
+      // ---- forces ----
+      gain = heliThrustGain(airH); inflow = heliInflow(_hAir.dot(_hUp), inPlane);
+      heliThrust = Math.max(0, rpm2 * rotorLive * (HELI.THRUST * heliColl * gain + inflow));
+      _hAcc.copy(_hUp).multiplyScalar(heliThrust);
+      _hAcc.y -= GRAVITY;
+      var dragK = HELI.DRAG_L + HELI.DRAG_Q * airH;
+      _hAcc.x -= _hAir.x * dragK; _hAcc.z -= _hAir.z * dragK;
+      _hAcc.y -= _hAir.y * HELI.VDRAG;
+      heliVel.addScaledVector(_hAcc, dt);
+      if (wasGrounded) {
+        // skids on the ground: friction holds it until the rotor is carrying the weight
+        var fr = Math.exp(-7 * skidLoad * dt);
+        heliVel.x *= fr; heliVel.z *= fr;
+        if (heliVel.y < 0) heliVel.y = 0;
+      }
+      position.addScaledVector(heliVel, dt);
+      plane.position.copy(position);
+      forwardVec.set(0, 0, -1).applyQuaternion(plane.quaternion).normalize();
+      verticalVel = heliVel.y;
+      velocityVec.copy(heliVel);
+      speed = vH;
+      distanceMeters += vH * dt;
+      stalled = false;
+      gForceSmoothed += ((heliThrust / GRAVITY) - gForceSmoothed) * Math.min(1, dt * 4);
+      gStrain = 0; isBlackedOut = false;
+
+      // ---- warnings + vibration ----
+      heliWarn = '';
+      if (!engineOn && !wasGrounded) heliWarn = 'ENGINE OUT';
+      if (heliRpm < 0.9 && heliSpool > 0.95) heliWarn = 'LOW ROTOR RPM';
+      if (heliRpm > 1.1) heliWarn = 'ROTOR OVERSPEED';
+      if (heliVrs > 0.35) heliWarn = 'VORTEX RING — GAIN AIRSPEED';
+      if (heliSpool < 1 && engineOn) heliWarn = 'ROTOR START ' + Math.round(heliRpm * 100) + '%';
+      heliShake = 0.006 * heliRpm + heliEtl * (1 - heliEtl) * 0.05 * (vH > 3 ? 1 : 0) + heliVrs * 0.09 +
+        Math.max(0, 0.9 - heliRpm) * 0.12 * (heliSpool > 0.95 ? 1 : 0) + hSmooth(60, 80, airH) * 0.03;
+
+      // ---- rotor visuals ----
+      mainRotorPivot.rotation.y += heliRpm * 44 * dt;
+      tailRotorPivot.rotation.x += heliRpm * 95 * dt;
+      heliDiscMat.opacity = 0.22 * hSmooth(0.35, 0.9, heliRpm);
+      rotorMat.opacity = heliTipMat.opacity = 1 - 0.6 * hSmooth(0.4, 0.95, heliRpm);
+      var cone = -0.04 * (1 - hSmooth(0.2, 0.8, heliRpm)) + 0.06 * hClamp(heliThrust / 20, 0, 1.3) * rotorLive;
+      for (var bi = 0; bi < heliBladeHinges.length; bi++) heliBladeHinges[bi].rotation.z = cone;
+      heliRotorTilt.rotation.x += ((-fwd * 0.07) - heliRotorTilt.rotation.x) * Math.min(1, dt * 8);
+      heliRotorTilt.rotation.z += ((-lat * 0.07) - heliRotorTilt.rotation.z) * Math.min(1, dt * 8);
+      var bOn = (t % 1.1) < 0.09;
+      heliBeaconMat.color.setHex(bOn && heliSpool > 0.05 ? 0xff2a1a : 0x3a0806);
+      heliDownwash(dt, gH);
+    }
+
+    // Skid contact, landings and rotor strikes (replaces the fixed-wing touchdown logic)
+    function heliGroundContact(groundHeight, overWater) {
+      var skid = position.y - PLANE_GROUND_OFFSET - groundHeight;
+      var vs = heliVel.y, hs = Math.sqrt(heliVel.x * heliVel.x + heliVel.z * heliVel.z);
+      if (wasGrounded) {
+        if (skid <= 0.02) { position.y = groundHeight + PLANE_GROUND_OFFSET; if (heliVel.y < 0) heliVel.y = 0; }
+        if (skid > 0.15) wasGrounded = false;
+        verticalVel = heliVel.y;
+      } else if (skid <= 0) {
+        if (overWater) { triggerCrash(true); return; }      // no floats — ditching is a crash
+        if (vs < -8.5 || hs > 22 || Math.abs(rollAngle) > 0.6 || pitchAngle < -0.5 || pitchAngle > 0.55) {
+          samToast(vs < -8.5 ? 'IMPACT — DESCENT TOO FAST' : hs > 22 ? 'SKIDS DUG IN — TOO FAST' : 'ROLLED OVER', '#ff3b30', 2.5);
+          triggerCrash(false); return;
+        }
+        position.y = groundHeight + PLANE_GROUND_OFFSET;
+        if (vs < -4) {
+          heliVel.y = -vs * 0.25;                            // hard landing: bounce off the skids
+          heliPitchRate += (Math.random() - 0.5) * 0.8; heliRollRate += (Math.random() - 0.5) * 1.2;
+          samToast('HARD LANDING', '#ffb02a', 1.6);
+        } else {
+          heliVel.y = 0;
+          wasGrounded = true;
+          heliHoldAlt = null; heliHoldSpeed = null;
+          if (vs < -0.6 || hs > 2) showTouchdownMessage();
+        }
+        verticalVel = heliVel.y;
+      }
+      // rotor strike: blade tips against rising ground when banked or pitched hard down low
+      if (!crashing && heliRpm > 0.3 && skid < 5 && (Math.abs(rollAngle) > 0.35 || Math.abs(pitchAngle) > 0.3)) {
+        for (var k = 0; k < 4; k++) {
+          var a = k * Math.PI / 2;
+          _hTip.set(Math.cos(a) * 4.4, 1.66, Math.sin(a) * 4.4);
+          plane.localToWorld(_hTip);
+          if (_hTip.y < getEffectiveGroundHeight(_hTip.x, _hTip.z) + 0.1) {
+            samToast('ROTOR STRIKE', '#ff3b30', 2.5);
+            triggerCrash(false); return;
+          }
+        }
+      }
+    }
+
+
+    // HUD: rotor %, torque %, vertical speed, radar altitude, assist mode, warnings, and a hover
+    // indicator — a top-down dot showing which way (and how fast) you're drifting over the ground
+    var _hh = null;
+    function heliUpdateHud() {
+      if (!_hh) {
+        _hh = { rpm: document.getElementById('hhRpm'), tq: document.getElementById('hhTq'), vs: document.getElementById('hhVs'),
+          agl: document.getElementById('hhAgl'), mode: document.getElementById('hhMode'), warn: document.getElementById('hhWarn'),
+          cv: document.getElementById('hhHover') };
+        if (!_hh.cv) { _hh = null; return; }
+        _hh.ctx = _hh.cv.getContext('2d');
+      }
+      var rp = Math.round(heliRpm * 100);
+      _hh.rpm.textContent = rp + '%';
+      _hh.rpm.classList.toggle('warn', heliSpool > 0.95 && (rp < 90 || rp > 110));
+      _hh.tq.textContent = Math.round(heliTorque * 100) + '%';
+      _hh.tq.classList.toggle('warn', heliTorque > 0.95);
+      var vsv = heliVel.y;
+      _hh.vs.textContent = (vsv >= 0 ? '+' : '') + vsv.toFixed(1);
+      _hh.vs.classList.toggle('warn', vsv < -6 && heliAgl < 40);
+      _hh.agl.textContent = Math.max(0, Math.round(heliAgl));
+      _hh.mode.textContent = wasGrounded ? (heliSpool < 1 && !outOfFuel ? 'ROTOR START' : 'ON SKIDS') : heliMode;
+      var w = heliWarn;
+      if (!w && !wasGrounded && heliAgl < 25 && vsv < -6) w = 'SINK RATE';
+      _hh.warn.textContent = w && (w.indexOf('ROTOR START') === 0 || (elapsedSeconds % 0.8) < 0.55) ? w : '';
+      _hh.warn.classList.toggle('amber', w.indexOf('ROTOR START') === 0 || w === 'SINK RATE');
+      // hover indicator
+      var c = _hh.ctx, S = 128, m = S / 2, R = 52;
+      c.clearRect(0, 0, S, S);
+      c.strokeStyle = 'rgba(200,215,230,0.35)'; c.lineWidth = 2;
+      c.beginPath(); c.arc(m, m, R, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.arc(m, m, R * 0.33, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.moveTo(m - R, m); c.lineTo(m + R, m); c.moveTo(m, m - R); c.lineTo(m, m + R); c.stroke();
+      var ch = Math.cos(heading), sh = Math.sin(heading);
+      var vF = -heliVel.x * sh - heliVel.z * ch, vR = heliVel.x * ch - heliVel.z * sh;
+      var vmag = Math.sqrt(vF * vF + vR * vR), scale = R / 6;
+      var dx = vR * scale, dy = -vF * scale, dl = Math.sqrt(dx * dx + dy * dy);
+      if (dl > R) { dx *= R / dl; dy *= R / dl; }
+      var col = vmag < 1 ? '#4fe07a' : vmag < 4 ? '#ffb02a' : '#e8eef4';
+      c.strokeStyle = col; c.lineWidth = 3;
+      c.beginPath(); c.moveTo(m, m); c.lineTo(m + dx, m + dy); c.stroke();
+      c.fillStyle = col; c.beginPath(); c.arc(m + dx, m + dy, 7, 0, Math.PI * 2); c.fill();
+      // vertical-speed bar on the right edge
+      var vy = Math.max(-1, Math.min(1, vsv / 8));
+      c.fillStyle = vy >= 0 ? 'rgba(79,224,122,0.85)' : (vsv < -6 ? 'rgba(255,59,48,0.9)' : 'rgba(255,176,42,0.85)');
+      c.fillRect(S - 8, m - Math.max(0, vy) * R, 6, Math.abs(vy) * R);
+    }
+
+    // rotor downwash: dust (or spray over water) blasted out under the helicopter, plus ripples
+    var heliWash = [], heliWashCursor = 0, heliWashAccum = 0, heliRippleT = 0;
+    var heliWashDust = new THREE.Color(0xb9a582), heliWashWater = new THREE.Color(0xe4f1f6);
+    function heliDownwash(dt, gH) {
+      if (!heliWash.length) {
+        for (var i = 0; i < 40; i++) {
+          var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: splashTexture, transparent: true, opacity: 0, depthWrite: false, fog: true }));
+          sp.visible = false; scene.add(sp);
+          heliWash.push({ sprite: sp, vel: new THREE.Vector3(), life: 9, maxLife: 1 });
+        }
+      }
+      var h = heliAgl, overWater = gH <= WATER_LEVEL + 0.01;
+      var power = heliRpm * hClamp(heliThrust / GRAVITY, 0, 1.5) * (1 - hSmooth(4, 16, h));
+      if (power > 0.05 && !crashing) {
+        heliWashAccum += dt * power * 60;
+        while (heliWashAccum > 1) {
+          heliWashAccum -= 1;
+          var p = heliWash[heliWashCursor]; heliWashCursor = (heliWashCursor + 1) % heliWash.length;
+          var a = Math.random() * Math.PI * 2, r = 2 + Math.random() * 3;
+          var gy = overWater ? WATER_LEVEL + seaMeshWaveHeight(position.x, position.z) : gH;
+          p.sprite.position.set(position.x + Math.cos(a) * r, gy + 0.4, position.z + Math.sin(a) * r);
+          var out = 7 + Math.random() * 8 * power;
+          p.vel.set(Math.cos(a) * out, 0.8 + Math.random() * 2, Math.sin(a) * out);
+          p.life = 0; p.maxLife = 0.9 + Math.random() * 0.8;
+          p.sprite.material.color.copy(overWater ? heliWashWater : heliWashDust);
+          p.sprite.material.opacity = 0.001;
+          p.sprite.visible = true;
+        }
+        if (overWater) {
+          heliRippleT -= dt;
+          if (heliRippleT <= 0) { heliRippleT = 0.45; seaAddRipple(position.x, position.z, 0.2 + 0.4 * power); }
+        }
+      }
+      for (var j = 0; j < heliWash.length; j++) {
+        var q = heliWash[j];
+        if (q.life >= q.maxLife) continue;
+        q.life += dt;
+        var k = Math.min(1, q.life / q.maxLife);
+        q.sprite.position.addScaledVector(q.vel, dt);
+        q.vel.multiplyScalar(Math.max(0, 1 - dt * 1.6));
+        var s = 1.5 + k * 5;
+        q.sprite.scale.set(s, s * 0.7, 1);
+        q.sprite.material.opacity = 0.32 * Math.sin(k * Math.PI) * power + 0.001;
+        if (k >= 1) { q.sprite.visible = false; q.sprite.material.opacity = 0; }
+      }
+    }
     var position = new THREE.Vector3(0, 0, 0);
     var distanceMeters = 0;
     var crashing = false;
@@ -9679,6 +10320,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var rumbleSeed = Math.random() * 1000;
 
     var camOffset = new THREE.Vector3(0, 4.2, 9.6);
+    var HELI_CAM_OFFSET = new THREE.Vector3(0, 3.9, 13.5), _heliCamQ = new THREE.Quaternion(), _heliCamAxis = new THREE.Vector3(0, 1, 0), _heliLook = new THREE.Vector3();
     var camLookOffset = new THREE.Vector3(0, 1.0, -7);
     var camPos = new THREE.Vector3();
     var camTarget = new THREE.Vector3();
@@ -9690,7 +10332,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       heading = 0; pitchAngle = 0; rollAngle = 0; speed = 0; throttle = 0; verticalVel = 0; stalled = false;
       flapsDeployed = false; barrelRolling = false; cruiseActive = false;
       setDroneCam(false);
-      heliVelX = 0; heliVelZ = 0;
+      if (isHelicopterMode) heliResetState(false); else heliVel.set(0, 0, 0);
       hasBrokenSonic = false;
       fuel = FUEL_MAX; outOfFuel = false;
       if (throttleSlider) throttleSlider.value = 0;
@@ -10837,13 +11479,19 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       throttleReadoutEl.textContent = throttleKmh;
       throttleMarkerEl.style.left = (THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1) * 100) + '%';
       throttleFillEl.style.height = (throttleFrac * 100) + '%';
-      throttleValEl.textContent = isHelicopterMode ? Math.round(throttleFrac * 100) + '%' :
-        (throttleKmh < 0 ? 'REV ' + Math.abs(throttleKmh) : throttleKmh) + ' km/h';
+      throttleValEl.textContent = isHelicopterMode
+        ? (heliAssist ? (Math.abs(heliVsCmd) < 0.3 || heliHoldAlt !== null ? 'HOLD' : (heliVsCmd > 0 ? '▲ ' : '▼ ') + Math.abs(heliVsCmd).toFixed(0) + ' m/s') : Math.round(heliColl * 100) + '%')
+        : (throttleKmh < 0 ? 'REV ' + Math.abs(throttleKmh) : throttleKmh) + ' km/h';
+      if (isHelicopterMode) {
+        throttleReadoutEl.textContent = Math.round(heliColl * 100);
+        throttleMarkerEl.style.left = (heliColl * 100) + '%';
+        heliUpdateHud();
+      }
       if (Math.round(Number(throttleSlider.value)) !== throttleKmh) throttleSlider.value = throttleKmh;
       if (flapsBtn) flapsBtn.classList.toggle('active', flapsDeployed);
       if (flapsBtn) flapsBtn.textContent = flapsDeployed ? 'FLAPS ▼' : 'FLAPS';
-      if (cruiseBtn) cruiseBtn.classList.toggle('active', cruiseActive);
-      if (cruiseBtn) cruiseBtn.textContent = cruiseActive ? 'CRUISE ✓' : 'CRUISE';
+      if (cruiseBtn) cruiseBtn.classList.toggle('active', isHelicopterMode ? heliAssist : cruiseActive);
+      if (cruiseBtn) cruiseBtn.textContent = isHelicopterMode ? (heliAssist ? 'HOVER ✓' : 'HOVER') : (cruiseActive ? 'CRUISE ✓' : 'CRUISE');
 
       var clearanceShown = Math.max(0, Math.round(clearance));
       altValEl.textContent = clearanceShown;
@@ -11347,6 +11995,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         pitchInput *= gControlMult;
         rollInput *= gControlMult;
 
+        // the helicopter flies its own attitude/yaw model in heliStep(); everything down to the
+        // wind wander below is fixed-wing handling
+        if (!isHelicopterMode) {
         var targetPitch = pitchInput * MAX_PITCH;
 
         // cancel a barrel roll early if we stall, crash, or touch back down mid-spin —
@@ -11424,6 +12075,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (currentWind > 0.01) {
           heading += Math.sin(windDirAngle - heading) * WIND_MAX_HEADING_KICK * currentWind * dt;
         }
+        }
 
 
         plane.rotation.x = pitchAngle;
@@ -11433,14 +12085,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         forwardVec.set(0, 0, -1).applyQuaternion(plane.quaternion).normalize();
 
         var throttleMinAllowed = isHelicopterMode ? 0 : -REVERSE_SPEED;
-        if (keys.throttleUp) throttle = THREE.MathUtils.clamp(throttle + THROTTLE_KEY_RATE * dt, throttleMinAllowed, MAX_SPEED);
-        if (keys.throttleDown) throttle = THREE.MathUtils.clamp(throttle - THROTTLE_KEY_RATE * dt, throttleMinAllowed, MAX_SPEED);
+        if (keys.throttleUp && !isHelicopterMode) throttle = THREE.MathUtils.clamp(throttle + THROTTLE_KEY_RATE * dt, throttleMinAllowed, MAX_SPEED);
+        if (keys.throttleDown && !isHelicopterMode) throttle = THREE.MathUtils.clamp(throttle - THROTTLE_KEY_RATE * dt, throttleMinAllowed, MAX_SPEED);
 
         // --- fuel burn ---
         // burn rate scales with how hard the engine is working: idle burn even at zero throttle,
         // ramping up toward full-throttle consumption, with boost guzzling extra on top.
-        var throttleFrac = THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1);
-        var burnRate = FUEL_BURN_IDLE + (FUEL_BURN_FULL - FUEL_BURN_IDLE) * throttleFrac + (keys.boost ? FUEL_BURN_BOOST : 0);
+        var throttleFrac = isHelicopterMode ? heliTorque : THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1);
+        var burnRate = (isHelicopterMode && heliSpool < 0.01 ? 0 : FUEL_BURN_IDLE) + (FUEL_BURN_FULL - FUEL_BURN_IDLE) * throttleFrac + (keys.boost && !isHelicopterMode ? FUEL_BURN_BOOST : 0);
         if (fuel > 0) {
           fuel = Math.max(0, fuel - burnRate * dt);
           if (fuel <= 0) outOfFuel = true;
@@ -11448,46 +12100,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         // once the tank runs dry the engine can no longer produce thrust — throttle input is
         // ignored and the plane just bleeds off speed until it stalls, exactly like real fuel
         // exhaustion (no special-cased "instant stall", it falls out of normal flight physics)
-        if (outOfFuel || samEngineKilled) throttle = 0;
+        if ((outOfFuel || samEngineKilled) && !isHelicopterMode) throttle = 0;
 
         if (isHelicopterMode) {
-          // --- helicopter physics: throttle is collective (vertical thrust), pitch/roll tilt the
-          // rotor disc to translate horizontally. No stall speed — the rotor always produces lift
-          // as long as there's fuel, so the craft can hover motionless or fly at any airspeed.
-          mainRotorPivot.rotation.y += (outOfFuel ? 4 : 55) * dt;
-          tailRotorPivot.rotation.x += (outOfFuel ? 4 : 70) * dt;
-
-          plane.rotation.x = pitchAngle;
-          plane.rotation.y = heading;
-          plane.rotation.z = -rollAngle;
-          // yaw eases toward the commanded rate instead of snapping instantly — turning while
-          // also tilting to translate no longer feels like it's fighting itself
-          var targetYawRate = (outOfFuel ? 0 : rollInput * TURN_RATE);
-          heliYawRate += (targetYawRate - heliYawRate) * Math.min(1, HELI_YAW_LERP * dt);
-          heading += heliYawRate * dt;
-
-          forwardVec.set(0, 0, -1).applyQuaternion(plane.quaternion).normalize();
-
-          var thrust = (outOfFuel || samEngineKilled) ? 0 : throttleFrac * (HOVER_THRUST + (keys.boost ? BOOST_ACCEL : 0));
-          verticalVel += (thrust - GRAVITY) * dt;
-          verticalVel = THREE.MathUtils.clamp(verticalVel, -MAX_CLIMB_RATE * 1.5, MAX_CLIMB_RATE);
-          // light vertical damping so it settles into a stable hover rather than oscillating
-          verticalVel *= (1 - Math.min(1, 1.6 * dt));
-
-          // horizontal drift comes from tilting the rotor disc via pitch/roll, not forward speed
-          var horizThrustX = Math.sin(rollAngle) * HELI_TILT_ACCEL;
-          var horizThrustZ = -Math.sin(pitchAngle) * HELI_TILT_ACCEL;
-          heliVelX += (horizThrustX - heliVelX * HELI_DRAG) * dt;
-          heliVelZ += (horizThrustZ - heliVelZ * HELI_DRAG) * dt;
-          var worldDX = heliVelX * Math.cos(heading) + heliVelZ * Math.sin(heading);
-          var worldDZ = -heliVelX * Math.sin(heading) + heliVelZ * Math.cos(heading);
-          position.x += worldDX * dt;
-          position.z += worldDZ * dt;
-          position.y += verticalVel * dt;
-          plane.position.copy(position);
-          speed = Math.sqrt(heliVelX * heliVelX + heliVelZ * heliVelZ);
-          distanceMeters += speed * dt;
-          stalled = false;
+          heliStep(dt);
         } else if (isCarMode) {
           // --- car physics: throttle drives forward/reverse speed, steering (left/right
           // drag) turns the heading. No lift, no altitude control at all — the shared
@@ -11655,7 +12271,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var clearance = position.y - groundHeight;
         var verticalSpeed = verticalVel;
 
-        if (wasGrounded) {
+        if (isHelicopterMode) {
+          if (!crashing) heliGroundContact(groundHeight, overWater);
+        } else if (wasGrounded) {
           // resting/rolling on the ground (takeoff roll, taxi, or just landed) — only correct for
           // actually dipping below the surface, and never fight a genuine climb-out.
           if (clearance < PLANE_GROUND_OFFSET) {
@@ -11783,6 +12401,20 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           camPos.copy(droneCamWorldPos); // keep the chase-cam lerp state primed for a clean handoff back
         } else if (ckOn) {
           plane.visible = true;   // first-person: camera already placed at the pilot's eye
+        } else if (isHelicopterMode) {
+          // helicopter chase cam follows heading only — it doesn't pitch and roll with the
+          // airframe, so you can see the disc tilt that's moving you — and leads into the drift
+          plane.visible = true;
+          _heliCamQ.setFromAxisAngle(_heliCamAxis, heading);
+          camTarget.copy(HELI_CAM_OFFSET).applyQuaternion(_heliCamQ).add(position);
+          camTarget.addScaledVector(heliVel, -0.05);
+          camTarget.y = Math.max(camTarget.y, getEffectiveGroundHeight(camTarget.x, camTarget.z) + 1.5);
+          camPos.lerp(camTarget, Math.min(1, 4.5 * dt));
+          camera.position.copy(camPos);
+          _heliLook.set(0, 1.2, -5).applyQuaternion(_heliCamQ).add(position).addScaledVector(heliVel, 0.35);
+          var hTilt = -rollAngle * 0.12;
+          camera.up.set(Math.sin(hTilt) * Math.cos(heading), Math.cos(hTilt), -Math.sin(hTilt) * Math.sin(heading));
+          camera.lookAt(_heliLook);
         } else {
           plane.visible = true;
           camTarget.copy(camOffset).applyQuaternion(plane.quaternion).add(position);
@@ -13663,7 +14295,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var throttleFrac = THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1);
       var eng = 0.45 + 0.75 * throttleFrac + (keys.boost ? 0.8 : 0);
       if (samEngineKilled) eng = 0.55;           // a burning engine is still hot
-      if (isHelicopterMode) eng *= 0.8; else if (isDroneMode) eng *= 0.6;
+      if (isHelicopterMode) eng = (0.45 + 0.75 * heliTorque) * 0.8; else if (isDroneMode) eng *= 0.6;
       _skD.copy(position).sub(m.pos).normalize();
       var rear = Math.max(0, forwardVec.dot(_skD)); // missile behind you sees the hot exhaust
       return eng * (0.6 + 0.8 * rear);
@@ -15700,6 +16332,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         throttle = 0;
       }
       heliBody.visible = isHelicopterMode;
+      if (isHelicopterMode) heliResetState(started && !wasGrounded, new THREE.Vector3().copy(forwardVec).setY(0).multiplyScalar(Math.min(60, Math.max(0, speed))));
+      var heliHudBoxEl = document.getElementById('heliHudBox');
+      if (heliHudBoxEl) heliHudBoxEl.classList.toggle('hidden', !isHelicopterMode);
+      if (started) document.getElementById('boostBtn').classList.toggle('hidden', isHelicopterMode);
       carBody.visible = isCarMode;
       droneBody.visible = isDroneMode;
       stealthBody.visible = isStealthMode;
@@ -15718,7 +16354,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (isHelicopterMode || isCarMode || isStealthMode) flapsDeployed = false;
       if (isHelicopterMode || isCarMode) cruiseActive = false;
       var cruiseBtnEl = document.getElementById('cruiseBtn');
-      if (cruiseBtnEl) cruiseBtnEl.classList.toggle('hidden', isHelicopterMode || isCarMode);
+      if (cruiseBtnEl) cruiseBtnEl.classList.toggle('hidden', isCarMode);   // on the helicopter it's the HOVER assist toggle
       var heliDpadEl = document.getElementById('heliDpad');
       if (heliDpadEl) heliDpadEl.classList.toggle('hidden', !isHelicopterMode);
       if (!isHelicopterMode) { keys.up = keys.down = keys.left = keys.right = false; }
@@ -15743,11 +16379,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         stealthEngineGlows.forEach(function(g) { g.material.opacity = 0; });
       }
       var throttleLabelEl = document.getElementById('throttleLabel');
-      if (throttleLabelEl) throttleLabelEl.textContent = isHelicopterMode ? 'LIFT' : (isCarMode ? 'THROTTLE' : 'THROTTLE');
+      if (throttleLabelEl) throttleLabelEl.textContent = isHelicopterMode ? 'COLLECTIVE' : 'THROTTLE';
+      var thrGaugeLbl = document.querySelector('#throttleGauge .label'), thrGaugeUnit = document.querySelector('#throttleGauge .unit');
+      if (thrGaugeLbl) thrGaugeLbl.textContent = isHelicopterMode ? 'COLLECTIVE' : 'THROTTLE';
+      if (thrGaugeUnit) thrGaugeUnit.textContent = isHelicopterMode ? '%' : 'km/h';
       var controlHintEl = document.getElementById('controlHint');
       if (controlHintEl) {
         controlHintEl.textContent = isHelicopterMode
-          ? 'Drag to move • Slider/±/Shift for lift • hold to hover'
+          ? 'Drag / W S Q E: cyclic • A D or ◀▶: yaw • Space ▲ / Z ▼ or lever: collective • C: hover assist'
           : isCarMode
           ? 'Drag to steer • Slider/±/Shift for speed • pull throttle below 0 to reverse'
           : isDroneMode
@@ -15775,11 +16414,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       document.getElementById('settingsToggle').classList.remove('hidden');
       document.getElementById('controlHint').classList.remove('hidden');
       document.getElementById('touchLayer').classList.remove('hidden');
-      document.getElementById('boostBtn').classList.remove('hidden');
+      document.getElementById('boostBtn').classList.toggle('hidden', isHelicopterMode);   // Space / ▲ is the heli's collective
       // only the controls this aircraft actually has (same rules applySelectedPlaneType uses)
       document.getElementById('rollBtns').classList.toggle('hidden', isHelicopterMode || isCarMode || isDroneMode || isStealthMode);
       document.getElementById('flapsBtn').classList.toggle('hidden', isHelicopterMode || isCarMode || isStealthMode);
-      document.getElementById('cruiseBtn').classList.toggle('hidden', isHelicopterMode || isCarMode);
+      document.getElementById('cruiseBtn').classList.toggle('hidden', isCarMode);
       document.getElementById('ejectBtn').classList.remove('hidden');
       document.getElementById('throttleWrap').classList.remove('hidden');
       document.getElementById('miniMapWrap').classList.remove('hidden');
