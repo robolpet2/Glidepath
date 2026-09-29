@@ -1110,6 +1110,7 @@
     <h1>GLIDEPATH</h1>
     <div class="rule"></div>
     <p class="sub">An endless flight over procedurally generated terrain, starting from your own airfield.</p>
+    <p class="sub" style="letter-spacing:.42em;font-size:11px;opacity:.75;margin-top:-6px">TACTICAL AVIATION ACTION</p>
     <div class="instructions">
       <div class="col">
         <h3>Keyboard</h3>
@@ -1121,6 +1122,11 @@
         <div><b>Shift</b>Boost</div>
         <div><b>Q / E</b>Barrel roll</div>
         <div><b>F</b>Flaps</div>
+        <div><b>I</b>Codec radio</div>
+        <div><b>O</b>Photo mode</div>
+        <div><b>U</b>Cardboard box</div>
+        <div><b>Y</b>Walkman</div>
+        <div><b>N</b>Drop cargo</div>
       </div>
       <div class="col">
         <h3>Touch</h3>
@@ -1129,6 +1135,8 @@
         <div><b>Hold ⚡</b>Boost</div>
         <div><b>↺ / ↻</b>Barrel roll</div>
         <div><b>FLAPS</b>Toggle flaps</div>
+        <div><b>📻 / 📷</b>Codec / photo</div>
+        <div><b>📦</b>Box (stopped)</div>
       </div>
     </div>
     <div id="planePicker">
@@ -6386,6 +6394,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var pendingThunder = [];
     function triggerLightning() {
       lightningFlashOpacity = 0.75 + Math.random() * 0.2;
+      kjOnLightning();
       var strikeIntensity = sunLight.intensity;
       // schedule a distant rumble of thunder proportional to a random "distance"
       var delay = 0.3 + Math.random() * 2.4;
@@ -9967,7 +9976,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       heliPedalIn += (pedal - heliPedalIn) * Math.min(1, dt * 8);
       fwd = heliFwdIn; lat = heliLatIn; pedal = heliPedalIn;
       var collUp = keys.boost || keys.collUp || keys.throttleUp, collDn = keys.collDown || keys.throttleDown;
-      var engineOn = !outOfFuel && !samEngineKilled;
+      var engineOn = !outOfFuel && !samEngineKilled && !kj.boxed;
       if (heliWasEngineOn && !engineOn && !wasGrounded) samToast('ENGINE OUT — LOWER COLLECTIVE, AUTOROTATE', '#ffb02a', 3.5);
       heliWasEngineOn = engineOn;
 
@@ -10171,10 +10180,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           heliVel.y = -vs * 0.25;                            // hard landing: bounce off the skids
           heliPitchRate += (Math.random() - 0.5) * 0.8; heliRollRate += (Math.random() - 0.5) * 1.2;
           samToast('HARD LANDING', '#ffb02a', 1.6);
+          kjWear(0.05, 'hard');
         } else {
           heliVel.y = 0;
           wasGrounded = true;
           heliHoldAlt = null; heliHoldSpeed = null;
+          kjOnTouchdown(vs);
           if (vs < -0.6 || hs > 2) showTouchdownMessage();
         }
         verticalVel = heliVel.y;
@@ -10828,6 +10839,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function triggerCrash(intoWater, viaEject) {
       if (crashing) return;
       crashing = true;
+      kjOnCrash(intoWater, viaEject);
       csarOnCrash();
       pvpOnCrash();
       cruiseActive = false;
@@ -10877,6 +10889,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (throttleSlider) throttleSlider.value = Math.round(throttle * 3.6);
       wasGrounded = false;
       plane.visible = true;
+      if (isHelicopterMode) heliResetState(true);
       document.getElementById('crashMsg').classList.add('hidden');
       crashing = false;
       samOnPlayerReset();
@@ -11047,6 +11060,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var ejectCrashTimer = null;
 
     function triggerEject() {
+      kjOnEject();
       if (ejecting || crashing) return;
       csarOnEject();
       ejecting = true;
@@ -12310,6 +12324,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             velocityVec.y = 0;
             wasGrounded = true;
             showTouchdownMessage();
+            kjOnTouchdown(verticalSpeed);
             if (overWater && isSeaplaneMode) seaTouchdownSplash(-verticalSpeed, speed);
           } else {
             triggerCrash(overWater);
@@ -12544,6 +12559,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (started) updateWingtipTrails(speed, rollAngle);
       updateEject(dt);
       updateEjectMotorPlume(dt);
+      kjUpdate(dt);
     }
 
     /* ============================================================
@@ -14511,7 +14527,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       samWasInZone = inZone;
 
       var masked = agl < SAM_MASK_AGL && dist > 300;
-      var tracking = eligible && samRadar.alive && samGrace <= 0 && dist < detectR && !masked;
+      var tracking = eligible && samRadar.alive && samGrace <= 0 && dist < detectR && !masked && !kj.boxed;
       if (tracking) samLock = Math.min(1, samLock + dt / SAM_LOCK_TIME);
       else samLock = Math.max(0, samLock - dt * 0.8);
 
@@ -15068,7 +15084,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       csarCable.visible = false; csarStrobe.sprite.visible = false;
       ejectPilot.visible = false;
       if (msg) samToast(msg, color, 3.4);
-      if (reward) coins += reward;
+      if (reward) { coins += reward; kjOnRescue(); }
       var back = csar.returnType; csar.returnType = null;
       if (!back) return;
       // put the player back in their own aircraft — straight away, or after the crash
@@ -16002,13 +16018,1633 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function animate() {
       requestAnimationFrame(animate);
       var dt = Math.min(clock.getDelta(), 0.05);
-      if (started) {
-        elapsedSeconds += dt;
-        update(dt);
+      // codec / photo mode pause the world; reflex mode slows it down
+      kjFrame(dt);
+      var sdt = dt * kj.timeScale;
+      if (started && !kj.paused) {
+        elapsedSeconds += sdt;
+        update(sdt);
       }
       planePreview.tick(dt);
       renderWithPost(renderer, scene, camera, elapsedSeconds);
+      kjAfterRender();
     }
+    /* ============================================================
+       TACTICAL AVIATION ACTION — the director's-cut layer.
+       Systems that sit on top of every aircraft and every place on the island:
+         · CODEC radio (I): four characters who notice what you do — and one who reads your save data
+         · ALERT / EVASION / CAUTION phases and a "!" when the SAM site finds you; REFLEX slow-motion
+           when a missile is about to hit
+         · the pilot's pulse: G, missiles, storms and terrain-hugging push it up; a racing heart
+           makes the hands shake
+         · airframe wear that persists per vehicle (hard landings, over-G, rain, birds, lightning),
+           repaired by parking at a base
+         · a cardboard box (U) — radar operators are trained to look for aircraft, not boxes
+         · cassette tapes hidden around the island, played on the Walkman (Y), synthesized live
+         · cargo deliveries for every vehicle: sling loads under the helicopter, air-drops from
+           planes, door-to-door by car
+         · photo mode (O), LIKES for doing things well, opening credits and a very loud game over
+       Everything is saved in this browser (localStorage 'gp-kj-v1').
+       ============================================================ */
+    var KJ_KEY = 'gp-kj-v1';
+    var kj = {
+      stats: null, saveT: 0,
+      paused: false, timeScale: 1, reflexT: 0, reflexCd: 0,
+      codecOpen: false, photoOn: false, input2T: 0,
+      sessionStart: Date.now(), lastInput: performance.now(), hiddenAt: 0, awayMs: 0,
+      battery: null, touchUser: false, sessionCrashes: 0, sessionT: 0, groundedT: 0,
+      bpm: 72, bpmSpike: 0, beatPhase: 0, beatT: 0, ecgT: 0, ecg: [],
+      alertPhase: '', alertT: 0, alertDetected: false,
+      nearMissCd: 0, birdCd: 0, recentCrashAt: -1e9, recentBirdAt: -1e9, recentBoltAt: -1e9,
+      glitchT: 0, boxed: false, box: null, flyingBoxes: [],
+      creditsShown: false, wasGroundedPrev: true, lastVy: 0,
+      watchedMissiles: [], lastVehicle: ''
+    };
+    function kjDefaultStats() {
+      return { v: 1, created: Date.now(), sessions: 0, flight: 0, veh: {}, crashes: 0, water: 0, ejects: 0,
+        landings: 0, butter: 0, likes: 0, codec: 0, tapes: [], deliveries: 0, boxes: 0, photos: 0, alerts: 0,
+        missed: 0, wear: {}, said: {}, archivist: 0, input2: false, lastSeen: 0 };
+    }
+    function kjLoad() {
+      var s = null;
+      try { s = JSON.parse(localStorage.getItem(KJ_KEY) || 'null'); } catch (e) { s = null; }
+      var d = kjDefaultStats();
+      if (!s || typeof s !== 'object') s = d;
+      Object.keys(d).forEach(function(k) { if (s[k] === undefined) s[k] = d[k]; });
+      kj.stats = s;
+      s.sessions++;
+      kj.prevSeen = s.lastSeen;
+      s.lastSeen = Date.now();
+      kjSave();
+    }
+    function kjSave() { try { localStorage.setItem(KJ_KEY, JSON.stringify(kj.stats)); } catch (e) {} }
+    function kjVehKey() { return selectedPlaneType; }
+    function kjVehName() { var p = PLANE_TYPES[selectedPlaneType]; return p ? p.name : 'aircraft'; }
+    function kjCallsign() { return (typeof net !== 'undefined' && net.name) ? net.name : 'PILOT'; }
+    function kjFmtDur(sec) {
+      sec = Math.max(0, Math.round(sec));
+      var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+      if (h > 0) return h + ' hour' + (h === 1 ? '' : 's') + ' ' + m + ' minute' + (m === 1 ? '' : 's');
+      if (m > 0) return m + ' minute' + (m === 1 ? '' : 's') + (s ? ' ' + s + ' second' + (s === 1 ? '' : 's') : '');
+      return s + ' second' + (s === 1 ? '' : 's');
+    }
+    function kjFavVehicle() {
+      var best = null, bt = -1, v = kj.stats.veh;
+      Object.keys(v).forEach(function(k) { if (v[k] > bt && PLANE_TYPES[k]) { bt = v[k]; best = k; } });
+      return best ? PLANE_TYPES[best].name : kjVehName();
+    }
+    function kjWeatherName() {
+      var n = 'clear skies';
+      Object.keys(WEATHER_PRESETS).forEach(function(k) { if (WEATHER_PRESETS[k] === weatherTarget) n = { clear: 'clear skies', fog: 'fog', rain: 'rain', storm: 'a thunderstorm' }[k] || k; });
+      return n;
+    }
+    function kjRealTime() { var d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+    function kjAgl() { return position.y - PLANE_GROUND_OFFSET - Math.max(getEffectiveGroundHeight(position.x, position.z), WATER_LEVEL); }
+    function kjAirborne() { return started && !crashing && !ejecting && !wasGrounded && !isCarMode; }
+
+    // ---------- UI shell: everything this layer draws lives in DOM built here ----------
+    var kjCss = document.createElement('style');
+    kjCss.textContent = [
+      '#kjTop{position:fixed;z-index:14;left:50%;top:calc(10px + env(safe-area-inset-top));transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;max-width:92vw}',
+      '#kjOrder{max-width:min(62vw,560px)}',
+      '.kjPill{pointer-events:auto;font:700 11px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.08em;color:#e8f4ea;background:rgba(8,14,10,.78);border:1px solid rgba(125,255,154,.35);border-radius:14px;padding:6px 11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:92vw;box-shadow:0 4px 14px rgba(0,0,0,.45)}',
+      '.kjPill.hidden{display:none}',
+      '#kjWalk{display:flex;gap:8px;align-items:center;cursor:pointer}',
+      '#kjWalk .reel{display:inline-block;width:9px;height:9px;border:2px solid #7dff9a;border-radius:50%;border-top-color:transparent}',
+      '#kjWalk.playing .reel{animation:kjSpin 1s linear infinite}',
+      '@keyframes kjSpin{to{transform:rotate(360deg)}}',
+      '#kjWalk button{all:unset;cursor:pointer;color:#7dff9a;padding:0 3px}',
+      '#kjAlert{font:900 15px/1.1 ui-monospace,Menlo,monospace;letter-spacing:.2em;padding:7px 16px;border-radius:6px;pointer-events:none}',
+      '#kjAlert.alert{background:rgba(160,0,0,.82);border-color:#ff3b30;color:#fff;box-shadow:0 0 22px rgba(255,40,30,.7)}',
+      '#kjAlert.evasion{background:rgba(150,110,0,.8);border-color:#ffd23b;color:#fff}',
+      '#kjAlert.caution{background:rgba(120,70,0,.72);border-color:#ffb02a;color:#ffe6b0}',
+      '#kjAlert b{font-size:17px;margin-left:10px;letter-spacing:.06em}',
+      '#kjRing{border-color:#7dff9a;color:#7dff9a;animation:kjBlink 1s steps(2) infinite}',
+      '@keyframes kjBlink{50%{opacity:.35}}',
+      '#kjOrder{border-color:rgba(255,210,59,.55);color:#fff2c8}',
+      '#kjOrder .bar{display:inline-block;width:46px;height:5px;background:rgba(255,255,255,.15);border-radius:3px;vertical-align:middle;margin-left:6px;overflow:hidden}',
+      '#kjOrder .bar i{display:block;height:100%;background:#ffd23b}',
+      '#kjPops{position:fixed;z-index:14;right:calc(210px + env(safe-area-inset-right));top:42%;pointer-events:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px}',
+      '.kjPop{font:800 13px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.06em;color:#fff;background:rgba(10,40,20,.8);border:1px solid rgba(125,255,154,.55);border-radius:12px;padding:4px 10px;animation:kjPop 2.2s ease forwards}',
+      '.kjPop em{font-style:normal;color:#7dff9a;margin-right:6px}',
+      '@keyframes kjPop{0%{opacity:0;transform:translateY(12px) scale(.8)}12%{opacity:1;transform:none}75%{opacity:1}100%{opacity:0;transform:translateY(-26px)}}',
+      '#kjBtns{position:fixed;z-index:11;top:calc(14px + env(safe-area-inset-top));right:calc(198px + env(safe-area-inset-right));display:flex;gap:8px}',
+      '#kjBtns button{width:38px;height:38px;border-radius:50%;background:rgba(15,17,20,.62);border:1px solid rgba(255,255,255,.12);color:#e8e6df;font-size:16px;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}',
+      '#kjBtns button.ring{background:rgba(40,160,80,.6);border-color:#7dff9a;animation:kjBlink 1s steps(2) infinite}',
+      '#kjCtx{position:fixed;z-index:12;left:50%;transform:translateX(-50%);bottom:calc(64px + env(safe-area-inset-bottom));display:flex;gap:10px}',
+      '#kjCtx button{font:800 12px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;color:#fff;background:rgba(120,80,30,.78);border:2px solid #e0b070;border-radius:12px;padding:10px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent}',
+      '#kjCtx button.drop{background:rgba(30,90,50,.8);border-color:#7dff9a}',
+      '#kjCtx button.hidden{display:none}',
+      '@media (orientation: landscape) and (max-height: 500px){#kjBtns{top:calc(8px + env(safe-area-inset-top));right:calc(376px + env(safe-area-inset-right))}#kjBtns button{width:34px;height:34px;font-size:15px}#kjPops{right:calc(220px + env(safe-area-inset-right))}}',
+      '.kjGlitch{animation:kjGl .18s steps(2) infinite}',
+      '@keyframes kjGl{0%{transform:translate(1px,0);filter:hue-rotate(40deg)}50%{transform:translate(-2px,1px);filter:none;opacity:.7}100%{transform:translate(0,-1px)}}',
+      'body.kj-reflex #canvas{filter:saturate(.3) contrast(1.2) brightness(.92)}',
+      '#kjReflex{position:fixed;inset:0;z-index:9;pointer-events:none;opacity:0;transition:opacity .2s;background:radial-gradient(ellipse at center,transparent 45%,rgba(120,0,0,.45) 100%)}',
+      'body.kj-reflex #kjReflex{opacity:1}',
+      '#kjReflex span{position:absolute;left:50%;top:30%;transform:translateX(-50%);font:900 22px/1 ui-monospace,monospace;letter-spacing:.5em;color:#ff5a48;text-shadow:0 0 16px #f00}',
+      '#kjShout{position:fixed;inset:0;z-index:30;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0}',
+      '#kjShout.on{opacity:1}',
+      '#kjShout .w{font:900 clamp(34px,8vw,92px)/1 Impact,"Arial Black",sans-serif;color:#fff;text-shadow:0 0 30px #f00,4px 4px 0 #700;letter-spacing:.04em;opacity:0;transform:scale(1.4)}',
+      '#kjShout .w.on{opacity:1;transform:none;transition:all .12s ease-out;animation:kjShake .1s steps(2) infinite}',
+      '#kjShout .s{margin-top:16px;font:600 14px/1 ui-monospace,monospace;color:#ffb3aa;letter-spacing:.3em}',
+      '@keyframes kjShake{50%{transform:translate(3px,-2px)}}',
+      '#kjCred{position:fixed;inset:0;z-index:15;pointer-events:none}',
+      '#kjCred .lb{position:absolute;left:0;right:0;height:11vh;background:#000;transition:transform 1.1s cubic-bezier(.2,.8,.2,1)}',
+      '#kjCred .lb.t{top:0;transform:translateY(-100%)}#kjCred .lb.b{bottom:0;transform:translateY(100%)}',
+      '#kjCred.on .lb{transform:none}',
+      '#kjCred .c{position:absolute;left:0;right:0;bottom:calc(11vh + 26px);text-align:center;color:#f2efe6;opacity:0;transition:opacity .7s}',
+      '#kjCred .c.on{opacity:1}',
+      '#kjCred .c small{display:block;font:500 11px/1 ui-monospace,monospace;letter-spacing:.45em;color:#bdb6a4;margin-bottom:10px}',
+      '#kjCred .c big{display:block;font:700 clamp(20px,3.4vw,38px)/1.1 Georgia,"Times New Roman",serif;letter-spacing:.14em}',
+      '#kjSplat{position:fixed;inset:0;z-index:8;pointer-events:none;opacity:0;transition:opacity 1.6s;background:radial-gradient(circle at 46% 42%,rgba(250,250,240,.85) 0 4%,rgba(120,20,10,.7) 5% 9%,transparent 14%),radial-gradient(circle at 55% 47%,rgba(240,240,230,.6) 0 2%,transparent 5%)}',
+      '#kjInput2{position:fixed;inset:0;z-index:70;background:#000;display:none;color:#35ff6a;font:700 28px/1 ui-monospace,monospace;padding:40px}',
+      '#kjInput2.on{display:block}',
+      'body.kj-photo > *:not(#canvas):not(#kjPhoto):not(#kjFlash){visibility:hidden !important}',
+      '#kjPhoto{position:fixed;left:0;right:0;bottom:0;z-index:50;display:none;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.75));color:#f2efe6;font:600 12px/1.4 ui-monospace,Menlo,monospace;letter-spacing:.06em;text-align:center}',
+      'body.kj-photo #kjPhoto{display:block}',
+      '#kjPhoto b{color:#ffd23b}',
+      '#kjPhoto .row{display:flex;gap:8px;justify-content:center;margin-top:8px;flex-wrap:wrap}',
+      '#kjPhoto button{font:800 12px/1 ui-monospace,monospace;letter-spacing:.1em;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.35);border-radius:10px;padding:10px 14px;cursor:pointer}',
+      '#kjPhoto button.shoot{background:#e10600;border-color:#ff6a60}',
+      '#kjFlash{position:fixed;inset:0;z-index:60;background:#fff;opacity:0;pointer-events:none;transition:opacity .35s}',
+      '#kjPulse canvas{width:100%;height:14px;display:block;margin-top:2px}',
+      'body.kj-heli #gGauge, body.kj-heli #throttleGauge, body.kj-car #gGauge{display:none}',
+      '#kjWearGauge .track i{display:block;height:100%;border-radius:2px;background:#4fe07a}',
+      '.ringStats .likes{color:#7dff9a}'
+    ].join('\n');
+    document.head.appendChild(kjCss);
+
+    function kjEl(tag, attrs, parent, html) {
+      var e = document.createElement(tag);
+      Object.keys(attrs || {}).forEach(function(k) { if (k === 'class') e.className = attrs[k]; else e.setAttribute(k, attrs[k]); });
+      if (html !== undefined) e.innerHTML = html;
+      (parent || document.body).appendChild(e);
+      return e;
+    }
+    var kjTop = kjEl('div', { id: 'kjTop' });
+    var kjWalkEl = kjEl('div', { id: 'kjWalk', class: 'kjPill hidden' }, kjTop, '<span class="reel"></span><span id="kjWalkTxt">TAPES</span><button id="kjWalkNext" title="Next tape (Y)">⏭</button><button id="kjWalkStop" title="Stop">⏹</button>');
+    var kjAlertEl = kjEl('div', { id: 'kjAlert', class: 'kjPill hidden' }, kjTop);
+    var kjRingEl = kjEl('div', { id: 'kjRing', class: 'kjPill hidden' }, kjTop);
+    var kjOrderEl = kjEl('div', { id: 'kjOrder', class: 'kjPill hidden' }, kjTop);
+    var kjPopsEl = kjEl('div', { id: 'kjPops' });
+    var kjBtns = kjEl('div', { id: 'kjBtns', class: 'hidden' });
+    var kjCodecBtn = kjEl('button', { title: 'Codec (I)', 'aria-label': 'Codec radio' }, kjBtns, '📻');
+    var kjPhotoBtn = kjEl('button', { title: 'Photo mode (O)', 'aria-label': 'Photo mode' }, kjBtns, '📷');
+    var kjCtx = kjEl('div', { id: 'kjCtx' });
+    var kjBoxBtn = kjEl('button', { class: 'hidden' }, kjCtx, '📦 BOX');
+    var kjDropBtn = kjEl('button', { class: 'drop hidden' }, kjCtx, '🪂 DROP');
+    var kjReflexEl = kjEl('div', { id: 'kjReflex' }, null, '<span>REFLEX</span>');
+    var kjShoutEl = kjEl('div', { id: 'kjShout' }, null, '<div class="w"></div><div class="s"></div>');
+    var kjCredEl = kjEl('div', { id: 'kjCred' }, null, '<div class="lb t"></div><div class="lb b"></div><div class="c"></div>');
+    var kjSplatEl = kjEl('div', { id: 'kjSplat' });
+    var kjInput2El = kjEl('div', { id: 'kjInput2' }, null, 'INPUT 2');
+    var kjFlashEl = kjEl('div', { id: 'kjFlash' });
+    var kjPhotoEl = kjEl('div', { id: 'kjPhoto' });
+    // HUD card additions: airframe condition, pulse, likes
+    (function() {
+      var fuelG = document.getElementById('fuelGauge'), gG = document.getElementById('gGauge');
+      var wear = document.createElement('div'); wear.className = 'gauge'; wear.id = 'kjWearGauge';
+      wear.innerHTML = '<div class="row1"><span class="label">AIRFRAME <span id="kjWearTag" style="color:var(--red)"></span></span><span class="value"><span id="kjWearVal">100</span><span class="unit">%</span></span></div><div class="track"><i id="kjWearFill" style="width:100%"></i></div>';
+      if (fuelG && fuelG.parentNode) fuelG.parentNode.insertBefore(wear, fuelG.nextSibling);
+      var pulse = document.createElement('div'); pulse.className = 'gauge'; pulse.id = 'kjPulse';
+      pulse.innerHTML = '<div class="row1"><span class="label">PULSE</span><span class="value"><span id="kjBpmVal">72</span><span class="unit">bpm</span></span></div><canvas id="kjEcg" width="300" height="44"></canvas>';
+      if (gG && gG.parentNode) gG.parentNode.insertBefore(pulse, gG.nextSibling);
+      var rs = document.querySelector('.ringStats');
+      if (rs) { var l = document.createElement('span'); l.className = 'likes'; l.innerHTML = '👍 <b id="kjLikeVal">0</b>'; rs.appendChild(l); }
+    })();
+    var kjWearValEl = document.getElementById('kjWearVal'), kjWearFillEl = document.getElementById('kjWearFill'), kjWearTagEl = document.getElementById('kjWearTag');
+    var kjBpmValEl = document.getElementById('kjBpmVal'), kjEcgCv = document.getElementById('kjEcg'), kjLikeValEl = document.getElementById('kjLikeVal');
+    var kjEcgCtx = kjEcgCv ? kjEcgCv.getContext('2d') : null;
+
+    // ---------- LIKES ----------
+    function kjLike(n, why) {
+      if (!kj.stats || n <= 0) return;
+      kj.stats.likes += n;
+      if (kjLikeValEl) kjLikeValEl.textContent = kj.stats.likes;
+      var p = kjEl('div', { class: 'kjPop' }, kjPopsEl, '<em>+' + n + ' 👍</em>' + why);
+      setTimeout(function() { if (p.parentNode) p.parentNode.removeChild(p); }, 2300);
+      while (kjPopsEl.children.length > 4) kjPopsEl.removeChild(kjPopsEl.firstChild);
+      kjSfx('like');
+    }
+
+    // ---------- tiny synth for UI sounds ----------
+    function kjSfx(kind) {
+      if (!audioCtx || !soundEnabled) return;
+      var t = audioCtx.currentTime;
+      function tone(type, f0, f1, dur, vol, at) {
+        var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.type = type; o.frequency.setValueAtTime(f0, t + (at || 0));
+        if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + (at || 0) + dur);
+        g.gain.setValueAtTime(0.0001, t + (at || 0)); g.gain.exponentialRampToValueAtTime(vol, t + (at || 0) + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + (at || 0) + dur);
+        o.connect(g).connect(audioCtx.destination); o.start(t + (at || 0)); o.stop(t + (at || 0) + dur + 0.05);
+      }
+      if (kind === 'like') { tone('triangle', 880, 0, 0.08, 0.05); tone('triangle', 1320, 0, 0.12, 0.05, 0.07); }
+      else if (kind === 'alert') { tone('square', 1180, 0, 0.1, 0.09); tone('square', 1580, 0, 0.32, 0.09, 0.1); }
+      else if (kind === 'clear') { tone('sine', 660, 0, 0.15, 0.06); tone('sine', 520, 0, 0.3, 0.06, 0.14); }
+      else if (kind === 'ring') { tone('square', 1400, 0, 0.07, 0.035); tone('square', 1760, 0, 0.07, 0.035, 0.09); tone('square', 1400, 0, 0.07, 0.035, 0.18); }
+      else if (kind === 'codecOpen') { tone('sine', 400, 1600, 0.25, 0.05); }
+      else if (kind === 'codecClose') { tone('sine', 1600, 300, 0.2, 0.04); }
+      else if (kind === 'blip') { tone('square', 1900 + Math.random() * 300, 0, 0.018, 0.012); }
+      else if (kind === 'tune') { tone('sawtooth', 300 + Math.random() * 900, 0, 0.05, 0.02); }
+      else if (kind === 'reflex') { tone('sawtooth', 200, 60, 0.9, 0.08); }
+      else if (kind === 'thump') { tone('sine', 110, 40, 0.35, 0.3); }
+      else if (kind === 'shutter') { tone('square', 2400, 800, 0.05, 0.05); tone('square', 1800, 600, 0.06, 0.04, 0.07); }
+      else if (kind === 'shout') { tone('square', 520, 180, 0.5, 0.07); tone('sawtooth', 390, 120, 0.9, 0.06, 0.35); }
+      else if (kind === 'beat') { tone('sine', 62, 40, 0.12, 0.22); tone('sine', 55, 36, 0.12, 0.16, 0.18); }
+      else if (kind === 'pickup') { tone('triangle', 523, 0, 0.1, 0.06); tone('triangle', 659, 0, 0.1, 0.06, 0.1); tone('triangle', 784, 0, 0.25, 0.06, 0.2); }
+    }
+
+    /* ---------- CODEC ---------- */
+    kjCss.textContent += [
+      '#kjCodec{position:fixed;inset:0;z-index:55;display:none;align-items:center;justify-content:center;background:rgba(0,6,2,.72)}',
+      '#kjCodec.on{display:flex}',
+      '#kjCodec .fr{position:relative;width:min(760px,96vw);padding:14px 16px;border:2px solid #3dbb66;border-radius:10px;background:#041109;color:#9dffb8;font:600 13px/1.45 ui-monospace,Menlo,Consolas,monospace;box-shadow:0 0 40px rgba(60,255,120,.18),inset 0 0 60px rgba(60,255,120,.06)}',
+      '#kjCodec .fr::after{content:"";position:absolute;inset:0;border-radius:8px;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}',
+      '#kjCodec .hd{display:flex;justify-content:space-between;font-size:11px;letter-spacing:.3em;color:#5fd184;margin-bottom:10px}',
+      '#kjCodec .mn{display:flex;align-items:stretch;justify-content:space-between;gap:12px}',
+      '#kjCodec canvas.pt{width:clamp(96px,20vw,160px);height:auto;aspect-ratio:4/5;border:2px solid #3dbb66;border-radius:4px;background:#06170c}',
+      '#kjCodec .nm{text-align:center;font-size:11px;letter-spacing:.2em;margin-top:4px}',
+      '#kjCodec .md{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-width:0}',
+      '#kjCodec .fq{font:700 clamp(26px,6vw,46px)/1 ui-monospace,Menlo,monospace;letter-spacing:.06em;color:#b8ffcb;text-shadow:0 0 14px rgba(120,255,160,.6)}',
+      '#kjCodec .ptt{font-size:10px;letter-spacing:.4em;color:#5fd184}',
+      '#kjCodec .mem{font-size:12px;letter-spacing:.3em;color:#d6ffe0}',
+      '#kjCodec canvas.bars{width:150px;height:26px}',
+      '#kjCodec .tx{margin-top:12px;min-height:82px;padding:10px 12px;border:1px solid #2a8a4a;border-radius:6px;background:rgba(0,30,12,.6);white-space:pre-wrap;cursor:pointer}',
+      '#kjCodec .tx b{color:#e9fff0;letter-spacing:.12em;margin-right:6px}',
+      '#kjCodec .ft{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:10px;font-size:10px;letter-spacing:.14em;color:#5fd184}',
+      '#kjCodec button{all:unset;cursor:pointer;font:800 12px/1 ui-monospace,monospace;letter-spacing:.14em;color:#041109;background:#7dff9a;border-radius:6px;padding:9px 14px}',
+      '#kjCodec button.gh{background:transparent;color:#7dff9a;border:1px solid #3dbb66}',
+      '#kjCodec .arr{display:flex;gap:10px}'
+    ].join('\n');
+    var kjCodecEl = kjEl('div', { id: 'kjCodec' }, null,
+      '<div class="fr"><div class="hd"><span>CODEC</span><span id="kjcStatus">STANDBY</span></div>' +
+      '<div class="mn"><div><canvas class="pt" id="kjcYou" width="160" height="200"></canvas><div class="nm" id="kjcYouNm">YOU</div></div>' +
+      '<div class="md"><div class="ptt">PTT · TUNE</div><div class="fq" id="kjcFq">140.15</div><canvas class="bars" id="kjcBars" width="150" height="26"></canvas>' +
+      '<div class="mem" id="kjcMem">HART</div><div class="arr"><button class="gh" id="kjcPrev">◀</button><button class="gh" id="kjcNext">▶</button></div></div>' +
+      '<div><canvas class="pt" id="kjcThem" width="160" height="200"></canvas><div class="nm" id="kjcThemNm">HART</div></div></div>' +
+      '<div class="tx" id="kjcTx"></div>' +
+      '<div class="ft"><span id="kjcHelp">◀ ▶ TUNE · ENTER CALL · ESC CLOSE</span><span><button id="kjcCall">CALL</button> <button class="gh" id="kjcClose">CLOSE</button></span></div></div>');
+    var kjcYou = document.getElementById('kjcYou').getContext('2d'), kjcThem = document.getElementById('kjcThem').getContext('2d');
+    var kjcBars = document.getElementById('kjcBars').getContext('2d');
+    var kjcTx = document.getElementById('kjcTx'), kjcFq = document.getElementById('kjcFq'), kjcMem = document.getElementById('kjcMem');
+    var kjcThemNm = document.getElementById('kjcThemNm'), kjcYouNm = document.getElementById('kjcYouNm'), kjcStatus = document.getElementById('kjcStatus');
+    var KJ_CONTACTS = [
+      { id: 'hart', name: 'HART', full: 'COL. R. HART', freq: '140.15' },
+      { id: 'wrench', name: 'WRENCH', full: 'CREW CHIEF "WRENCH"', freq: '141.12' },
+      { id: 'luna', name: 'LUNA', full: 'LUNA · WX / NAV', freq: '142.52' },
+      { id: 'archivist', name: '???', full: 'THE ARCHIVIST', freq: '000.00', hidden: true }
+    ];
+    var kjc = { idx: 0, convo: null, page: 0, shown: 0, typing: false, talker: null, t: 0, drawT: 0, ring: null, ringT: 0, ringBeep: 0 };
+
+    // ---- procedural portraits: green CRT line art ----
+    function kjPortrait(c, who, talking, t, hot) {
+      var W = 160, H = 200, L = '#9dffb8', F = '#123d22', D = '#062010';
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      var bg = c.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#04130a'); bg.addColorStop(1, '#0c2c17');
+      c.fillStyle = bg; c.fillRect(0, 0, W, H);
+      c.lineWidth = 2.2; c.strokeStyle = L; c.lineJoin = 'round'; c.lineCap = 'round';
+      if (!who) { c.fillStyle = '#1f6b3a'; c.font = '700 14px monospace'; c.textAlign = 'center'; c.fillText('NO SIGNAL', W / 2, H / 2); kjScan(c, W, H, t); return; }
+      var mouthOpen = talking && (Math.floor(t * 11) % 2 === 0);
+      var blink = (t % 3.7) < 0.13;
+      function path(pts, close, fill) { c.beginPath(); c.moveTo(pts[0], pts[1]); for (var i = 2; i < pts.length; i += 2) c.lineTo(pts[i], pts[i + 1]); if (close) c.closePath(); if (fill) { c.fillStyle = fill; c.fill(); } c.stroke(); }
+      function ell(x, y, rx, ry, fill) { c.beginPath(); c.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); if (fill) { c.fillStyle = fill; c.fill(); } c.stroke(); }
+      // shoulders + neck
+      c.beginPath(); c.moveTo(6, H); c.quadraticCurveTo(14, 152, 56, 144); c.lineTo(104, 144); c.quadraticCurveTo(146, 152, 154, H); c.closePath(); c.fillStyle = F; c.fill(); c.stroke();
+      path([66, 124, 64, 146], false); path([94, 124, 96, 146], false);
+      if (who === 'archivist') {
+        // hood, gas mask with glowing lenses and a filter canister
+        c.beginPath(); c.moveTo(34, 150); c.quadraticCurveTo(22, 40, 80, 30); c.quadraticCurveTo(138, 40, 126, 150); c.closePath(); c.fillStyle = '#061a0d'; c.fill(); c.stroke();
+        ell(80, 92, 30, 38, F);
+        var glow = talking ? 0.55 + 0.45 * Math.abs(Math.sin(t * 9)) : 0.35;
+        [[67, 84], [93, 84]].forEach(function(p) { c.beginPath(); c.arc(p[0], p[1], 10, 0, Math.PI * 2); c.fillStyle = 'rgba(160,255,190,' + glow + ')'; c.fill(); c.stroke(); });
+        c.beginPath(); c.arc(80, 116, 12, 0, Math.PI * 2); c.fillStyle = D; c.fill(); c.stroke();
+        for (var g = -6; g <= 6; g += 4) path([74, 116 + g, 86, 116 + g], false);
+        path([52, 96, 36, 110], false); path([108, 96, 124, 110], false);
+        kjScan(c, W, H, t, 0.5); return;
+      }
+      // head
+      ell(80, 90, 30, 38, F);
+      // ears
+      ell(49, 92, 4, 8); ell(111, 92, 4, 8);
+      // eyes, brows, nose, mouth
+      var brow = who === 'hart' ? [60, 74, 74, 78, 86, 78, 100, 74] : who === 'wrench' ? [58, 77, 76, 75, 84, 75, 102, 77] : [60, 76, 74, 73, 86, 73, 100, 76];
+      if (who !== 'you') {
+        c.lineWidth = who === 'wrench' ? 3.4 : 2.2;
+        path([brow[0], brow[1], brow[2], brow[3]], false); path([brow[4], brow[5], brow[6], brow[7]], false);
+        c.lineWidth = 2.2;
+        if (blink) { path([62, 85, 74, 85], false); path([86, 85, 98, 85], false); }
+        else { ell(68, 85, 6, 2.8); ell(92, 85, 6, 2.8); c.fillStyle = L; c.fillRect(66.5, 83.5, 3, 3); c.fillRect(90.5, 83.5, 3, 3); }
+      }
+      path([80, 88, 76, 102, 83, 103], false);
+      if (mouthOpen) ell(80, 113, 7, 4, D);
+      else if (who === 'luna') { c.beginPath(); c.moveTo(71, 111); c.quadraticCurveTo(80, 118, 89, 111); c.stroke(); }
+      else if (who === 'hart') path([71, 113, 89, 112], false);
+      else { c.beginPath(); c.moveTo(72, 113); c.quadraticCurveTo(80, 115, 88, 113); c.stroke(); }
+      if (who === 'hart') {
+        // swept-back hair with a bun, headset with boom mic, rank on the collar
+        c.beginPath(); c.moveTo(50, 90); c.quadraticCurveTo(46, 50, 80, 50); c.quadraticCurveTo(114, 50, 110, 90); c.quadraticCurveTo(104, 64, 80, 62); c.quadraticCurveTo(58, 62, 50, 90); c.fillStyle = '#0a2c16'; c.fill(); c.stroke();
+        ell(80, 46, 11, 8, '#0a2c16');
+        c.beginPath(); c.arc(80, 88, 36, Math.PI * 1.05, Math.PI * 1.95); c.stroke();
+        c.fillStyle = F; c.fillRect(40, 82, 10, 18); c.strokeRect(40, 82, 10, 18);
+        c.beginPath(); c.moveTo(46, 100); c.quadraticCurveTo(52, 118, 68, 116); c.stroke();
+        c.fillStyle = L; c.beginPath(); c.moveTo(118, 160); c.lineTo(122, 168); c.lineTo(114, 164); c.lineTo(124, 164); c.lineTo(116, 168); c.closePath(); c.fill();
+      } else if (who === 'wrench') {
+        // cap with brim, full beard, pencil behind the ear
+        c.beginPath(); c.moveTo(48, 78); c.quadraticCurveTo(50, 44, 80, 44); c.quadraticCurveTo(110, 44, 112, 78); c.closePath(); c.fillStyle = '#0a2c16'; c.fill(); c.stroke();
+        c.beginPath(); c.ellipse(80, 78, 38, 6, 0, 0, Math.PI * 2); c.fillStyle = '#0d3a1c'; c.fill(); c.stroke();
+        c.beginPath(); c.moveTo(52, 98); c.quadraticCurveTo(54, 130, 80, 132); c.quadraticCurveTo(106, 130, 108, 98); c.quadraticCurveTo(96, 108, 80, 106); c.quadraticCurveTo(64, 108, 52, 98); c.fillStyle = '#0a2c16'; c.fill(); c.stroke();
+        if (mouthOpen) ell(80, 113, 6, 3.5, D);
+        path([108, 70, 124, 58], false);
+      } else if (who === 'luna') {
+        // long hair framing the face, fringe, round glasses
+        c.beginPath(); c.moveTo(46, 150); c.quadraticCurveTo(36, 60, 80, 48); c.quadraticCurveTo(124, 60, 114, 150); c.lineTo(104, 150); c.quadraticCurveTo(112, 96, 104, 72); c.quadraticCurveTo(84, 78, 62, 66); c.quadraticCurveTo(50, 96, 56, 150); c.closePath(); c.fillStyle = '#0a2c16'; c.fill(); c.stroke();
+        c.beginPath(); c.arc(68, 85, 9, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.arc(92, 85, 9, 0, Math.PI * 2); c.stroke(); path([77, 85, 83, 85], false);
+      } else if (who === 'you') {
+        // flight helmet, dark visor with a sky reflection, boom mic
+        c.beginPath(); c.moveTo(44, 108); c.quadraticCurveTo(38, 44, 80, 42); c.quadraticCurveTo(122, 44, 116, 108); c.lineTo(108, 108); c.quadraticCurveTo(110, 66, 80, 64); c.quadraticCurveTo(50, 66, 52, 108); c.closePath(); c.fillStyle = '#0d3a1c'; c.fill(); c.stroke();
+        c.beginPath(); c.moveTo(50, 74); c.quadraticCurveTo(80, 66, 110, 74); c.lineTo(108, 96); c.quadraticCurveTo(80, 102, 52, 96); c.closePath(); c.fillStyle = '#031008'; c.fill(); c.stroke();
+        c.strokeStyle = 'rgba(160,255,190,.55)'; path([60, 80, 74, 76], false); path([64, 88, 70, 86], false); c.strokeStyle = L;
+        path([112, 100, 104, 118, 90, 118], false);
+        path([80, 42, 80, 58], false);
+      }
+      kjScan(c, W, H, t, hot ? 0.3 : 0.12);
+    }
+    function kjScan(c, W, H, t, noise) {
+      c.fillStyle = 'rgba(0,0,0,0.28)';
+      for (var y = (Math.floor(t * 30) % 3); y < H; y += 3) c.fillRect(0, y, W, 1);
+      var n = Math.floor((noise || 0.12) * 120);
+      c.fillStyle = 'rgba(160,255,190,0.35)';
+      for (var i = 0; i < n; i++) c.fillRect(Math.random() * W, Math.random() * H, 1.5, 1.5);
+      var v = c.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.75);
+      v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.55)');
+      c.fillStyle = v; c.fillRect(0, 0, W, H);
+    }
+    function kjDrawBars(level, t) {
+      var c = kjcBars; c.clearRect(0, 0, 150, 26);
+      for (var i = 0; i < 12; i++) {
+        var on = i < level * 12 * (0.75 + 0.25 * Math.sin(t * 13 + i));
+        c.fillStyle = on ? '#9dffb8' : '#123d22';
+        c.fillRect(4 + i * 12, 22 - i * 1.6, 8, 4 + i * 1.6);
+      }
+    }
+
+    // ---- conversations: [speaker, text]; 'T' = the contact, 'Y' = you. {tokens} are filled live ----
+    function kjVars() {
+      var s = kj.stats, o = kjOrder;
+      var cond = kjWearGet(), tapesN = s.tapes.length;
+      var nextTape = KJ_TAPES.filter(function(tp) { return s.tapes.indexOf(tp.id) < 0; })[0];
+      return {
+        cs: kjCallsign(), veh: kjVehName(), crashes: s.crashes, ejects: s.ejects, landings: s.landings,
+        flight: kjFmtDur(s.flight), fav: kjFavVehicle(), wear: Math.round(cond * 100), tapes: tapesN, tapesTotal: KJ_TAPES.length,
+        likes: s.likes, coins: Math.round(coins), rt: kjRealTime(), time: typeof formatClock === 'function' ? formatClock(dayTimeOfDay) : '',
+        away: kjFmtDur(kj.awayMs / 1000), battery: kj.battery === null ? '?' : Math.round(kj.battery), sessions: s.sessions, missed: s.missed,
+        deliveries: s.deliveries, cargo: o ? o.cargo.name : 'nothing', dest: o ? o.dest.name : 'nowhere', cond: o ? Math.round(o.cond * 100) : 100,
+        weather: kjWeatherName(), codec: s.codec, hint: nextTape ? nextTape.hint : 'nowhere — you found them all', boxes: s.boxes, alerts: s.alerts, photos: s.photos
+      };
+    }
+    function kjFmt(str) { var v = kjVars(); return str.replace(/\{(\w+)\}/g, function(m, k) { return v[k] !== undefined ? v[k] : m; }); }
+    function kjNight() { return typeof cityNightFactor === 'function' && cityNightFactor() > 0.5; }
+    function kjSamClose() { return SAM_BASE && Math.hypot(position.x - SAM_BASE.x, position.z - SAM_BASE.z) < 2600; }
+    var KJ_TALK = {
+      hart: [
+        { id: 'h_intro', pri: 100, once: true, when: function() { return true; }, p: [
+          ['T', '{cs}, this is Colonel Hart. Can you hear me?'], ['Y', 'Loud and clear, Colonel. Where am I?'],
+          ['T', 'An island. A runway, a city, a lighthouse, a carrier offshore — and one very bad-tempered SAM site. All of it is yours.'],
+          ['T', 'Your mission is simple: fly. Deliver what needs delivering. Find what\'s been hidden. Come home in one piece.'],
+          ['Y', 'That\'s it?'], ['T', 'That\'s never it, {cs}. You\'ll see. I\'m on 140.15 — press I, or the radio button, whenever you need me.'] ] },
+        { id: 'h_alert', pri: 95, when: function() { return kj.alertPhase === 'alert'; }, p: [
+          ['T', 'They\'ve got you on radar! Break the lock — drop below thirty metres, dump flares with G, or get out of their range. MOVE!'] ] },
+        { id: 'h_crash', pri: 80, when: function() { return elapsedSeconds - kj.recentCrashAt < 90; }, p: [
+          ['T', '{cs}! {cs}, respond!'], ['Y', '...I\'m here. The aircraft isn\'t.'],
+          ['T', 'That makes {crashes} on the record. The ground is patient, {cs}. It always wins in the end. Don\'t make it easy.'] ] },
+        { id: 'h_fuel', pri: 70, when: function() { return fuel < 20 && !isCarMode; }, p: [
+          ['T', 'Your fuel is low. Put it down at the airport, the carrier or the gas station and sit still — they\'ll top you up.'] ] },
+        { id: 'h_order', pri: 60, when: function() { return !!kjOrder; }, p: [
+          ['T', 'You\'re carrying {cargo} for {dest}. It\'s at {cond} percent. The client will know exactly how you flew — be gentle.'] ] },
+        { id: 'h_deliver', pri: 55, when: function() { return !kjOrder && kj.stats.deliveries < 3; }, p: [
+          ['T', 'People out there need things. Medicine. Parts. A pizza that is somehow still warm.'],
+          ['T', 'There\'s a cargo pad beside the runway where you spawned — the blue light. Stop on it and you\'ll get an order.'],
+          ['Y', 'I\'m a pilot, not a courier.'], ['T', 'Out here those are the same job. Connect people, {cs}. That\'s what flying is for.'] ] },
+        { id: 'h_sam', pri: 50, when: kjSamClose, p: [
+          ['T', 'You\'re close to the SAM site. Their search radar sweeps every three seconds, and when it finds you it\'s an ALERT.'],
+          ['T', 'Hug the terrain — below thirty metres you\'re lost in ground clutter. Flares on G. And if you\'re parked... Wrench tells me you have a box.'] ] },
+        { id: 'h_heli', pri: 45, when: function() { return isHelicopterMode; }, p: [
+          ['T', 'A helicopter doesn\'t fly, {cs}. It beats the air into submission.'],
+          ['Y', 'And if the engine quits?'], ['T', 'Lower the collective, keep your airspeed, flare at the bottom. Autorotation — every rotor pilot\'s final exam.'] ] },
+        { id: 'h_storm', pri: 45, when: function() { return stormActive; }, p: [
+          ['T', 'You\'re flying through a thunderstorm. Lightning loves tall metal things, and up there that\'s you. Stay low or get out.'] ] },
+        { id: 'h_night', pri: 30, when: kjNight, p: [
+          ['T', 'It\'s dark out there. Night flying is instruments and faith. Mostly faith.'] ] },
+        { id: 'h_idle', pri: 20, when: function() { return false; }, p: [
+          ['T', '{cs}? {cs}!? ...Oh. You\'re still there. Don\'t scare me like that.'] ] },
+        { id: 'h_g1', pri: 5, p: [['T', 'Altitude is life insurance, {cs}. Airspeed is the premium.']] },
+        { id: 'h_g2', pri: 5, p: [['T', 'The sky doesn\'t care who you are. That\'s what I like about it.']] },
+        { id: 'h_g3', pri: 5, p: [['T', 'You\'ve logged {flight} in the air. Some people call that a hobby.'], ['Y', 'What do you call it?'], ['T', 'A condition.']] },
+        { id: 'h_g4', pri: 5, p: [['T', 'Somewhere down there someone is waiting — for a delivery, a rescue, or just a light moving across the sky. Be that light.']] },
+        { id: 'h_g5', pri: 5, p: [['T', '{likes} likes, {cs}. I don\'t know who\'s giving them to you. I just know you\'ve earned them.']] }
+      ],
+      wrench: [
+        { id: 'w_intro', pri: 100, once: true, when: function() { return true; }, p: [
+          ['T', 'Wrench here, ground crew. Everything you fly, I fix. Everything you break, I also fix — I just complain about it.'],
+          ['T', 'Airframes wear out now. Hard landings, pulling too many G, flying through rain, birds, lightning — it all adds up and it stays.'],
+          ['T', 'Park on the airport pavement, the carrier or the gas station and I\'ll patch you back up for free. Watch the AIRFRAME gauge.'] ] },
+        { id: 'w_box', pri: 90, once: true, when: function() { return wasGrounded; }, p: [
+          ['T', 'Listen. I put a cardboard box in every cockpit. Don\'t ask why.'], ['Y', 'What does it do?'],
+          ['T', 'When you\'re stopped on the ground, press U. Radar operators are trained to look for aircraft. Nobody ever trained them to look for boxes.'] ] },
+        { id: 'w_bird', pri: 85, when: function() { return elapsedSeconds - kj.recentBirdAt < 60; }, p: [
+          ['T', 'That thud was a bird. Your airframe\'s scratched.'], ['Y', 'And the bird?'], ['T', '...It had a full life, probably.'] ] },
+        { id: 'w_bolt', pri: 85, when: function() { return elapsedSeconds - kj.recentBoltAt < 60; }, p: [
+          ['T', 'You just took a lightning strike. Instruments rebooted, skin\'s scorched.'], ['T', 'Congratulations. You\'re a Faraday cage with opinions.'] ] },
+        { id: 'w_bad', pri: 70, when: function() { return kjWearGet() < 0.6; }, p: [
+          ['T', 'Your {veh} is at {wear} percent. I can hear it creaking from here.'], ['T', 'Below a third, the instruments start lying and the airframe drags. At zero... well. Don\'t get to zero.'] ] },
+        { id: 'w_good', pri: 10, when: function() { return kjWearGet() >= 0.95; }, p: [['T', '{veh} at {wear} percent. Mint. Try to keep it that way.'], ['Y', 'I will.'], ['T', 'You won\'t.']] },
+        { id: 'w_jet', pri: 15, when: function() { return ['interceptor', 'voyager', 'rocket'].indexOf(selectedPlaneType) >= 0; }, p: [['T', 'Afterburner is Shift. It drinks fuel like it\'s the last night on Earth. Flaps on F if you want to land slow.']] },
+        { id: 'w_heli', pri: 15, when: function() { return isHelicopterMode; }, p: [['T', 'Give the rotor three seconds to spool before you pull. And don\'t sink straight down fast — you\'ll fall into your own downwash. Vortex ring. Ugly.'], ['T', 'Hover over a cargo crate and I\'ll hook it on the sling for you.']] },
+        { id: 'w_car', pri: 15, when: function() { return isCarMode; }, p: [['T', 'It\'s a car, {cs}. Four wheels, no wings. The box still fits over it, though. I checked.']] },
+        { id: 'w_drone', pri: 15, when: function() { return isDroneMode; }, p: [['T', 'The Reaper\'s sensor ball is V. Aim with the drag, fire with M. The autopilot flies while you look.']] },
+        { id: 'w_stealth', pri: 15, when: function() { return isStealthMode; }, p: [['T', 'The bomber shows up on radar about the size of a bird — their radar sees a third as far. Bombs on B, cargo on N.']] },
+        { id: 'w_sea', pri: 15, when: function() { return isSeaplaneMode; }, p: [['T', 'The Albatross lands on water. Wings level, gentle sink. The swell will rock you — let it.']] },
+        { id: 'w_g1', pri: 5, p: [['T', 'You\'ve used the box {boxes} times. I\'m not judging. I\'m... keeping count.']] },
+        { id: 'w_g2', pri: 5, p: [['T', 'Every rivet on that thing has a story. Most of them end with "and then {cs} landed it."']] }
+      ],
+      luna: [
+        { id: 'l_intro', pri: 100, once: true, when: function() { return true; }, p: [
+          ['T', 'Hi, {cs}! Luna — weather, navigation and, um... music.'], ['Y', 'Music?'],
+          ['T', 'I hid cassette tapes around the island. The lighthouse, the tower rooftop, the carrier deck, the gas station... one of them is way up in the sky.'],
+          ['T', 'Fly close and you\'ll grab them. Press Y to play what you\'ve found. Everything is better with a soundtrack.'] ] },
+        { id: 'l_tapes_all', pri: 90, when: function() { return kj.stats.tapes.length >= KJ_TAPES.length; }, p: [
+          ['T', 'You found every tape. All {tapesTotal}. I... honestly didn\'t think anyone would.'], ['T', 'Thank you for listening, {cs}.'] ] },
+        { id: 'l_late', pri: 80, when: function() { var h = new Date().getHours(); return h >= 0 && h < 5; }, p: [
+          ['T', 'It\'s {rt} where you actually are, isn\'t it?'], ['Y', '...How do you know that?'],
+          ['T', 'The island will still be here tomorrow. Get some sleep.'], ['Y', 'Five more minutes.'], ['T', 'That\'s what you said {sessions} sessions ago.'] ] },
+        { id: 'l_battery', pri: 75, when: function() { return kj.battery !== null && kj.battery < 25; }, p: [
+          ['T', 'Your device is down to {battery} percent. Even machines get tired, {cs}.'] ] },
+        { id: 'l_tapes', pri: 40, when: function() { return kj.stats.tapes.length < KJ_TAPES.length; }, p: [
+          ['T', 'You\'ve found {tapes} of {tapesTotal} tapes. There\'s one near {hint}... if you\'re brave.'] ] },
+        { id: 'l_wx', pri: 30, p: [
+          ['T', 'Conditions right now: {weather}. Island clock says {time}. Out where you are, it\'s {rt}.'] ] },
+        { id: 'l_g1', pri: 5, p: [['T', 'Did you know rain wears down your airframe now? Wrench calls it timefall. I call it weather.']] },
+        { id: 'l_g2', pri: 5, p: [['T', 'At night the lighthouse beam sweeps the whole bay. If you park under it, you can hear the ocean breathe.']] }
+      ],
+      archivist: [
+        { id: 'a_first', pri: 100, once: true, when: function() { return true; }, p: [
+          ['T', '...So. You are the one they call {cs}.'], ['Y', 'Who is this? How did you get on this frequency?'],
+          ['T', 'I am the Archivist. I read what you leave behind.'],
+          ['T', '{flight} in the air. {crashes} crashes. {ejects} ejections. {landings} landings. You favor the {fav}, don\'t you?'],
+          ['T', 'Don\'t worry. I won\'t tell anyone. ...I\'ll only remember.'] ] },
+        { id: 'a_away', pri: 90, when: function() { return kj.awayMs > 20000; }, p: [
+          ['T', 'You left. {away}. Where did you go?'], ['Y', '...'], ['T', 'No. Don\'t tell me. The island noticed. So did I.'] ] },
+        { id: 'a_ignored', pri: 60, when: function() { return kj.stats.missed > 0; }, p: [
+          ['T', 'You have ignored {missed} calls. Hart pretends it doesn\'t bother her.'] ] },
+        { id: 'a_touch', pri: 50, once: true, when: function() { return kj.touchUser; }, p: [
+          ['T', 'You fly with your fingers on glass. Every swipe leaves a trace... every panic, every hesitation. I can read them all.'] ] },
+        { id: 'a_crashes', pri: 45, when: function() { return kj.stats.crashes >= 10; }, p: [
+          ['T', '{crashes} crashes. You like the ground more than you admit.'] ] },
+        { id: 'a_input2', pri: 40, once: true, when: function() { return kj.stats.archivist >= 2; }, p: [
+          ['T', 'Now... watch closely. I will change the channel with my mind.'] ], after: function() { kjInput2(); } },
+        { id: 'a_g1', pri: 5, p: [['T', 'You opened the codec {codec} times. Lonely?']] },
+        { id: 'a_g2', pri: 5, p: [['T', '{likes} likes. Strangers approve of you. Does it help?']] }
+      ]
+    };
+    function kjPick(contact, forceId) {
+      var list = KJ_TALK[contact] || [], said = kj.stats.said;
+      if (forceId) { for (var i = 0; i < list.length; i++) if (list[i].id === forceId) return list[i]; }
+      var best = null, bestScore = -1;
+      list.forEach(function(e) {
+        if (e.once && said[e.id]) return;
+        if (e.when && !e.when()) return;
+        if (e.id === 'h_idle') return;
+        var recency = said[e.id] ? Math.min(1, (Date.now() - said[e.id]) / 600000) : 1;
+        var score = e.pri * (0.25 + 0.75 * recency) + Math.random() * 4;
+        if (score > bestScore) { bestScore = score; best = e; }
+      });
+      return best;
+    }
+    function kjCodecOpen(fromRing) {
+      if (!started || kj.photoOn) return;
+      kj.codecOpen = true; kj.paused = true;
+      Object.keys(keys).forEach(function(k) { keys[k] = false; });
+      kjCodecEl.classList.add('on');
+      kj.stats.codec++;
+      kjSfx('codecOpen');
+      kjcYouNm.textContent = kjCallsign();
+      kjc.convo = null; kjc.page = 0;
+      if (kjc.ring) {
+        var r = kjc.ring; kjc.ring = null; kjRingEl.classList.add('hidden'); kjCodecBtn.classList.remove('ring');
+        kjc.idx = KJ_CONTACTS.findIndex(function(c) { return c.id === r.who; });
+        kjCodecCall(r.id);
+      } else {
+        kjcStatus.textContent = 'STANDBY';
+        kjcTx.innerHTML = 'Select a frequency with ◀ ▶ and press CALL.';
+      }
+      kjCodecShowContact();
+    }
+    function kjCodecClose() {
+      kj.codecOpen = false; kj.paused = kj.photoOn;
+      kjCodecEl.classList.remove('on');
+      kjSfx('codecClose');
+      kjSave();
+    }
+    function kjVisibleContacts() { return KJ_CONTACTS.filter(function(c) { return !c.hidden || kj.stats.archivist > 0; }); }
+    function kjCodecShowContact() {
+      var c = KJ_CONTACTS[kjc.idx];
+      kjcFq.textContent = c.freq; kjcMem.textContent = c.full;
+      kjcThemNm.textContent = c.name;
+    }
+    function kjCodecTune(d) {
+      var vis = kjVisibleContacts(), cur = vis.indexOf(KJ_CONTACTS[kjc.idx]);
+      cur = (cur + d + vis.length) % vis.length;
+      kjc.idx = KJ_CONTACTS.indexOf(vis[cur]);
+      kjc.convo = null; kjcStatus.textContent = 'STANDBY';
+      kjcTx.innerHTML = 'Press CALL to contact ' + KJ_CONTACTS[kjc.idx].full + '.';
+      kjCodecShowContact(); kjSfx('tune');
+    }
+    function kjCodecCall(forceId) {
+      var c = KJ_CONTACTS[kjc.idx];
+      var e = kjPick(c.id, forceId);
+      if (!e) { kjcTx.textContent = '...no answer.'; return; }
+      kj.stats.said[e.id] = Date.now();
+      if (c.id === 'archivist') kj.stats.archivist++;
+      kjc.convo = e; kjc.page = 0; kjc.shown = 0; kjc.typing = true;
+      kjcStatus.textContent = 'CONNECTED · ' + c.freq;
+    }
+    function kjCodecAdvance() {
+      if (!kjc.convo) { kjCodecCall(); return; }
+      var pg = kjc.convo.p[kjc.page];
+      if (kjc.typing) { kjc.shown = 1e9; return; }
+      kjc.page++;
+      if (kjc.page >= kjc.convo.p.length) {
+        var after = kjc.convo.after; kjc.convo = null;
+        kjcStatus.textContent = 'STANDBY'; kjcTx.innerHTML = 'Transmission ended. CALL again, tune, or CLOSE.';
+        if (after) { kjCodecClose(); after(); }
+        return;
+      }
+      kjc.shown = 0; kjc.typing = true;
+    }
+    function kjCodecTick(rdt) {
+      kjc.t += rdt;
+      var talker = null;
+      if (kjc.convo) {
+        var pg = kjc.convo.p[kjc.page], txt = kjFmt(pg[1]);
+        var prev = Math.floor(kjc.shown);
+        if (kjc.typing) {
+          kjc.shown += rdt * 52;
+          if (Math.floor(kjc.shown) > prev && Math.floor(kjc.shown) % 2 === 0) kjSfx('blip');
+          if (kjc.shown >= txt.length) { kjc.shown = txt.length; kjc.typing = false; }
+        }
+        var who = pg[0] === 'Y' ? kjCallsign() : KJ_CONTACTS[kjc.idx].name;
+        kjcTx.innerHTML = '<b>' + who + ':</b>' + txt.slice(0, Math.floor(kjc.shown)).replace(/&/g, '&amp;').replace(/</g, '&lt;') + (kjc.typing ? '▌' : '  ▸');
+        talker = kjc.typing ? pg[0] : null;
+      }
+      kjc.drawT -= rdt;
+      if (kjc.drawT <= 0) {
+        kjc.drawT = 1 / 14;
+        var cid = KJ_CONTACTS[kjc.idx].id;
+        kjPortrait(kjcYou, 'you', talker === 'Y', kjc.t);
+        kjPortrait(kjcThem, kjc.convo || kjc.idx >= 0 ? cid : null, talker === 'T', kjc.t + 1.3, cid === 'archivist');
+        kjDrawBars(kjc.convo ? (talker ? 0.95 : 0.6) : 0.25, kjc.t);
+      }
+    }
+    // incoming calls ring (they don't force the codec open — flying comes first); unanswered ones are remembered
+    function kjRing(who, id) {
+      if (!started || kj.codecOpen) return;
+      if (kjc.ring && kjc.ring.pri >= 50 && id !== 'h_alert') return;
+      var e = kjPick(who, id);
+      if (!e || (e.once && kj.stats.said[e.id])) return;
+      var c = KJ_CONTACTS.find(function(x) { return x.id === who; });
+      kjc.ring = { who: who, id: e.id, pri: e.pri, t: 25 };
+      kjRingEl.textContent = '📡 INCOMING · ' + c.freq + ' ' + (c.hidden && !kj.stats.archivist ? '???' : c.name) + ' · PRESS I';
+      kjRingEl.classList.remove('hidden'); kjCodecBtn.classList.add('ring');
+      kjc.ringBeep = 0;
+    }
+    function kjRingTick(rdt) {
+      if (!kjc.ring) return;
+      kjc.ring.t -= rdt; kjc.ringBeep -= rdt;
+      if (kjc.ringBeep <= 0) { kjc.ringBeep = 1.3; kjSfx('ring'); }
+      if (kjc.ring.t <= 0) { kjc.ring = null; kj.stats.missed++; kjRingEl.classList.add('hidden'); kjCodecBtn.classList.remove('ring'); }
+    }
+    // the Archivist's parlour trick: a fake dead channel
+    function kjInput2() {
+      kj.stats.input2 = true; kj.input2T = 2.8; kj.paused = true;
+      kjInput2El.classList.add('on');
+    }
+    document.getElementById('kjcPrev').addEventListener('click', function() { kjCodecTune(-1); });
+    document.getElementById('kjcNext').addEventListener('click', function() { kjCodecTune(1); });
+    document.getElementById('kjcCall').addEventListener('click', function() { kjCodecAdvance(); });
+    document.getElementById('kjcClose').addEventListener('click', function() { kjCodecClose(); });
+    kjcTx.addEventListener('click', function() { kjCodecAdvance(); });
+    kjCodecBtn.addEventListener('click', function() { if (kj.codecOpen) kjCodecClose(); else kjCodecOpen(); });
+
+    /* ---------- ALERT PHASES + the "!" ---------- */
+    function kjMarkTex(ch, col) {
+      var cv = document.createElement('canvas'); cv.width = cv.height = 128;
+      var c = cv.getContext('2d');
+      c.font = '900 118px Impact, "Arial Black", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.lineWidth = 12; c.strokeStyle = '#fff'; c.strokeText(ch, 64, 70);
+      c.fillStyle = col; c.fillText(ch, 64, 70);
+      var t = new THREE.CanvasTexture(cv); t.encoding = THREE.sRGBEncoding; return t;
+    }
+    var kjMark = new THREE.Sprite(new THREE.SpriteMaterial({ map: kjMarkTex('!', '#ff1a0a'), depthTest: false, depthWrite: false, transparent: true, fog: false, toneMapped: false }));
+    kjMark.renderOrder = 998; kjMark.visible = false; scene.add(kjMark);
+    var kjMarkQ = kjMarkTex('?', '#ffb02a'), kjMarkE = kjMark.material.map, kjMarkT = 0;
+    function kjPopMark(q) {
+      kjMark.material.map = q ? kjMarkQ : kjMarkE; kjMark.material.needsUpdate = true;
+      kjMarkT = 1.1; kjMark.visible = true;
+    }
+    function kjSetAlert(phase, t) {
+      if (phase === 'alert' && kj.alertPhase !== 'alert') {
+        kjPopMark(false); kjSfx('alert'); kj.bpmSpike += 30; kj.stats.alerts++;
+        if (kj.stats.alerts === 1 || Math.random() < 0.25) kjRing('hart', 'h_alert');
+      }
+      if (!phase && kj.alertPhase === 'caution') { kjSfx('clear'); kjLike(2, 'EVADED'); }
+      kj.alertPhase = phase; kj.alertT = t;
+    }
+    function kjAlertTick(dt) {
+      var incoming = samMissiles.some(function(m) { return m.active && m.target === 'player'; });
+      var seen = started && !crashing && !ejecting && !kj.boxed && (samLock > 0.3 || incoming);
+      kj.alertDetected = seen;
+      if (seen) { if (kj.alertPhase !== 'alert') kjSetAlert('alert', 15); else kj.alertT = 15; }
+      else if (kj.alertPhase) {
+        kj.alertT -= dt;
+        if (kj.alertT <= 0) {
+          if (kj.alertPhase === 'alert') kjSetAlert('evasion', 20);
+          else if (kj.alertPhase === 'evasion') kjSetAlert('caution', 30);
+          else kjSetAlert('', 0);
+        }
+      }
+      if (kj.alertPhase) {
+        kjAlertEl.className = 'kjPill ' + kj.alertPhase;
+        kjAlertEl.innerHTML = kj.alertPhase.toUpperCase() + '<b>' + (seen ? '99.99' : kj.alertT.toFixed(2)) + '</b>';
+      } else kjAlertEl.className = 'kjPill hidden';
+      if (kjMarkT > 0) {
+        kjMarkT -= dt;
+        var k = 1 - kjMarkT / 1.1, pop = k < 0.15 ? k / 0.15 * 1.3 : 1.3 - Math.min(0.3, (k - 0.15) * 2);
+        var s = 2.2 * pop * Math.max(1, camera.position.distanceTo(position) / 18);
+        kjMark.scale.set(s, s, 1);
+        kjMark.position.copy(position).addScaledVector(camera.up, 1.6 + s * 0.45);
+        if (kjMarkT <= 0) kjMark.visible = false;
+      }
+    }
+
+    /* ---------- REFLEX: a missile about to hit slows time for a heartbeat ---------- */
+    var _kjR = new THREE.Vector3();
+    function kjReflexTick(dt) {
+      if (kj.reflexCd > 0) kj.reflexCd -= dt;
+      for (var i = 0; i < samMissiles.length; i++) {
+        var m = samMissiles[i];
+        if (!m.active || m.target !== 'player') continue;
+        _kjR.copy(position).sub(m.pos);
+        var d = _kjR.length(); if (d < 1) continue;
+        _kjR.multiplyScalar(1 / d);
+        var closing = m.vel.dot(_kjR) - velocityVec.dot(_kjR);
+        if (kj.watchedMissiles.indexOf(m) < 0) { kj.watchedMissiles.push(m); m.kjMin = 1e9; m.kjReflex = false; }
+        m.kjMin = Math.min(m.kjMin, d);
+        if (closing > 0 && d / closing < 1.5 && !m.kjReflex && kj.reflexCd <= 0 && !crashing) {
+          m.kjReflex = true; kj.reflexCd = 4; kj.reflexT = 1.3;
+          document.body.classList.add('kj-reflex'); kjSfx('reflex'); kj.bpmSpike += 35;
+        }
+      }
+      // a missile that came close and is gone while you're still flying: dodged
+      for (var j = kj.watchedMissiles.length - 1; j >= 0; j--) {
+        var w = kj.watchedMissiles[j];
+        if (w.active && w.target === 'player') continue;
+        if (w.kjMin < 90 && !crashing && !samEngineKilled) kjLike(3, 'DODGED');
+        kj.watchedMissiles.splice(j, 1);
+      }
+    }
+
+    /* ---------- PULSE: the pilot is a body too ---------- */
+    function kjHeartTick(dt) {
+      var stress = 0, agl = kjAgl();
+      var g = typeof gForceSmoothed === 'number' ? gForceSmoothed : 1;
+      stress += Math.max(0, g - 2.5) * 9;
+      if (kj.alertPhase === 'alert') stress += 28; else if (kj.alertPhase) stress += 12;
+      if (samMissiles.some(function(m) { return m.active && m.target === 'player'; })) stress += 42;
+      if (kjAirborne() && agl < 60 && speed > 40) stress += (60 - agl) / 60 * 28;
+      if (stormActive && kjAirborne()) stress += 12;
+      if (fuel < 15 && !isCarMode) stress += 12;
+      if (samEngineKilled) stress += 34;
+      if (isHelicopterMode && typeof heliWarn === 'string' && heliWarn && heliWarn.indexOf('ROTOR START') < 0) stress += 18;
+      if (kjWearGet() < 0.3) stress += 10;
+      if (crashing) stress += 70;
+      if (kj.boxed) stress -= 8;                                   // it's cosy in there
+      kj.bpmSpike = Math.max(0, kj.bpmSpike - dt * 7);
+      var target = THREE.MathUtils.clamp(64 + stress + kj.bpmSpike, 52, 188);
+      kj.bpm += (target - kj.bpm) * Math.min(1, (target > kj.bpm ? 1.1 : 0.22) * dt);
+      // beat phase for the ECG trace and the audible heartbeat once it's racing
+      var prevPhase = kj.beatPhase;
+      kj.beatPhase = (kj.beatPhase + dt * kj.bpm / 60) % 1;
+      if (kj.beatPhase < prevPhase && kj.bpm > 112 && !crashing) kjSfx('beat');
+      // a racing heart shakes the hands: small involuntary stick inputs
+      var tremor = THREE.MathUtils.clamp((kj.bpm - 118) / 60, 0, 1);
+      if (tremor > 0 && kjAirborne()) {
+        var t = elapsedSeconds;
+        var nx = Math.sin(t * 21.3) * Math.sin(t * 5.1 + 1.7), ny = Math.sin(t * 17.9 + 2.2) * Math.sin(t * 6.3);
+        if (isHelicopterMode) { heliRollRate += nx * tremor * 0.9 * dt; heliPitchRate += ny * tremor * 0.6 * dt; }
+        else { rollAngle += nx * tremor * 0.35 * dt; pitchAngle += ny * tremor * 0.2 * dt; }
+      }
+    }
+    function kjEcgDraw(dt) {
+      kj.ecgT -= dt;
+      if (!kjEcgCtx || kj.ecgT > 0) return;
+      kj.ecgT = 1 / 20;
+      var ph = kj.beatPhase, v = 0;
+      // P wave, QRS spike, T wave
+      if (ph < 0.08) v = Math.sin(ph / 0.08 * Math.PI) * 0.15;
+      else if (ph < 0.12) v = -0.12;
+      else if (ph < 0.16) v = 1;
+      else if (ph < 0.2) v = -0.35;
+      else if (ph > 0.32 && ph < 0.46) v = Math.sin((ph - 0.32) / 0.14 * Math.PI) * 0.28;
+      kj.ecg.push(v); while (kj.ecg.length > 60) kj.ecg.shift();
+      var c = kjEcgCtx, W = 300, H = 44;
+      c.clearRect(0, 0, W, H);
+      var col = kj.bpm > 150 ? '#ff3b30' : kj.bpm > 115 ? '#ffb02a' : '#4fe07a';
+      c.strokeStyle = col; c.lineWidth = 2.5; c.beginPath();
+      for (var i = 0; i < kj.ecg.length; i++) { var x = i / 59 * W, y = H * 0.62 - kj.ecg[i] * H * 0.5; if (i) c.lineTo(x, y); else c.moveTo(x, y); }
+      c.stroke();
+      if (kjBpmValEl) { kjBpmValEl.textContent = Math.round(kj.bpm); kjBpmValEl.style.color = col; }
+    }
+
+    /* ---------- NEAR MISSES ---------- */
+    function kjNearMissTick(dt) {
+      if (kj.nearMissCd > 0) { kj.nearMissCd -= dt; return; }
+      if (!kjAirborne()) return;
+      var agl = kjAgl(), onStrip = isOverRunway(position.x, position.z, 60) || isOverHighway(position.x, position.z, 30) || isOverCarrierDeck(position.x, position.z) || isOnAirportPavement(position.x, position.z);
+      if (onStrip) return;
+      var hit = isHelicopterMode ? (speed > 25 && agl < 6 && agl > 0.8) : (speed > 55 && agl < 22 && agl > 1.5 && verticalVel > -10);
+      if (hit) { kj.nearMissCd = 8; kj.bpmSpike += 18; kjLike(1, 'NEAR MISS'); }
+    }
+
+    /* ---------- AIRFRAME WEAR (persistent, per vehicle) ---------- */
+    function kjWearGet() { var w = kj.stats && kj.stats.wear[kjVehKey()]; return w === undefined ? 1 : w; }
+    function kjWear(amount, why) {
+      if (!kj.stats || isCarMode && why === 'rain') return;
+      var k = kjVehKey(), before = kjWearGet();
+      var after = Math.max(0, before - amount);
+      kj.stats.wear[k] = after;
+      if (before >= 0.6 && after < 0.6) kjRing('wrench', 'w_bad');
+      if (before > 0 && after <= 0 && !crashing && !isCarMode) {
+        samEngineKilled = true;
+        samToast('STRUCTURAL FAILURE — ENGINE LOST', '#ff3b30', 3.5);
+      }
+    }
+    var kjRepairToast = 0;
+    function kjWearTick(dt) {
+      var k = kjVehKey(), cond = kjWearGet();
+      if (kjAirborne()) {
+        var g = typeof gForceSmoothed === 'number' ? gForceSmoothed : 1;
+        if (g > 7) kjWear((g - 7) * 0.004 * dt, 'g');
+        if (currentRainIntensity > 0.05) kjWear(currentRainIntensity * 0.0005 * dt, 'rain');
+        // worn airframes drag and rattle
+        if (cond < 0.35) {
+          var drag = (0.35 - cond) / 0.35;
+          if (isHelicopterMode) heliVel.multiplyScalar(1 - drag * 0.06 * dt);
+          else if (!wasGrounded && speed > MIN_SPEED) speed = Math.max(MIN_SPEED, speed - drag * 5 * dt);
+        }
+      }
+      // repair while parked at a base
+      var parked = wasGrounded && !crashing && Math.abs(speed) < 2 &&
+        (isOnAirportPavement(position.x, position.z) || isOverRunway(position.x, position.z, RUNWAY_LANDING_MARGIN + 40) ||
+         isOverCarrierDeck(position.x, position.z) || (window.__gasStationSpot && Math.hypot(position.x - window.__gasStationSpot.x, position.z - window.__gasStationSpot.z) < window.__gasStationSpot.radius * 1.5));
+      if (parked && cond < 1) {
+        kj.stats.wear[k] = Math.min(1, cond + 0.07 * dt);
+        kjRepairToast -= dt;
+        if (kjRepairToast <= 0) { kjRepairToast = 2.5; samToast('WRENCH: REPAIRING ' + Math.round(kj.stats.wear[k] * 100) + '%', '#9dffb8', 1.4); }
+        if (kj.stats.wear[k] >= 1 && samEngineKilled && !outOfFuel) { samEngineKilled = false; }
+      }
+      cond = kjWearGet();
+      if (kjWearValEl) {
+        kjWearValEl.textContent = Math.round(cond * 100);
+        kjWearFillEl.style.width = (cond * 100) + '%';
+        kjWearFillEl.style.background = cond > 0.6 ? '#4fe07a' : cond > 0.3 ? '#ffb02a' : '#ff3b30';
+        kjWearTagEl.textContent = cond < 0.3 ? 'CRITICAL' : cond < 0.6 ? 'WORN' : '';
+      }
+      // low condition or a lightning EMP makes the instruments glitch
+      if (kj.glitchT > 0) kj.glitchT -= dt;
+      var hudEl = document.getElementById('hud');
+      var glitch = kj.glitchT > 0 || (cond < 0.3 && (elapsedSeconds % 5) < 0.6);
+      if (hudEl) hudEl.classList.toggle('kjGlitch', glitch);
+      if (miniMapWrapEl) miniMapWrapEl.style.opacity = kj.glitchT > 0 ? (Math.random() < 0.5 ? '0.15' : '0.6') : '';
+    }
+
+    /* ---------- BIRD STRIKES ---------- */
+    var kjBirdCol = new THREE.Color(0.92, 0.9, 0.86);
+    function kjBirdTick(dt) {
+      if (kj.birdCd > 0) { kj.birdCd -= dt; return; }
+      if (!kjAirborne() || speed < 25) return;
+      for (var f = 0; f < birdFlocks.length; f++) {
+        var fl = birdFlocks[f];
+        if (Math.abs(fl.center.y - position.y) > 30) continue;
+        for (var b = 0; b < fl.birds.length; b++) {
+          var bm = fl.birds[b].mesh;
+          if (!bm.visible) continue;
+          if (bm.position.distanceToSquared(position) < 20) {
+            bm.visible = false;
+            setTimeout(function(m) { return function() { m.visible = true; }; }(bm), 40000);
+            kj.birdCd = 3; kj.recentBirdAt = elapsedSeconds; kj.bpmSpike += 25;
+            kjWear(0.04, 'bird');
+            samEmitSmoke(bm.position.clone(), new THREE.Vector3(0, 1, 0), 3, 1.2, 0.7, 0.8, kjBirdCol);
+            kjSplatEl.style.transition = 'none'; kjSplatEl.style.opacity = '1';
+            setTimeout(function() { kjSplatEl.style.transition = 'opacity 1.6s'; kjSplatEl.style.opacity = '0'; }, 60);
+            samToast('BIRD STRIKE', '#ffcc33', 1.8);
+            kjRing('wrench', 'w_bird');
+            return;
+          }
+        }
+      }
+    }
+
+    /* ---------- LIGHTNING can find you now ---------- */
+    function kjOnLightning() {
+      if (!kjAirborne() || kjAgl() < 120 || Math.random() > 0.3) return;
+      kj.recentBoltAt = elapsedSeconds; kj.glitchT = 2.6; kj.bpmSpike += 35;
+      kjWear(0.06, 'bolt');
+      samToast('⚡ LIGHTNING STRIKE — INSTRUMENTS REBOOTING', '#dfe8ff', 2.6);
+      kjRing('wrench', 'w_bolt');
+    }
+
+    /* ---------- THE BOX ---------- */
+    var kjBoxTex = (function() {
+      var cv = document.createElement('canvas'); cv.width = cv.height = 512;
+      var c = cv.getContext('2d'), rng = mulberry32(1998);
+      c.fillStyle = '#b8894f'; c.fillRect(0, 0, 512, 512);
+      for (var i = 0; i < 1800; i++) { c.fillStyle = 'rgba(' + (rng() < 0.5 ? '90,60,30' : '230,200,150') + ',' + (0.05 + rng() * 0.08) + ')'; c.fillRect(rng() * 512, rng() * 512, 1 + rng() * 40, 1); }
+      c.fillStyle = 'rgba(160,125,70,.9)'; c.fillRect(0, 226, 512, 60);                 // packing tape
+      c.strokeStyle = 'rgba(80,50,20,.5)'; c.lineWidth = 3; c.strokeRect(8, 8, 496, 496);
+      c.fillStyle = '#3a2410'; c.textAlign = 'center';
+      c.font = '900 44px Impact, "Arial Black", sans-serif'; c.fillText('GLIDEPATH SUPPLY CO.', 256, 110);
+      c.font = '700 26px "Courier New", monospace'; c.fillText('THIS SIDE UP  ↑ ↑', 256, 160);
+      c.fillText('HANDLE WITH CARE', 256, 350);
+      c.font = '700 20px "Courier New", monospace'; c.fillText('CONTENTS: NOTHING SUSPICIOUS', 256, 440);
+      c.lineWidth = 5; c.strokeStyle = '#3a2410';
+      c.beginPath(); c.moveTo(420, 380); c.quadraticCurveTo(420, 420, 440, 425); c.quadraticCurveTo(460, 420, 460, 380); c.closePath(); c.stroke();
+      c.beginPath(); c.moveTo(440, 425); c.lineTo(440, 460); c.moveTo(425, 462); c.lineTo(455, 462); c.stroke();
+      var t = new THREE.CanvasTexture(cv); t.encoding = THREE.sRGBEncoding; t.anisotropy = 4; return t;
+    })();
+    var kjBoxMat = new THREE.MeshStandardMaterial({ map: kjBoxTex, roughness: 0.92, metalness: 0 });
+    function kjActiveBody() {
+      return isHelicopterMode ? heliBody : isCarMode ? carBody : isDroneMode ? droneBody : isStealthMode ? stealthBody : isSeaplaneMode ? seaBody : jetBody;
+    }
+    var _kjBox3 = new THREE.Box3(), _kjV = new THREE.Vector3();
+    function kjBoxDeploy() {
+      if (kj.boxed || !started || crashing || ejecting || !wasGrounded || Math.abs(speed) > 1.2) return;
+      plane.updateMatrixWorld(true);
+      _kjBox3.setFromObject(kjActiveBody());
+      var size = _kjBox3.getSize(new THREE.Vector3()), ctr = _kjBox3.getCenter(new THREE.Vector3());
+      var gy = getEffectiveGroundHeight(position.x, position.z);
+      var w = Math.max(size.x, size.z) + 0.8, h = Math.max(1.4, size.y + 0.4);
+      var m = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), kjBoxMat);
+      m.castShadow = true; m.receiveShadow = true;
+      m.position.set(ctr.x, gy + h / 2 + 10, ctr.z); m.rotation.y = heading;
+      scene.add(m);
+      kj.box = { mesh: m, h: h, gy: gy, t: 0 };
+      kj.boxed = true;
+      kj.stats.boxes++;
+      if (kj.alertPhase) kjPopMark(true);
+      if (kj.stats.boxes === 1) kjLike(1, 'THINKING INSIDE THE BOX');
+      samToast(isHelicopterMode ? '📦 BOX DEPLOYED — ROTOR SHUT DOWN. RADAR CAN\'T SEE YOU' : '📦 BOX DEPLOYED — RADAR CAN\'T SEE YOU', '#e0b070', 2.4);
+    }
+    function kjBoxBreak() {
+      if (!kj.boxed || !kj.box) return;
+      var b = kj.box; kj.boxed = false; kj.box = null;
+      b.vel = new THREE.Vector3((Math.random() - 0.5) * 4, 7 + Math.random() * 3, (Math.random() - 0.5) * 4).addScaledVector(forwardVec, 4);
+      b.spin = new THREE.Vector3((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 6);
+      b.life = 25; kj.flyingBoxes.push(b);
+      kjSfx('thump');
+    }
+    function kjBoxTick(dt) {
+      if (kj.boxed && kj.box) {
+        var b = kj.box; b.t += dt;
+        var restY = b.gy + b.h / 2;
+        // drop from above with a little cardboard bounce
+        if (b.t < 0.5) { var k = b.t / 0.5; b.mesh.position.y = restY + 10 * (1 - k * k); }
+        else { var k2 = Math.min(1, (b.t - 0.5) / 0.35); b.mesh.position.y = restY + Math.sin(k2 * Math.PI) * 0.35 * (1 - k2); if (b.t - dt < 0.5) kjSfx('thump'); }
+        var moving = Math.abs(speed) > 0.6 || (!isHelicopterMode && throttle > 1 && !isCarMode) || (isCarMode && Math.abs(throttle) > 0.5) ||
+          (isHelicopterMode && (keys.boost || keys.collUp || keys.throttleUp || throttle > MAX_SPEED * (heliAssist ? 0.58 : 0.3))) || !wasGrounded || crashing;
+        if (moving && b.t > 0.9) kjBoxBreak();
+      }
+      for (var i = kj.flyingBoxes.length - 1; i >= 0; i--) {
+        var f = kj.flyingBoxes[i];
+        f.life -= dt;
+        if (f.vel) {
+          f.vel.y -= 9.8 * dt;
+          f.mesh.position.addScaledVector(f.vel, dt);
+          f.mesh.rotation.x += f.spin.x * dt; f.mesh.rotation.y += f.spin.y * dt; f.mesh.rotation.z += f.spin.z * dt;
+          var g = getEffectiveGroundHeight(f.mesh.position.x, f.mesh.position.z) + f.h * 0.35;
+          if (f.mesh.position.y < g) { f.mesh.position.y = g; f.vel.set(0, 0, 0); f.spin.multiplyScalar(0); f.vel = null; }
+        }
+        if (f.life <= 0) { scene.remove(f.mesh); f.mesh.geometry.dispose(); kj.flyingBoxes.splice(i, 1); }
+      }
+      var canBox = started && !kj.boxed && !crashing && !ejecting && wasGrounded && Math.abs(speed) < 1.2;
+      kjBoxBtn.classList.toggle('hidden', !canBox || kj.photoOn);
+    }
+    kjBoxBtn.addEventListener('click', function() { kjBoxDeploy(); });
+
+    /* ---------- OPENING CREDITS (once per session, on your first takeoff) ---------- */
+    function kjCredits() {
+      if (kj.creditsShown) return;
+      kj.creditsShown = true;
+      var cs = kjCallsign(), lines = [
+        ['', 'A GLIDEPATH PRODUCTION'],
+        ['starring', cs],
+        ['and', 'THE ' + kjVehName().toUpperCase()],
+        ['music by', KJ_TAPES.length + ' TAPES YOU HAVEN\'T FOUND YET'],
+        ['', 'TACTICAL AVIATION ACTION'],
+        ['a game by', 'YOU']
+      ];
+      var c = kjCredEl.querySelector('.c');
+      kjCredEl.classList.add('on');
+      lines.forEach(function(l, i) {
+        setTimeout(function() {
+          c.innerHTML = (l[0] ? '<small>' + l[0].toUpperCase() + '</small>' : '') + '<big></big>';
+          c.querySelector('big').textContent = l[1];
+          c.classList.add('on');
+          setTimeout(function() { c.classList.remove('on'); }, 1500);
+        }, 900 + i * 2000);
+      });
+      setTimeout(function() { kjCredEl.classList.remove('on'); }, 900 + lines.length * 2000 + 300);
+    }
+
+    /* ---------- GAME OVER: someone always screams your name ---------- */
+    function kjShout() {
+      var cs = kjCallsign().toUpperCase(), words = kjShoutEl.querySelector('.w'), sub = kjShoutEl.querySelector('.s');
+      kjShoutEl.classList.add('on');
+      sub.textContent = '';
+      var beats = [cs + '?', cs + '?!', cs + '!!!'];
+      beats.forEach(function(b, i) {
+        setTimeout(function() {
+          words.classList.remove('on'); void words.offsetWidth;
+          words.textContent = b; words.classList.add('on');
+          if (i === 2) { sub.textContent = '— COL. HART'; kjSfx('shout'); }
+        }, 150 + i * 380);
+      });
+      setTimeout(function() { kjShoutEl.classList.remove('on'); words.classList.remove('on'); }, 1550);
+    }
+
+    /* ---------- CASSETTE TAPES + WALKMAN ---------- */
+    // Each tape is a little song generated live from a seed: tempo, key, scale, groove, instruments.
+    var KJ_TAPES = [
+      { id: 'lighthouse', title: 'Lighthouse Keeper', artist: 'The Low Tide Signal', year: 1983, hint: 'the lighthouse',
+        bpm: 84, root: 45, scale: [0, 2, 3, 5, 7, 8, 10], prog: [0, 5, 3, 4], lead: 'triangle', bass: 'sine', drums: 1, delay: 0.42, seed: 11 },
+      { id: 'rooftop', title: 'Rooftop Requiem', artist: 'Glass Tower Choir', year: 1987, hint: 'the roof of the tallest tower in the city',
+        bpm: 96, root: 48, scale: [0, 2, 4, 5, 7, 9, 11], prog: [0, 4, 5, 3], lead: 'square', bass: 'triangle', drums: 2, delay: 0.3, seed: 22 },
+      { id: 'carrier', title: 'Wire Three', artist: 'Angled Deck', year: 1986, hint: 'the deck of the carrier',
+        bpm: 104, root: 43, scale: [0, 2, 3, 5, 7, 9, 10], prog: [0, 3, 4, 3], lead: 'sawtooth', bass: 'sawtooth', drums: 2, delay: 0.25, seed: 33 },
+      { id: 'gas', title: 'Octane Heart', artist: 'Midnight Pump No. 9', year: 1984, hint: 'the gas station by the highway',
+        bpm: 124, root: 40, scale: [0, 3, 5, 7, 10], prog: [0, 0, 3, 4], lead: 'square', bass: 'sawtooth', drums: 3, delay: 0.18, seed: 44 },
+      { id: 'sam', title: 'Hostile Airspace', artist: 'Radar Lock', year: 1985, hint: 'the SAM site itself',
+        bpm: 132, root: 41, scale: [0, 1, 3, 5, 7, 8, 10], prog: [0, 1, 0, 6], lead: 'sawtooth', bass: 'square', drums: 3, delay: 0.12, seed: 55 },
+      { id: 'tower', title: 'Tower Frequency', artist: 'Clearance Delivery', year: 1982, hint: 'the foot of the control tower',
+        bpm: 108, root: 47, scale: [0, 2, 4, 5, 7, 9, 10], prog: [0, 6, 3, 0], lead: 'triangle', bass: 'triangle', drums: 2, delay: 0.35, seed: 66 },
+      { id: 'city', title: 'Neon Grid', artist: 'Downtown Static', year: 1988, hint: 'the middle of the city',
+        bpm: 116, root: 45, scale: [0, 2, 3, 5, 7, 8, 10], prog: [0, 5, 2, 6], lead: 'sawtooth', bass: 'sawtooth', drums: 3, delay: 0.28, seed: 77 },
+      { id: 'sea', title: 'Swell (Side B)', artist: 'Albatross', year: 1981, hint: 'the open sea, far beyond the carrier',
+        bpm: 72, root: 38, scale: [0, 2, 4, 7, 9], prog: [0, 3, 4, 3], lead: 'sine', bass: 'sine', drums: 0, delay: 0.55, seed: 88 },
+      { id: 'sky', title: 'Stratosphere Lullaby', artist: 'Nobody, Nowhere', year: 1989, hint: 'the sky, very high above the runway',
+        bpm: 64, root: 50, scale: [0, 2, 4, 7, 9], prog: [0, 4, 5, 3], lead: 'triangle', bass: 'sine', drums: 0, delay: 0.6, seed: 99, radius: 70 }
+    ];
+    var kjTapeObjs = [], kjTapesPlaced = false;
+    // nearest dry, reasonably flat spot around a landmark (the lighthouse stands right on the waterline)
+    function kjLandNear(x, z, rMin, rMax) {
+      var best = null, bestH = -1e9;
+      for (var r = rMin; r <= rMax; r += 4) for (var a = 0; a < 16; a++) {
+        var px = x + Math.cos(a / 16 * Math.PI * 2) * r, pz = z + Math.sin(a / 16 * Math.PI * 2) * r, h = getEffectiveGroundHeight(px, pz);
+        if (h > WATER_LEVEL + 1.5 && (best === null || h < bestH + 0.5 && r < best.r + 1 || bestH < WATER_LEVEL + 1.5)) { if (best === null || h > WATER_LEVEL + 1.5) { best = { x: px, z: pz, r: r }; bestH = h; } }
+        if (best) return best;
+      }
+      return best || { x: x, z: z };
+    }
+    function kjTapeSpot(id) {
+      var g = function(x, z, up) { return new THREE.Vector3(x, Math.max(getEffectiveGroundHeight(x, z), WATER_LEVEL) + (up || 1.6), z); };
+      var s;
+      switch (id) {
+        case 'lighthouse': s = window.__lighthouseSpot; if (!s) return null; var ln = kjLandNear(s.x, s.z, 10, 60); return g(ln.x, ln.z);
+        case 'rooftop': return LANDMARK_SET ? new THREE.Vector3(LANDMARK_X, LANDMARK_ROOF_Y + 1.6, LANDMARK_Z) : null;
+        case 'carrier': var w = carrierToWorld(40, 10); return new THREE.Vector3(w.x, CARRIER.deckY + 1.6, w.z);
+        case 'gas': s = window.__gasStationSpot; return s ? g(s.x, s.z) : null;
+        case 'sam': return SAM_BASE ? g(SAM_BASE.x + 25, SAM_BASE.z + 25) : null;
+        case 'tower': s = window.__towerSpot; return s ? g(s.x + 14, s.z + 14) : null;
+        case 'city': s = window.__citySpot; return s ? g(s.x, s.z) : null;
+        case 'sea': return new THREE.Vector3(CARRIER.x + 1600, WATER_LEVEL + 2.2, CARRIER.z + 1200);
+        case 'sky': return new THREE.Vector3(RUNWAY_CENTER_X, 1450, RUNWAY_CENTER_Z);
+      }
+      return null;
+    }
+    function kjTapeLabelTex(tp) {
+      var cv = document.createElement('canvas'); cv.width = 256; cv.height = 160;
+      var c = cv.getContext('2d');
+      c.fillStyle = '#1a1a1c'; c.fillRect(0, 0, 256, 160);
+      c.fillStyle = '#f1e6c8'; c.fillRect(14, 14, 228, 92);
+      c.fillStyle = ['#e10600', '#ffb02a', '#2e7bc4', '#4fe07a'][tp.seed % 4]; c.fillRect(14, 14, 228, 16);
+      c.fillStyle = '#222'; c.font = '700 20px "Courier New", monospace'; c.textAlign = 'center';
+      c.fillText(tp.title.toUpperCase().slice(0, 18), 128, 60); c.font = '15px "Courier New", monospace'; c.fillText(tp.artist + ' · ' + tp.year, 128, 88);
+      c.fillStyle = '#333'; c.beginPath(); c.arc(78, 132, 16, 0, 7); c.arc(178, 132, 16, 0, 7); c.fill();
+      c.strokeStyle = '#eee'; c.lineWidth = 3; c.beginPath(); c.arc(78, 132, 7, 0, 7); c.stroke(); c.beginPath(); c.arc(178, 132, 7, 0, 7); c.stroke();
+      var t = new THREE.CanvasTexture(cv); t.encoding = THREE.sRGBEncoding; return t;
+    }
+    var kjBeamMat = new THREE.MeshBasicMaterial({ color: 0x7dff9a, transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
+    function kjPlaceTapes() {
+      if (kjTapesPlaced || !((SAM_BASE && LANDMARK_SET) || kj.sessionT > 10)) return;
+      kjTapesPlaced = true;
+      KJ_TAPES.forEach(function(tp) {
+        var p = kjTapeSpot(tp.id);
+        if (!p) return;
+        var grp = new THREE.Group(); grp.position.copy(p);
+        var shell = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.22), new THREE.MeshBasicMaterial({ map: kjTapeLabelTex(tp) }));
+        grp.add(shell);
+        var back = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.2), new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.4 }));
+        back.position.z = -0.02; back.rotation.y = Math.PI; grp.add(back);
+        var beam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, tp.id === 'sky' ? 30 : 160, 10, 1, true), kjBeamMat);
+        beam.position.y = tp.id === 'sky' ? 0 : 80;
+        grp.add(beam);
+        grp.visible = kj.stats.tapes.indexOf(tp.id) < 0;
+        scene.add(grp);
+        kjTapeObjs.push({ tp: tp, grp: grp, shell: shell, beam: beam, pos: p });
+      });
+    }
+    function kjTapesTick(dt) {
+      kjPlaceTapes();
+      for (var i = 0; i < kjTapeObjs.length; i++) {
+        var o = kjTapeObjs[i];
+        if (!o.grp.visible) continue;
+        o.shell.parent.rotation.y += dt * 1.6;
+        if (o.tp.id === 'sea') o.grp.position.y = WATER_LEVEL + seaMeshWaveHeight(o.pos.x, o.pos.z) + 2;
+        o.beam.visible = o.grp.position.distanceToSquared(position) < 1600 * 1600;
+        var r = o.tp.radius || 18;
+        if (!crashing && !ejecting && started && o.grp.position.distanceToSquared(position) < r * r) {
+          o.grp.visible = false;
+          kj.stats.tapes.push(o.tp.id); kjSave();
+          samToast('📼 CASSETTE TAPE ACQUIRED — "' + o.tp.title.toUpperCase() + '"', '#9dffb8', 3.2);
+          kjSfx('pickup'); kjLike(5, 'TAPE FOUND');
+          kjWalkPlay(o.tp.id);
+          if (kj.stats.tapes.length >= KJ_TAPES.length) kjRing('luna', 'l_tapes_all');
+          else if (kj.stats.tapes.length === 1) kjRing('luna', 'l_tapes');
+        }
+      }
+      kjWalkEl.classList.toggle('hidden', !kj.stats.tapes.length || kj.photoOn);
+    }
+
+    // ---- the synth ----
+    var kjMus = { on: false, tape: null, timer: null, next: 0, step: 0, gain: null, delay: null, fb: null, rng: null, pat: null };
+    function kjMidi(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+    function kjBuildSong(tp) {
+      var rng = mulberry32(tp.seed * 7919), sc = tp.scale;
+      function deg(d, oct) { var n = sc.length; return tp.root + 12 * (oct + Math.floor(d / n)) + sc[((d % n) + n) % n]; }
+      var lead = [], bass = [], hat = [], kick = [], snare = [];
+      for (var bar = 0; bar < 4; bar++) {
+        var ch = tp.prog[bar];
+        for (var st = 0; st < 16; st++) {
+          var i = bar * 16 + st;
+          bass[i] = (st % 4 === 0 || (tp.drums >= 3 && st % 4 === 2 && rng() < 0.6)) ? deg(ch, 0) + (st === 12 && rng() < 0.5 ? 7 : 0) : null;
+          var onBeat = st % 2 === 0;
+          lead[i] = (rng() < (onBeat ? 0.55 : 0.22)) ? deg(ch + [0, 2, 4, 1, 3, 5, 7][Math.floor(rng() * 7)], 2) : null;
+          kick[i] = tp.drums && (st % 8 === 0 || (tp.drums >= 3 && st % 4 === 0) || (tp.drums >= 2 && st === 10 && rng() < 0.5));
+          snare[i] = tp.drums >= 2 && st % 8 === 4;
+          hat[i] = tp.drums && (tp.drums >= 2 ? st % 2 === 0 : st % 4 === 2);
+        }
+      }
+      return { lead: lead, bass: bass, kick: kick, snare: snare, hat: hat, chords: tp.prog.map(function(c) { return [deg(c, 1), deg(c + 2, 1), deg(c + 4, 1)]; }), deg: deg };
+    }
+    var kjNoiseBuf = null;
+    function kjNoise() {
+      if (kjNoiseBuf) return kjNoiseBuf;
+      kjNoiseBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.5, audioCtx.sampleRate);
+      var d = kjNoiseBuf.getChannelData(0); for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      return kjNoiseBuf;
+    }
+    function kjVoice(type, freq, t, dur, vol, cutoff, dest) {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain(), f = audioCtx.createBiquadFilter();
+      o.type = type; o.frequency.setValueAtTime(freq, t);
+      f.type = 'lowpass'; f.frequency.value = cutoff;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(f).connect(g).connect(dest); o.start(t); o.stop(t + dur + 0.02);
+    }
+    function kjDrum(kind, t) {
+      if (kind === 'kick') {
+        var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.14);
+        g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+        o.connect(g).connect(kjMus.gain); o.start(t); o.stop(t + 0.22);
+      } else {
+        var s = audioCtx.createBufferSource(), fl = audioCtx.createBiquadFilter(), g2 = audioCtx.createGain();
+        s.buffer = kjNoise();
+        fl.type = kind === 'hat' ? 'highpass' : 'bandpass'; fl.frequency.value = kind === 'hat' ? 7000 : 1800;
+        var dur = kind === 'hat' ? 0.04 : 0.14;
+        g2.gain.setValueAtTime(kind === 'hat' ? 0.08 : 0.22, t); g2.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        s.connect(fl).connect(g2).connect(kjMus.gain); s.start(t); s.stop(t + dur + 0.02);
+      }
+    }
+    function kjSchedule() {
+      if (!kjMus.on || !audioCtx) return;
+      var tp = kjMus.tape, song = kjMus.pat, stepDur = 60 / tp.bpm / 4;
+      while (kjMus.next < audioCtx.currentTime + 0.15) {
+        var i = kjMus.step % 64, t = kjMus.next;
+        if (soundEnabled) {
+          if (song.bass[i] !== null) kjVoice(tp.bass, kjMidi(song.bass[i]), t, stepDur * 3.2, 0.16, 700, kjMus.gain);
+          if (song.lead[i] !== null) kjVoice(tp.lead, kjMidi(song.lead[i]), t, stepDur * (tp.bpm < 90 ? 3.5 : 1.8), tp.lead === 'sawtooth' ? 0.045 : 0.07, 2400, kjMus.delay);
+          if (i % 16 === 0) song.chords[Math.floor(i / 16)].forEach(function(n) { kjVoice('sawtooth', kjMidi(n), t, stepDur * 15, 0.018, 900, kjMus.gain); });
+          if (song.kick[i]) kjDrum('kick', t);
+          if (song.snare[i]) kjDrum('snare', t);
+          if (song.hat[i]) kjDrum('hat', t);
+        }
+        kjMus.next += stepDur; kjMus.step++;
+      }
+    }
+    function kjWalkPlay(id) {
+      if (!audioCtx) { try { initAudio(); } catch (e) {} }
+      if (!audioCtx) return;
+      var tp = KJ_TAPES.find(function(x) { return x.id === id; });
+      if (!tp) return;
+      kjWalkStop(true);
+      if (!kjMus.gain) {
+        // master <- dry, master <- echo (with feedback); lead voices go to leadBus -> dry + echo
+        kjMus.gain = audioCtx.createGain(); kjMus.gain.gain.value = 0.2; kjMus.gain.connect(audioCtx.destination);
+        kjMus.echo = audioCtx.createDelay(1.5); kjMus.fb = audioCtx.createGain();
+        kjMus.echo.connect(kjMus.fb); kjMus.fb.connect(kjMus.echo); kjMus.echo.connect(kjMus.gain);
+        kjMus.delay = audioCtx.createGain(); kjMus.delay.connect(kjMus.gain); kjMus.delay.connect(kjMus.echo);
+      }
+      kjMus.echo.delayTime.value = 60 / tp.bpm * 0.75; kjMus.fb.gain.value = tp.delay;
+      kjMus.tape = tp; kjMus.pat = kjBuildSong(tp); kjMus.on = true; kjMus.step = 0; kjMus.next = audioCtx.currentTime + 0.1;
+      kjMus.timer = setInterval(kjSchedule, 40);
+      document.getElementById('kjWalkTxt').textContent = '♫ ' + tp.title.toUpperCase() + ' — ' + tp.artist + ' (' + tp.year + ')';
+      kjWalkEl.classList.add('playing');
+    }
+    function kjWalkStop(quiet) {
+      if (kjMus.timer) clearInterval(kjMus.timer);
+      kjMus.timer = null; kjMus.on = false;
+      kjWalkEl.classList.remove('playing');
+      if (!quiet) document.getElementById('kjWalkTxt').textContent = '📼 TAPES ' + kj.stats.tapes.length + '/' + KJ_TAPES.length + ' · Y TO PLAY';
+    }
+    function kjWalkNext() {
+      var owned = KJ_TAPES.filter(function(t) { return kj.stats.tapes.indexOf(t.id) >= 0; });
+      if (!owned.length) { samToast('NO TAPES YET — CALL LUNA ON 142.52', '#9dffb8', 2); return; }
+      var cur = kjMus.on ? owned.indexOf(kjMus.tape) : -1;
+      if (cur + 1 >= owned.length) { kjWalkStop(); return; }
+      kjWalkPlay(owned[cur + 1].id);
+    }
+    document.getElementById('kjWalkNext').addEventListener('click', function(e) { e.stopPropagation(); kjWalkNext(); });
+    document.getElementById('kjWalkStop').addEventListener('click', function(e) { e.stopPropagation(); kjWalkStop(); });
+    kjWalkEl.addEventListener('click', function() { kjWalkNext(); });
+
+    /* ---------- DELIVERIES: connect the island ---------- */
+    var KJ_CARGO = [
+      { name: 'MEDICAL SUPPLIES', fragile: 1.6, base: 10 },
+      { name: 'A WARM PIZZA', fragile: 0.8, base: 8, perish: 240 },
+      { name: 'VINYL RECORDS', fragile: 1.3, base: 8 },
+      { name: 'A SINGLE ENVELOPE', fragile: 0.4, base: 6 },
+      { name: 'A SPARE ROTOR BLADE', fragile: 0.9, base: 12, heavy: true },
+      { name: 'EMPTY CARDBOARD BOXES', fragile: 0.2, base: 5 },
+      { name: 'RAIN SAMPLES', fragile: 1.1, base: 9 },
+      { name: 'A LETTER FROM A FATHER', fragile: 0.6, base: 14 }
+    ];
+    var KJ_THANKS = [
+      '"I didn\'t think anyone would come." — the recipient',
+      '"You flew this all the way here? For me?"',
+      '"Tell the pilot I said thank you. No — tell them twice."',
+      '"It\'s a little dented. So am I. Thank you."',
+      '"Somebody out there remembered us."',
+      '"I\'ll leave you a like. It\'s all I have."'
+    ];
+    var kjOrder = null, kjPad = null, kjPadObjs = null, kjDestObjs = null, kjWp = null, kjDrops = [], kjPadHint = 0;
+    function kjKind() { return isHelicopterMode ? 'heli' : isCarMode ? 'car' : 'air'; }
+    function kjDests() {
+      var out = [], g = function(x, z) { return Math.max(getEffectiveGroundHeight(x, z), WATER_LEVEL); };
+      if (window.__citySpot) out.push({ id: 'city', name: 'THE CITY', x: window.__citySpot.x, z: window.__citySpot.z, kinds: 'heli car air' });
+      if (LANDMARK_SET) out.push({ id: 'roof', name: 'THE TOWER ROOFTOP', x: LANDMARK_X, z: LANDMARK_Z, kinds: 'heli' });
+      if (window.__lighthouseSpot) { var ln = kjLandNear(window.__lighthouseSpot.x, window.__lighthouseSpot.z, 22, 90); out.push({ id: 'light', name: 'THE LIGHTHOUSE', x: ln.x, z: ln.z, kinds: 'heli car air' }); }
+      if (window.__gasStationSpot) out.push({ id: 'gas', name: 'THE GAS STATION', x: window.__gasStationSpot.x, z: window.__gasStationSpot.z, kinds: 'heli car air' });
+      out.push({ id: 'carrier', name: 'THE CARRIER', x: CARRIER.x, z: CARRIER.z, kinds: 'heli air' });
+      if (SAM_BASE) out.push({ id: 'sam', name: 'THE SAM SITE (they ordered it?)', x: SAM_BASE.x + 60, z: SAM_BASE.z + 60, kinds: 'heli air' });
+      out.forEach(function(d) { d.y = g(d.x, d.z); });
+      return out;
+    }
+    function kjBeam(color, h) {
+      var m = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, h, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+      m.position.y = h / 2; return m;
+    }
+    function kjRingMesh(color, r) {
+      var m = new THREE.Mesh(new THREE.RingGeometry(r - 1, r, 48), new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+      m.rotation.x = -Math.PI / 2; m.position.y = 0.15; return m;
+    }
+    function kjCrate(size) { var m = new THREE.Mesh(new THREE.BoxGeometry(size, size, size), kjBoxMat); m.castShadow = true; return m; }
+    function kjSetupPad() {
+      if (kjPad) return;
+      var x = RUNWAY_CENTER_X + 34, z = RUNWAY_CENTER_Z + RUNWAY_HALF_LENGTH - 55;
+      kjPad = { x: x, z: z, y: getEffectiveGroundHeight(x, z) };
+      var grp = new THREE.Group(); grp.position.set(x, kjPad.y, z);
+      grp.add(kjRingMesh(0x4fb7ff, 12));
+      var crates = [];
+      [[0, 0.8, 0], [1.7, 0.8, 0.3], [0.8, 2.4, 0.1]].forEach(function(p) { var c = kjCrate(1.6); c.position.set(p[0], p[1], p[2]); grp.add(c); crates.push(c); });
+      var beam = kjBeam(0x4fb7ff, 140); grp.add(beam);
+      scene.add(grp);
+      kjPadObjs = { grp: grp, crates: crates, beam: beam };
+    }
+    function kjWaypoint(name, x, z) {
+      if (kjWp) { var i = WAYPOINTS.indexOf(kjWp); if (i >= 0) WAYPOINTS.splice(i, 1); kjWp = null; }
+      if (name) { kjWp = { name: name, x: x, z: z, color: '#ffd23b', icon: 'city' }; WAYPOINTS.push(kjWp); }
+    }
+    function kjStartOrder() {
+      var kind = kjKind(), list = kjDests().filter(function(d) { return d.kinds.indexOf(kind) >= 0; });
+      list = list.filter(function(d) { return Math.hypot(d.x - position.x, d.z - position.z) > 400; });
+      if (!list.length) return;
+      var dest = list[Math.floor(Math.random() * list.length)];
+      var cargo = KJ_CARGO[Math.floor(Math.random() * KJ_CARGO.length)];
+      kjOrder = { cargo: cargo, dest: dest, cond: 1, t: 0, kind: kind, doneT: 0, sling: null };
+      var grp = new THREE.Group(); grp.position.set(dest.x, dest.y, dest.z);
+      grp.add(kjRingMesh(0xffd23b, kind === 'air' ? 60 : 20)); grp.add(kjBeam(0xffd23b, 220));
+      scene.add(grp); kjDestObjs = grp;
+      kjWaypoint('DELIVERY', dest.x, dest.z);
+      kjSfx('pickup');
+      samToast('📦 ORDER: ' + cargo.name + ' → ' + dest.name, '#ffd23b', 3.2);
+      if (kj.stats.deliveries === 0) kjRing('hart', 'h_order');
+    }
+    function kjEndOrder(ok, msg) {
+      if (!kjOrder) return;
+      var o = kjOrder;
+      if (o.sling) { scene.remove(o.sling.line); if (o.sling.crate) kjDrops.push({ mesh: o.sling.crate, rest: true, t: 0 }); o.sling = null; }
+      if (kjDestObjs) { scene.remove(kjDestObjs); kjDestObjs = null; }
+      kjWaypoint(null);
+      kjOrder = null;
+      if (ok) {
+        var likes = Math.max(1, Math.round(o.cargo.base * o.cond));
+        kj.stats.deliveries++;
+        coins += Math.round(o.cargo.base * 3 * o.cond);
+        samToast('✅ DELIVERED — ' + o.cargo.name + ' · CONDITION ' + Math.round(o.cond * 100) + '%', '#9dffb8', 3.2);
+        kjLike(likes, 'DELIVERY');
+        setTimeout(function() { samToast(KJ_THANKS[Math.floor(Math.random() * KJ_THANKS.length)], '#fff2c8', 4); }, 3400);
+      } else if (msg) samToast(msg, '#ff8a7a', 3);
+      kjSave();
+    }
+    function kjDropCargo() {
+      if (!kjOrder || kjOrder.kind !== 'air' || wasGrounded || crashing) return;
+      var c = kjCrate(1.6); c.position.copy(position).y -= 2.5; scene.add(c);
+      var chute = new THREE.Mesh(new THREE.SphereGeometry(2.6, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.8, side: THREE.DoubleSide }));
+      chute.position.y = 4.5; chute.visible = false; c.add(chute);
+      kjDrops.push({ mesh: c, chute: chute, vel: velocityVec.clone(), t: 0, order: kjOrder });
+      kjOrder.dropped = true;
+      samToast('🪂 CARGO AWAY', '#9dffb8', 1.6);
+    }
+    var _kjH = new THREE.Vector3(), _kjN = new THREE.Vector3();
+    function kjDeliveryTick(dt) {
+      kjSetupPad();
+      var o = kjOrder, kind = kjKind();
+      if (kjPadObjs) kjPadObjs.beam.visible = !o;
+      // ---- pick up ----
+      if (!o && started && !crashing && !ejecting && kjPad) {
+        var pd = Math.hypot(position.x - kjPad.x, position.z - kjPad.z);
+        if (kind === 'heli') {
+          var above = position.y - kjPad.y;
+          if (!wasGrounded && pd < 8 && above > 4 && above < 18 && kjPadObjs.crates[2]) {
+            kj.hookT = (kj.hookT || 0) + dt;
+            if (kjPadHint <= 0) { samToast('HOOKING… HOLD STEADY', '#ffd23b', 0.8); kjPadHint = 0.9; }
+            if (kj.hookT > 1.2) {
+              kj.hookT = 0; kjStartOrder();
+              if (kjOrder) {
+                var crate = kjPadObjs.crates[2]; kjPadObjs.grp.remove(crate); crate.position.set(kjPad.x + 0.8, kjPad.y + 0.8, kjPad.z); scene.add(crate);
+                var line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x222222 }));
+                line.frustumCulled = false; scene.add(line);
+                kjOrder.sling = { crate: crate, line: line, vel: new THREE.Vector3(), L: 11, ground: true, mass: kjOrder.cargo.heavy ? 0.2 : 0.11 };
+                setTimeout(function() { if (kjPadObjs && !kjPadObjs.crates[2]) { var nc = kjCrate(1.6); nc.position.set(0.8, 2.4, 0.1); kjPadObjs.grp.add(nc); kjPadObjs.crates[2] = nc; } }, 20000);
+                kjPadObjs.crates[2] = null;
+              }
+            }
+          } else kj.hookT = 0;
+          if (pd < 60 && kjPadHint <= 0 && kjPadObjs.crates[2] && !kj.padHintHeliDone) { kj.padHintHeliDone = true; samToast('CARGO PAD — HOVER 5–15 m OVER THE CRATES TO HOOK A SLING LOAD', '#8fd0ff', 2.5); kjPadHint = 12; }
+        } else if (pd < 30 && wasGrounded && Math.abs(speed) < 2) {
+          kj.loadT = (kj.loadT || 0) + dt;
+          if (kjPadHint <= 0) { samToast('LOADING CARGO… ' + Math.min(100, Math.round(kj.loadT / 1.5 * 100)) + '%', '#ffd23b', 0.6); kjPadHint = 0.5; }
+          if (kj.loadT > 1.5) { kj.loadT = 0; kjStartOrder(); }
+        } else kj.loadT = 0;
+        if (kjPadHint > 0) kjPadHint -= dt;
+      }
+      // ---- carrying ----
+      if (o) {
+        o.t += dt;
+        var g = typeof gForceSmoothed === 'number' ? gForceSmoothed : 1;
+        if (o.kind !== 'heli' && !o.dropped && g > 4.5) o.cond -= (g - 4.5) * 0.02 * o.cargo.fragile * dt;
+        if (o.cargo.perish && o.t > o.cargo.perish) o.cond -= 0.01 * dt;
+        o.cond = Math.max(0, o.cond);
+        var dd = Math.hypot(position.x - o.dest.x, position.z - o.dest.z);
+        if (crashing) { kjEndOrder(false, '📦 CARGO LOST IN THE CRASH'); return; }
+        if (o.kind !== 'heli' && !o.dropped) {
+          // landed or parked at the destination (car, or a plane that lands there — like the carrier)
+          if (wasGrounded && Math.abs(speed) < 2 && dd < (o.dest.id === 'carrier' ? 160 : 40)) {
+            o.doneT += dt; if (o.doneT > 1.2) { kjEndOrder(true); return; }
+          } else o.doneT = 0;
+        }
+        if (o.sling) kjSlingTick(o, dt, dd);
+        if (!kjOrder) return;
+        // card
+        var txt = '📦 ' + o.cargo.name + ' → ' + o.dest.name + ' · ' + (dd > 1000 ? (dd / 1000).toFixed(1) + ' km' : Math.round(dd) + ' m');
+        if (o.cargo.perish) { var left = Math.max(0, o.cargo.perish - o.t); txt += ' · ' + Math.floor(left / 60) + ':' + String(Math.floor(left % 60)).padStart(2, '0'); }
+        if (o.kind === 'air' && !o.dropped && dd < 1500) txt += ' · DROP: N';
+        if (o.kind === 'heli' && o.sling) txt += ' · LOWER IT ONTO THE RING';
+        kjOrderEl.innerHTML = ''; kjOrderEl.textContent = txt;
+        var bar = document.createElement('span'); bar.className = 'bar'; bar.innerHTML = '<i style="width:' + Math.round(o.cond * 100) + '%"></i>';
+        kjOrderEl.appendChild(bar);
+        kjOrderEl.classList.toggle('hidden', kj.photoOn);
+        if (kjDestObjs) kjDestObjs.children[1].material.opacity = 0.14 + 0.08 * Math.sin(elapsedSeconds * 3);
+      } else kjOrderEl.classList.add('hidden');
+      kjDropBtn.classList.toggle('hidden', !(o && o.kind === 'air' && !o.dropped && !wasGrounded && !crashing) || kj.photoOn);
+      kjDropsTick(dt);
+    }
+    function kjSlingTick(o, dt, dd) {
+      var s = o.sling, c = s.crate;
+      _kjH.copy(position); _kjH.y -= 1.2;
+      s.vel.y -= 9.8 * dt;
+      s.vel.multiplyScalar(1 - 0.12 * dt);
+      c.position.addScaledVector(s.vel, dt);
+      var gy = Math.max(getEffectiveGroundHeight(c.position.x, c.position.z), WATER_LEVEL) + 0.8;
+      s.ground = false;
+      if (c.position.y < gy) {
+        var impact = -s.vel.y;
+        if (impact > 3.5) { o.cond -= (impact - 3.5) * 0.05 * o.cargo.fragile; kjSfx('thump'); }
+        c.position.y = gy; s.vel.y = 0; s.vel.x *= 0.7; s.vel.z *= 0.7; s.ground = true;
+        if (gy - 0.8 <= WATER_LEVEL + 0.01 && getEffectiveGroundHeight(c.position.x, c.position.z) < WATER_LEVEL) { kjEndOrder(false, '📦 THE CARGO SANK'); return; }
+      }
+      _kjN.copy(c.position).sub(_kjH);
+      var len = _kjN.length();
+      if (len > s.L) {
+        _kjN.multiplyScalar(1 / len);
+        c.position.copy(_kjH).addScaledVector(_kjN, s.L);
+        var vr = s.vel.dot(_kjN) - heliVel.dot(_kjN);
+        if (vr > 0) s.vel.addScaledVector(_kjN, -vr);
+        // the load pulls on the helicopter: its weight hangs off the hook, and swings tug at it
+        if (!s.ground) heliVel.addScaledVector(_kjN, 9.8 * s.mass * dt + Math.max(0, vr) * s.mass * 0.5);
+      }
+      c.rotation.y += s.vel.x * 0.02 * dt;
+      var pa = s.line.geometry.attributes.position;
+      pa.setXYZ(0, _kjH.x, _kjH.y, _kjH.z); pa.setXYZ(1, c.position.x, c.position.y + 0.8, c.position.z); pa.needsUpdate = true;
+      var cd = Math.hypot(c.position.x - o.dest.x, c.position.z - o.dest.z);
+      if (s.ground && cd < 20) { o.doneT += dt; if (o.doneT > 1) { c.userData.kjDie = 60; kjDrops.push({ mesh: c, rest: true, t: 0 }); o.sling.crate = null; scene.remove(s.line); o.sling = null; kjEndOrder(true); } }
+      else if (o.kind === 'heli') o.doneT = 0;
+    }
+    function kjDropsTick(dt) {
+      for (var i = kjDrops.length - 1; i >= 0; i--) {
+        var d = kjDrops[i];
+        d.t += dt;
+        if (d.rest) { if (d.t > 60) { scene.remove(d.mesh); kjDrops.splice(i, 1); } continue; }
+        if (d.t > 0.8 && !d.chute.visible) { d.chute.visible = true; kjSfx('thump'); }
+        if (d.chute.visible) {
+          d.vel.x *= Math.exp(-1.3 * dt); d.vel.z *= Math.exp(-1.3 * dt);
+          d.vel.y += (-6 - d.vel.y) * Math.min(1, 2.2 * dt);
+          if (currentWind > 0.01) { d.vel.x += windPush.x * 0.4 * dt; d.vel.z += windPush.z * 0.4 * dt; }
+          d.mesh.rotation.z = Math.sin(d.t * 1.7) * 0.12;
+        } else { d.vel.y -= 9.8 * dt; d.vel.multiplyScalar(1 - 0.05 * dt); }
+        d.mesh.position.addScaledVector(d.vel, dt);
+        var ge = getEffectiveGroundHeight(d.mesh.position.x, d.mesh.position.z), gy = Math.max(ge, WATER_LEVEL) + 0.8;
+        if (d.mesh.position.y <= gy) {
+          d.mesh.position.y = gy; d.chute.visible = false; d.rest = true; d.t = 0;
+          var o = d.order, miss = Math.hypot(d.mesh.position.x - o.dest.x, d.mesh.position.z - o.dest.z);
+          if (kjOrder !== o) continue;
+          if (ge < WATER_LEVEL) { kjEndOrder(false, '📦 CARGO LANDED IN THE SEA'); continue; }
+          if (miss < 150) {
+            o.cond *= Math.max(0.4, 1 - miss / 250);
+            if (miss < 25) kjLike(3, 'BULLSEYE');
+            kjEndOrder(true);
+          } else kjEndOrder(false, '📦 CARGO LOST — LANDED ' + Math.round(miss) + ' m FROM ' + o.dest.name);
+        }
+      }
+    }
+    kjDropBtn.addEventListener('click', function() { kjDropCargo(); });
+
+    /* ---------- PHOTO MODE ---------- */
+    var KJ_FILTERS = [
+      ['NONE', 'none'], ['NOIR', 'grayscale(1) contrast(1.35) brightness(.95)'], ['CODEC', 'sepia(1) hue-rotate(75deg) saturate(3.2) brightness(.9)'],
+      ['VHS 1987', 'contrast(1.12) saturate(1.45) hue-rotate(-10deg) blur(.5px)'], ['GOLDEN HOUR', 'sepia(.45) saturate(1.35) brightness(1.06)'], ['COLD WAR', 'saturate(.55) hue-rotate(18deg) brightness(1.02) contrast(1.1)']
+    ];
+    var kjPh = { yaw: 0, pitch: 0.25, dist: 16, f: 0, keys: {}, drag: null, shoot: false, n: 0 };
+    kjPhotoEl.innerHTML = '<div><b>PHOTO MODE</b> · drag / arrows to orbit · wheel or ± to zoom · <b id="kjPhF">FILTER: NONE</b></div>' +
+      '<div class="row"><button id="kjPhFilt">FILTER (F)</button><button class="shoot" id="kjPhShoot">📸 CAPTURE (ENTER)</button><button id="kjPhExit">EXIT (O)</button></div>';
+    function kjPhotoToggle() {
+      if (kj.photoOn) {
+        kj.photoOn = false; kj.paused = kj.codecOpen;
+        document.body.classList.remove('kj-photo');
+        renderer.domElement.style.filter = '';
+        return;
+      }
+      if (!started || crashing || kj.codecOpen) return;
+      kj.photoOn = true; kj.paused = true;
+      Object.keys(keys).forEach(function(k) { keys[k] = false; });
+      document.body.classList.add('kj-photo');
+      var d = camera.position.clone().sub(position);
+      kjPh.dist = THREE.MathUtils.clamp(d.length(), 5, 60);
+      kjPh.yaw = Math.atan2(d.x, d.z); kjPh.pitch = Math.asin(THREE.MathUtils.clamp(d.y / Math.max(0.01, d.length()), -0.95, 0.95));
+      kjPhApplyFilter();
+    }
+    function kjPhApplyFilter() {
+      renderer.domElement.style.filter = KJ_FILTERS[kjPh.f][1] === 'none' ? '' : KJ_FILTERS[kjPh.f][1];
+      document.getElementById('kjPhF').textContent = 'FILTER: ' + KJ_FILTERS[kjPh.f][0];
+    }
+    function kjPhotoTick(rdt) {
+      var k = kjPh.keys, sp = 1.6 * rdt;
+      if (k.left) kjPh.yaw -= sp; if (k.right) kjPh.yaw += sp;
+      if (k.up) kjPh.pitch = Math.min(1.45, kjPh.pitch + sp * 0.7); if (k.down) kjPh.pitch = Math.max(-0.3, kjPh.pitch - sp * 0.7);
+      if (k.zin) kjPh.dist = Math.max(3, kjPh.dist * (1 - rdt * 1.2)); if (k.zout) kjPh.dist = Math.min(120, kjPh.dist * (1 + rdt * 1.2));
+      var cp = Math.cos(kjPh.pitch);
+      camera.position.set(position.x + Math.sin(kjPh.yaw) * cp * kjPh.dist, position.y + Math.sin(kjPh.pitch) * kjPh.dist, position.z + Math.cos(kjPh.yaw) * cp * kjPh.dist);
+      var gy = getEffectiveGroundHeight(camera.position.x, camera.position.z) + 0.6;
+      if (camera.position.y < gy) camera.position.y = gy;
+      camera.up.set(0, 1, 0);
+      camera.lookAt(position.x, position.y + 0.4, position.z);
+    }
+    // grabbed straight after the frame renders, so the WebGL buffer is still valid
+    function kjAfterRender() {
+      if (!kjPh.shoot) return;
+      kjPh.shoot = false;
+      try {
+        var src = renderer.domElement, cv = document.createElement('canvas');
+        cv.width = src.width; cv.height = src.height;
+        var c = cv.getContext('2d');
+        if (KJ_FILTERS[kjPh.f][1] !== 'none') c.filter = KJ_FILTERS[kjPh.f][1];
+        c.drawImage(src, 0, 0);
+        c.filter = 'none';
+        var s = cv.height / 720;
+        c.fillStyle = 'rgba(0,0,0,.45)'; c.fillRect(0, cv.height - 54 * s, cv.width, 54 * s);
+        c.fillStyle = '#f2efe6'; c.font = '700 ' + Math.round(22 * s) + 'px Georgia, serif'; c.textAlign = 'left';
+        c.fillText('GLIDEPATH', 22 * s, cv.height - 20 * s);
+        c.font = Math.round(14 * s) + 'px monospace'; c.textAlign = 'right';
+        c.fillText(kjCallsign() + ' · ' + kjVehName().toUpperCase() + ' · ' + new Date().toLocaleString(), cv.width - 22 * s, cv.height - 22 * s);
+        var a = document.createElement('a');
+        a.href = cv.toDataURL('image/png');
+        a.download = 'glidepath-photo-' + Date.now() + '.png';
+        document.body.appendChild(a); a.click(); a.remove();
+        kj.stats.photos++; kjSave();
+        if (kj.stats.photos <= 3) kjLike(1, 'PHOTOGENIC');
+      } catch (e) { samToast('PHOTO FAILED', '#ff8a7a', 2); }
+    }
+    function kjPhotoShoot() {
+      kjPh.shoot = true; kjSfx('shutter');
+      kjFlashEl.style.transition = 'none'; kjFlashEl.style.opacity = '0.9';
+      setTimeout(function() { kjFlashEl.style.transition = 'opacity .35s'; kjFlashEl.style.opacity = '0'; }, 40);
+    }
+    document.getElementById('kjPhFilt').addEventListener('click', function() { kjPh.f = (kjPh.f + 1) % KJ_FILTERS.length; kjPhApplyFilter(); });
+    document.getElementById('kjPhShoot').addEventListener('click', kjPhotoShoot);
+    document.getElementById('kjPhExit').addEventListener('click', kjPhotoToggle);
+    kjPhotoBtn.addEventListener('click', kjPhotoToggle);
+    function kjPhPtr(e) { return e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY }; }
+    renderer.domElement.addEventListener('pointerdown', function(e) { if (kj.photoOn) kjPh.drag = { x: e.clientX, y: e.clientY }; });
+    window.addEventListener('pointermove', function(e) {
+      if (!kj.photoOn || !kjPh.drag) return;
+      kjPh.yaw -= (e.clientX - kjPh.drag.x) * 0.006;
+      kjPh.pitch = THREE.MathUtils.clamp(kjPh.pitch + (e.clientY - kjPh.drag.y) * 0.005, -0.3, 1.45);
+      kjPh.drag = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointerup', function() { kjPh.drag = null; });
+    window.addEventListener('wheel', function(e) { if (kj.photoOn) kjPh.dist = THREE.MathUtils.clamp(kjPh.dist * (e.deltaY > 0 ? 1.1 : 0.9), 3, 120); }, { passive: true });
+
+    /* ---------- the loop ---------- */
+    // real-time part: runs every frame even while paused (codec, photo mode, reflex timing)
+    function kjFrame(rdt) {
+      if (!kj.stats) return;
+      if (kj.reflexT > 0) {
+        kj.reflexT -= rdt;
+        kj.timeScale += (0.22 - kj.timeScale) * Math.min(1, rdt * 12);
+        if (kj.reflexT <= 0) document.body.classList.remove('kj-reflex');
+      } else kj.timeScale += (1 - kj.timeScale) * Math.min(1, rdt * 3);
+      if (kj.input2T > 0) {
+        kj.input2T -= rdt;
+        if (kj.input2T <= 0) { kjInput2El.classList.remove('on'); kj.paused = kj.codecOpen || kj.photoOn; samToast('...THE ARCHIVIST HAS LEFT THE FREQUENCY', '#9dffb8', 2.5); }
+      }
+      if (kj.codecOpen) kjCodecTick(rdt);
+      if (kj.photoOn) kjPhotoTick(rdt);
+      kjRingTick(kj.paused ? 0 : rdt);
+      kjBtns.classList.toggle('hidden', !started);
+      document.body.classList.toggle('kj-heli', isHelicopterMode);
+      document.body.classList.toggle('kj-car', isCarMode);
+      // keep the SAM/status toast clear of the pills stacked at the top
+      if (samToastEl) samToastEl.style.top = kjTop.offsetHeight > 40 ? (kjTop.offsetTop + kjTop.offsetHeight + 10) + 'px' : '';
+    }
+    // simulation part: runs inside update(), in (possibly slowed) game time
+    function kjUpdate(dt) {
+      if (!kj.stats || !started) return;
+      kj.sessionT += dt;
+      var flying = kjAirborne();
+      if (flying) {
+        kj.stats.flight += dt;
+        var vk = kjVehKey(); kj.stats.veh[vk] = (kj.stats.veh[vk] || 0) + dt;
+      }
+      // first takeoff of the session rolls the credits
+      if (kj.wasGroundedPrev && !wasGrounded && !crashing && !isCarMode) kjCredits();
+      if (isCarMode && !kj.creditsShown && Math.abs(speed) > 3) kjCredits();
+      kj.wasGroundedPrev = wasGrounded;
+      kj.groundedT = wasGrounded && Math.abs(speed) < 1 ? kj.groundedT + dt : 0;
+      if (kjVehKey() !== kj.lastVehicle) { if (kj.lastVehicle) kjOnVehicleChange(); kj.lastVehicle = kjVehKey(); }
+      kjAlertTick(dt);
+      kjReflexTick(dt);
+      kjHeartTick(dt);
+      kjEcgDraw(dt);
+      kjNearMissTick(dt);
+      kjWearTick(dt);
+      kjBirdTick(dt);
+      kjBoxTick(dt);
+      kjTapesTick(dt);
+      kjDeliveryTick(dt);
+      kjStory(dt);
+      kj.lastVy = verticalVel;
+      kj.saveT -= dt;
+      if (kj.saveT <= 0) { kj.saveT = 8; kjSave(); }
+      if (kjLikeValEl && kjLikeValEl.textContent !== String(kj.stats.likes)) kjLikeValEl.textContent = kj.stats.likes;
+    }
+    // who calls you, and when
+    var kjStoryFlags = {};
+    function kjStory(dt) {
+      var s = kj.stats, t = kj.sessionT, F = kjStoryFlags;
+      function once(k, fn) { if (!F[k]) { F[k] = true; fn(); } }
+      if (t > 4 && !s.said.h_intro) once('intro', function() { kjRing('hart', 'h_intro'); });
+      if (t > 70 && !s.said.l_intro && s.said.h_intro) once('luna', function() { kjRing('luna', 'l_intro'); });
+      if (t > 40 && !s.said.w_intro && s.said.h_intro) once('wrench', function() { kjRing('wrench', 'w_intro'); });
+      if (kj.groundedT > 10 && !s.said.w_box && s.said.w_intro) once('box', function() { kjRing('wrench', 'w_box'); });
+      if ((t > 360 || kj.sessionCrashes >= 3) && !s.said.a_first) once('arch', function() { kjRing('archivist', 'a_first'); });
+      if (t > 20 && kjSamClose() && !F.samTalk) once('samTalk', function() { kjRing('hart', 'h_sam'); });
+      if (fuel < 18 && !isCarMode && !F['fuel' + Math.floor(t / 300)]) once('fuel' + Math.floor(t / 300), function() { kjRing('hart', 'h_fuel'); });
+      if (stormActive && kjAirborne() && !F.storm) once('storm', function() { kjRing('hart', 'h_storm'); });
+      // idle: nobody touching anything
+      var idle = (performance.now() - kj.lastInput) / 1000;
+      if (idle > 75 && !F.idle1) once('idle1', function() { kjRing('hart', 'h_idle'); });
+      if (idle > 200 && s.said.a_first && !F.idle2) once('idle2', function() { kjRing('archivist', 'a_ignored'); });
+      if (idle < 5) { F.idle1 = false; }
+      // came back from another tab
+      if (kj.awayMs > 20000 && s.said.a_first && !F['away' + kj.awayStamp]) once('away' + kj.awayStamp, function() { kjRing('archivist', 'a_away'); });
+    }
+
+    /* ---------- hooks called from the rest of the game ---------- */
+    function kjOnCrash(intoWater, viaEject) {
+      if (!kj.stats) return;
+      if (!viaEject) {
+        kj.stats.crashes++; kj.sessionCrashes++;
+        if (intoWater) kj.stats.water++;
+        kjShout();
+      }
+      kjWear(0.15, 'crash');
+      kj.recentCrashAt = elapsedSeconds;
+      kjBoxBreak();
+      if (kj.sessionCrashes === 1 || kj.sessionCrashes % 5 === 0) setTimeout(function() { kjRing('hart', 'h_crash'); }, 2200);
+      document.body.classList.remove('kj-reflex'); kj.reflexT = 0;
+      kjSave();
+    }
+    function kjOnTouchdown(vs) {
+      if (!kj.stats || isCarMode) return;
+      kj.stats.landings++;
+      var sink = -(vs === undefined ? kj.lastVy : vs);
+      if (sink > 5) kjWear(Math.min(0.12, (sink - 5) * 0.02), 'hard');
+      if (kjOrder && kjOrder.kind === 'air' && !kjOrder.dropped && sink > 4) kjOrder.cond = Math.max(0, kjOrder.cond - 0.1 * kjOrder.cargo.fragile);
+      if (isOverCarrierDeck(position.x, position.z) && !isHelicopterMode) kjLike(3, 'CARRIER TRAP');
+      else if (isHelicopterMode && typeof isOverLandmarkPad === 'function' && isOverLandmarkPad(position.x, position.z, 2)) kjLike(3, 'ROOFTOP LANDING');
+      else if (sink < 1.3) { kj.stats.butter++; kjLike(2, 'BUTTER LANDING'); }
+    }
+    function kjOnEject() { if (kj.stats) { kj.stats.ejects++; kjSave(); } }
+    function kjOnRescue() { kjLike(10, 'RESCUE'); }
+    function kjOnVehicleChange() {
+      if (kjOrder) kjEndOrder(false, '📦 ORDER CANCELLED — YOU SWITCHED VEHICLES');
+      kjBoxBreak();
+    }
+
+    /* ---------- keyboard ---------- */
+    function kjKey(e, down) {
+      if (down) { kj.lastInput = performance.now(); }
+      var c = e.code;
+      if (kj.input2T > 0) return true;
+      if (kj.codecOpen) {
+        if (!down) return true;
+        if (c === 'ArrowLeft' || c === 'KeyA') kjCodecTune(-1);
+        else if (c === 'ArrowRight' || c === 'KeyD') kjCodecTune(1);
+        else if (c === 'Enter' || c === 'Space' || c === 'NumpadEnter') kjCodecAdvance();
+        else if (c === 'Escape' || c === 'KeyI') kjCodecClose();
+        return true;
+      }
+      if (kj.photoOn) {
+        var map = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', Equal: 'zin', NumpadAdd: 'zin', Minus: 'zout', NumpadSubtract: 'zout' };
+        if (map[c]) { kjPh.keys[map[c]] = down; return true; }
+        if (!down) return true;
+        if (c === 'KeyF') { kjPh.f = (kjPh.f + 1) % KJ_FILTERS.length; kjPhApplyFilter(); }
+        else if (c === 'Enter' || c === 'Space' || c === 'NumpadEnter') kjPhotoShoot();
+        else if (c === 'Escape' || c === 'KeyO') kjPhotoToggle();
+        return true;
+      }
+      if (!started || !down) return false;
+      if (c === 'KeyI') { kjCodecOpen(); return true; }
+      if (c === 'KeyO') { kjPhotoToggle(); return true; }
+      if (c === 'KeyU') { if (kj.boxed) kjBoxBreak(); else kjBoxDeploy(); return true; }
+      if (c === 'KeyY') { kjWalkNext(); return true; }
+      if (c === 'KeyN') { kjDropCargo(); return true; }
+      return false;
+    }
+    window.addEventListener('keydown', function(e) { if (kjKey(e, true)) { e.preventDefault(); e.stopImmediatePropagation(); } }, { capture: true });
+    window.addEventListener('keyup', function(e) { if (kjKey(e, false)) { e.stopImmediatePropagation(); } }, { capture: true });
+    window.addEventListener('touchstart', function() { kj.lastInput = performance.now(); kj.touchUser = true; }, { passive: true, capture: true });
+    window.addEventListener('mousedown', function() { kj.lastInput = performance.now(); }, { passive: true, capture: true });
+    document.addEventListener('visibilitychange', function() {
+      if (document.hidden) kj.hiddenAt = Date.now();
+      else if (kj.hiddenAt) { kj.awayMs = Date.now() - kj.hiddenAt; kj.awayStamp = kj.hiddenAt; kj.hiddenAt = 0; }
+    });
+    try { if (navigator.getBattery) navigator.getBattery().then(function(b) { kj.battery = b.level * 100; b.addEventListener('levelchange', function() { kj.battery = b.level * 100; }); }); } catch (e) {}
+    kjLoad();
+    if (kjLikeValEl) kjLikeValEl.textContent = kj.stats.likes;
+    kjWalkStop();
 
     /* ============================================================
        START / INIT
