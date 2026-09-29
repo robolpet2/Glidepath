@@ -774,6 +774,19 @@
     transition:transform .1s ease, background .1s ease;
   }
   #ejectBtn:active{ background:rgba(255,30,30,.75); transform:scale(.92); }
+  #respawnBtn{
+    position:fixed; z-index:12;
+    left:calc(20px + env(safe-area-inset-left)); bottom:calc(400px + env(safe-area-inset-bottom));
+    width:70px; height:34px; border-radius:12px;
+    background:rgba(20,40,30,.55); border:2px solid rgba(125,255,138,.7);
+    color:#dfffe4; font-size:10px; font-weight:800; letter-spacing:.05em;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none;
+    transition:transform .1s ease, background .1s ease;
+  }
+  #respawnBtn.hidden{ display:none; }
+  #respawnBtn:active{ transform:scale(.92); background:rgba(60,160,80,.7); }
+  #respawnBtn.urgent{ background:rgba(40,150,70,.75); animation:respawnPulse 0.9s ease-in-out infinite; }
+  @keyframes respawnPulse{ 50%{ box-shadow:0 0 18px rgba(125,255,138,.8); transform:scale(1.06); } }
 
   #fireBtn{
     position:fixed; z-index:12;
@@ -1053,6 +1066,7 @@
     #ejectBtn{ top:calc(8px + env(safe-area-inset-top)); }
     #cruiseBtn{ top:calc(44px + env(safe-area-inset-top)); }
     #flapsBtn{ top:calc(80px + env(safe-area-inset-top)); }
+    #respawnBtn{ left:calc(122px + env(safe-area-inset-left)); bottom:auto; top:calc(116px + env(safe-area-inset-top)); width:62px; height:30px; border-radius:9px; font-size:9px; }
     #throttleWrap{ left:calc(8px + env(safe-area-inset-left)); bottom:calc(6px + env(safe-area-inset-bottom)); transform:scale(.78); transform-origin:bottom left; }
     #heliDpad{ left:calc(82px + env(safe-area-inset-left)); bottom:calc(8px + env(safe-area-inset-bottom)); transform:scale(.7); transform-origin:bottom left; }
     /* right-hand cluster, re-stacked so nothing overlaps the stats card */
@@ -1128,6 +1142,7 @@
         <div><b>Y</b>Walkman</div>
         <div><b>N</b>Drop cargo</div>
         <div><b>B</b>Nuke (bomber)</div>
+        <div><b>Backspace</b>Respawn</div>
       </div>
       <div class="col">
         <h3>Touch</h3>
@@ -10919,6 +10934,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       heading = 0; pitchAngle = 0; rollAngle = 0; speed = 0; throttle = 0; verticalVel = 0; stalled = false;
       flapsDeployed = false; barrelRolling = false; cruiseActive = false;
       setDroneCam(false);
+      if (typeof wreckClearDamage === 'function' && typeof WRECK !== 'undefined') wreckClearDamage();
       if (isHelicopterMode) heliResetState(false); else heliVel.set(0, 0, 0);
       hasBrokenSonic = false;
       fuel = FUEL_MAX; outOfFuel = false;
@@ -11894,6 +11910,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       ringsEnabled = false;
       ringStreak = 0; // banked coins stay banked — only the in-progress streak is lost
       setDroneCam(false);
+      var crashAgl = kjAgl();
+      wreckBreakUp(intoWater, !viaEject && !ejecting);
       plane.visible = false;
       if (intoWater) {
         triggerWaterSplash(position);
@@ -11917,19 +11935,24 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         crashMsgEl.innerHTML = 'AIRCRAFT LOST<span>pilot ejected safely</span>';
         setTimeout(function() { if (ejecting || csar.active || csar.state === 'offer') crashMsgEl.classList.add('hidden'); }, 2600);
       } else {
-        crashMsgEl.innerHTML = (intoWater ? 'SPLASHDOWN' : 'TERRAIN CONTACT') + '<span>respawning…</span>';
+        crashMsgEl.innerHTML = (intoWater ? 'SPLASHDOWN' : crashAgl > 30 ? 'SHOT DOWN' : 'TERRAIN CONTACT') + '<span>respawning… · ⟲ RESPAWN / Backspace to skip</span>';
       }
       crashMsgEl.classList.remove('hidden');
 
       if (!viaEject) {
         // normal (non-eject) crash: reset and hand control back after a short freeze
-        setTimeout(resetAfterCrash, CRASH_RESET_DELAY);
+        // long enough to watch it come apart (longer if it's still falling out of the sky)
+        if (WRECK.resetTimer) clearTimeout(WRECK.resetTimer);
+        WRECK.resetTimer = setTimeout(function() { WRECK.resetTimer = null; if (crashing) resetAfterCrash(); }, crashAgl > 30 ? CRASH_RESET_DELAY * 3.4 : CRASH_RESET_DELAY * 2.6);
       }
       // crashes that happen mid-eject are reset later instead — once the pilot has landed
       // and the respawn delay has elapsed, see finishEjectRespawn()
     }
 
     function resetAfterCrash() {
+      if (WRECK.resetTimer) { clearTimeout(WRECK.resetTimer); WRECK.resetTimer = null; }
+      wreckClearDamage();
+      WRECK.follow = false;
       var groundH = Math.max(getTerrainHeight(position.x, position.z), WATER_LEVEL);
       position.y = groundH + RESPAWN_CLEARANCE;
       pitchAngle = 0; rollAngle = 0; verticalVel = 0; stalled = false;
@@ -11943,6 +11966,327 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       samOnPlayerReset();
       csarAfterReset();
       pvpOnReset();
+    }
+
+
+    /* ============================================================
+       WRECKAGE — crashes and battle damage that obey physics.
+       - Crash: the aircraft doesn't just vanish into a fireball. It breaks along its real parts
+         (wings, nose, tail, fin, fuselage) plus torn skin panels; every piece keeps the momentum
+         the aircraft had, tumbles, bounces and skids along the ground or sinks in the sea, the
+         big pieces burning and trailing smoke. The camera rides along with the wreck, swinging
+         round the main piece of fuselage as it cartwheels to a stop.
+       - Hit (proximity blast): a piece of the airframe — usually a wingtip — is torn off and falls
+         away. With the lift gone on one side the aircraft rolls toward it and falls into a spiral
+         you can only partly hold with opposite stick, getting worse as it goes. A helicopter loses
+         its tail rotor instead and starts to spin.
+       - RESPAWN button (or Backspace): right after a crash it puts you straight back in the air;
+         otherwise it takes you back to the runway.
+       ============================================================ */
+    var WRECK = { pieces: [], main: null, follow: false, cam: new THREE.Vector3(), camDir: new THREE.Vector3(), camDist: 20, look: new THREE.Vector3(),
+                  resetTimer: null, dmg: null, smokeT: 0 };
+    var _wkV = new THREE.Vector3(), _wkV2 = new THREE.Vector3(), _wkQ = new THREE.Quaternion(), _wkM = new THREE.Matrix4(), _wkBox = new THREE.Box3(), _wkS = new THREE.Vector3();
+    var wreckCharCache = new Map();
+    function wreckCharred(m) {
+      if (!m || Array.isArray(m)) return m;
+      if (wreckCharCache.has(m)) return wreckCharCache.get(m);
+      var c = m.clone();
+      if (c.color) c.color.multiplyScalar(0.42);
+      if (c.emissive) c.emissive.setRGB(0, 0, 0);
+      wreckCharCache.set(m, c);
+      return c;
+    }
+    function wreckActiveBody() {
+      var bodies = [heliBody, carBody, droneBody, stealthBody, seaBody];
+      for (var i = 0; i < bodies.length; i++) if (bodies[i] && bodies[i].visible) return bodies[i];
+      return jetBody;
+    }
+    // every visible, solid mesh under root, with its world matrix
+    function wreckMeshes(root) {
+      var out = [];
+      root.updateMatrixWorld(true);
+      root.traverse(function(o) {
+        if (!o.isMesh || o.isInstancedMesh) return;
+        for (var p = o; p && p !== root.parent; p = p.parent) if (!p.visible) return;
+        var m = o.material;
+        if (!m || Array.isArray(m) || (m.transparent && m.opacity < 0.6) || m.blending === THREE.AdditiveBlending) return;
+        out.push(o);
+      });
+      return out;
+    }
+    var wreckFireTex = null;
+    function wreckMakePiece(meshes, burning) {
+      // centroid in world space
+      var c = new THREE.Vector3(), n = 0;
+      meshes.forEach(function(o) { o.getWorldPosition(_wkV); c.add(_wkV); n++; });
+      c.divideScalar(Math.max(1, n));
+      var g = new THREE.Group();
+      g.position.copy(c);
+      var inv = new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z);
+      meshes.forEach(function(o) {
+        var mm = new THREE.Mesh(o.geometry, wreckCharred(o.material));
+        _wkM.multiplyMatrices(inv, o.matrixWorld);
+        _wkM.decompose(mm.position, mm.quaternion, mm.scale);
+        mm.castShadow = true;
+        g.add(mm);
+      });
+      _wkBox.setFromObject(g);
+      var r = Math.max(0.4, _wkBox.getSize(_wkS).length() * 0.35);
+      scene.add(g);
+      var P = { g: g, vel: new THREE.Vector3(), axis: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(),
+                spin: 0, r: r, burn: burning ? 10 + Math.random() * 8 : 0, fire: null, rest: false, sunk: false, age: 0, mass: n };
+      if (burning) {
+        if (!wreckFireTex) wreckFireTex = fireGlowTexture;
+        P.fire = new THREE.Sprite(new THREE.SpriteMaterial({ map: wreckFireTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: 0xffa050, opacity: 0.9 }));
+        P.fire.scale.set(r * 3, r * 3, 1);
+        scene.add(P.fire);
+      }
+      WRECK.pieces.push(P);
+      return P;
+    }
+    // torn skin panels: jagged little shards in the aircraft's paint
+    var wreckShardGeo = (function() {
+      var g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1.1, 0.1, 0.2, 0.3, 0.05, 0.9, 0.9, -0.05, 0.8, 0, 0, 0, 0.3, 0.05, 0.9], 3));
+      g.computeVertexNormals();
+      return g;
+    })();
+    function wreckShards(at, baseVel, count, mat) {
+      for (var i = 0; i < count; i++) {
+        var g = new THREE.Group();
+        var m = new THREE.Mesh(wreckShardGeo, mat);
+        m.material.side = THREE.DoubleSide;
+        var s = 0.5 + Math.random() * 1.2;
+        m.scale.set(s, s, s);
+        g.add(m);
+        g.position.copy(at).add(_wkV.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2));
+        scene.add(g);
+        var P = { g: g, vel: baseVel.clone().multiplyScalar(0.5 + Math.random() * 0.4).add(new THREE.Vector3((Math.random() - 0.5) * 30, Math.random() * 16, (Math.random() - 0.5) * 30)),
+                  axis: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(), spin: 6 + Math.random() * 10,
+                  r: 0.4 * s, burn: 0, fire: null, rest: false, sunk: false, age: 0, mass: 0.2, shard: true };
+        WRECK.pieces.push(P);
+      }
+    }
+    function wreckClearDebris() {
+      WRECK.pieces.forEach(function(P) { scene.remove(P.g); if (P.fire) { scene.remove(P.fire); P.fire.material.dispose(); } });
+      WRECK.pieces.length = 0; WRECK.main = null; WRECK.follow = false;
+    }
+
+    // ---------- crash: the aircraft comes apart ----------
+    function wreckBreakUp(intoWater, follow) {
+      wreckClearDebris();
+      var body = wreckActiveBody();
+      var meshes = wreckMeshes(body);
+      if (!meshes.length) return;
+      plane.updateMatrixWorld(true);
+      var inv = new THREE.Matrix4().copy(plane.matrixWorld).invert();
+      // extent of the airframe in its own axes (x right, y up, -z forward)
+      var lp = meshes.map(function(o) { o.getWorldPosition(_wkV); return _wkV.clone().applyMatrix4(inv); });
+      var maxX = 0.5, minZ = -0.5, maxZ = 0.5;
+      lp.forEach(function(p) { maxX = Math.max(maxX, Math.abs(p.x)); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); });
+      var groups = { L: [], R: [], nose: [], tail: [], fin: [], body: [] };
+      meshes.forEach(function(o, i) {
+        var p = lp[i];
+        if (p.x < -maxX * 0.4) groups.L.push(o);
+        else if (p.x > maxX * 0.4) groups.R.push(o);
+        else if (p.z < minZ * 0.45) groups.nose.push(o);
+        else if (p.z > maxZ * 0.5) (p.y > 0.5 ? groups.fin : groups.tail).push(o);
+        else groups.body.push(o);
+      });
+      // what the aircraft was doing at the moment of impact
+      var v = new THREE.Vector3();
+      if (isHelicopterMode) v.copy(heliVel);
+      else v.copy(velocityVec);
+      if (v.lengthSq() < 1) v.copy(forwardVec).multiplyScalar(speed);
+      var impact = Math.min(1, v.length() / 120);
+      var hitGround = !intoWater && kjAgl() < 12;
+      var biggest = null;
+      Object.keys(groups).forEach(function(k) {
+        if (!groups[k].length) return;
+        var burning = k === 'body' || (k !== 'nose' && Math.random() < 0.45);
+        var P = wreckMakePiece(groups[k], burning && !intoWater);
+        // keep most of the momentum; hitting the ground turns the vertical part into a bounce and
+        // flings the pieces out sideways
+        P.vel.copy(v).multiplyScalar(hitGround ? 0.55 + Math.random() * 0.25 : 0.85 + Math.random() * 0.15);
+        if (hitGround) P.vel.y = Math.abs(v.y) * 0.25 + 3 + Math.random() * 7 * (0.4 + impact);
+        _wkV.copy(P.g.position).sub(position).normalize().multiplyScalar(5 + impact * 18 + Math.random() * 6);
+        P.vel.add(_wkV);
+        P.spin = (1.5 + Math.random() * 5) * (0.4 + impact);
+        if (!biggest || P.mass > biggest.mass) biggest = P;
+      });
+      var paint = meshes[0].material && meshes[0].material.isMaterial ? wreckCharred(meshes[0].material) : new THREE.MeshStandardMaterial({ color: 0x333333 });
+      wreckShards(position, v, intoWater ? 6 : 14, paint);
+      WRECK.main = biggest;
+      WRECK.follow = !!follow;
+      if (follow) {
+        WRECK.look.copy(biggest ? biggest.g.position : position);
+        WRECK.cam.copy(camera.position);
+        WRECK.camDir.copy(camera.position).sub(WRECK.look); WRECK.camDir.y = 0;
+        if (WRECK.camDir.lengthSq() < 0.01) WRECK.camDir.set(0, 0, 1);
+        WRECK.camDir.normalize();
+        WRECK.camDist = THREE.MathUtils.clamp(camera.position.distanceTo(WRECK.look), 12, 30);
+      }
+    }
+
+    // ---------- battle damage: something tears off ----------
+    function wreckDamage(why) {
+      if (crashing || ejecting || isCarMode || !started) return;
+      var D = WRECK.dmg;
+      if (D) {
+        // hit again with a piece already gone — it only gets worse
+        D.sev = Math.min(1.5, D.sev + 0.35);
+        wreckShards(plane.localToWorld(D.tip.clone()), velocityVec, 8, D.paint);
+        return;
+      }
+      D = WRECK.dmg = { side: Math.random() < 0.5 ? -1 : 1, sev: 0.55, t: 0, hidden: [], tip: new THREE.Vector3(), paint: null, heli: isHelicopterMode };
+      var body = wreckActiveBody(), meshes = wreckMeshes(body);
+      plane.updateMatrixWorld(true);
+      var inv = new THREE.Matrix4().copy(plane.matrixWorld).invert();
+      D.paint = meshes.length ? wreckCharred(meshes[0].material) : new THREE.MeshStandardMaterial({ color: 0x333333 });
+      var torn = [];
+      if (isHelicopterMode && typeof tailRotorPivot !== 'undefined' && tailRotorPivot.visible) {
+        torn = wreckMeshes(tailRotorPivot);
+        tailRotorPivot.getWorldPosition(_wkV); D.tip.copy(_wkV.applyMatrix4(inv));
+        D.hidden.push(tailRotorPivot);
+      } else {
+        var lp = meshes.map(function(o) { o.getWorldPosition(_wkV); return _wkV.clone().applyMatrix4(inv); });
+        var maxX = 0.5; lp.forEach(function(p) { if (p.x * D.side > maxX) maxX = p.x * D.side; });
+        meshes.forEach(function(o, i) { if (lp[i].x * D.side > maxX * 0.55 && maxX > 1.2) torn.push(o); });
+        D.tip.set(D.side * Math.max(maxX, 2.5), 0, 0.3);
+        torn.forEach(function(o) { D.hidden.push(o); });
+      }
+      var tipW = plane.localToWorld(D.tip.clone());
+      var v = isHelicopterMode ? heliVel.clone() : velocityVec.clone();
+      if (torn.length) {
+        var P = wreckMakePiece(torn, true);
+        P.vel.copy(v).multiplyScalar(0.9).add(_wkV.set(Math.random() - 0.5, 2 + Math.random() * 3, Math.random() - 0.5));
+        P.burn = 6; P.spin = 5 + Math.random() * 6;
+      }
+      D.hidden.forEach(function(o) { o.visible = false; });
+      wreckShards(tipW, v, 10, D.paint);
+      triggerMissileBlast(tipW.clone());
+      fxShake = Math.max(fxShake, 1.0);
+      samToast(isHelicopterMode ? '💥 TAIL ROTOR SHOT AWAY — IT\'S SPINNING' : (D.side > 0 ? '💥 RIGHT WING HIT — FIGHT THE ROLL' : '💥 LEFT WING HIT — FIGHT THE ROLL'), '#ff5a3a', 3.2);
+    }
+    function wreckClearDamage() {
+      if (WRECK.dmg) WRECK.dmg.hidden.forEach(function(o) { o.visible = true; });
+      WRECK.dmg = null;
+    }
+
+    // ---------- respawn ----------
+    function wreckRespawn() {
+      if (!started || ejecting) return;
+      if (WRECK.resetTimer) { clearTimeout(WRECK.resetTimer); WRECK.resetTimer = null; }
+      if (typeof csar !== 'undefined' && csar.active) csarAbort();
+      if (crashing) { resetAfterCrash(); return; }
+      wreckClearDamage();
+      wreckClearDebris();
+      spawnAt(RUNWAY_CENTER_X, RUNWAY_CENTER_Z + RUNWAY_HALF_LENGTH - 15);
+      samOnPlayerReset();
+      samToast('⟲ RESPAWNED AT THE AIRFIELD', '#7dff8a', 1.6);
+    }
+    var wreckRespawnBtn = document.createElement('div');
+    wreckRespawnBtn.id = 'respawnBtn';
+    wreckRespawnBtn.className = 'hidden';
+    wreckRespawnBtn.textContent = '⟲ RESPAWN';
+    document.body.appendChild(wreckRespawnBtn);
+    ['touchstart', 'mousedown'].forEach(function(ev) {
+      wreckRespawnBtn.addEventListener(ev, function(e) { e.preventDefault(); e.stopPropagation(); wreckRespawn(); }, { passive: false });
+    });
+    window.addEventListener('keydown', function(e) {
+      if (e.code === 'Backspace' && started && !(e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) { e.preventDefault(); wreckRespawn(); }
+    });
+
+    // ---------- per frame ----------
+    function wreckUpdate(dt) {
+      wreckRespawnBtn.classList.toggle('hidden', !started);
+      wreckRespawnBtn.classList.toggle('urgent', crashing && !ejecting);
+      var i, P;
+      // debris physics
+      for (i = WRECK.pieces.length - 1; i >= 0; i--) {
+        P = WRECK.pieces[i];
+        P.age += dt;
+        if (P.sunk || P.age > 40) { scene.remove(P.g); if (P.fire) scene.remove(P.fire); WRECK.pieces.splice(i, 1); if (P === WRECK.main) WRECK.main = null; continue; }
+        var gp = P.g.position;
+        if (!P.rest) {
+          P.vel.y -= 9.81 * dt;
+          var drag = P.shard ? 0.9 : 0.12;
+          P.vel.multiplyScalar(1 - Math.min(0.5, drag * dt));
+          gp.addScaledVector(P.vel, dt);
+          _wkQ.setFromAxisAngle(P.axis, P.spin * dt);
+          P.g.quaternion.premultiply(_wkQ);
+          var gh = getEffectiveGroundHeight(gp.x, gp.z);
+          if (gh < WATER_LEVEL && gp.y < WATER_LEVEL + 0.3) {
+            // into the sea: a splash, then it slowly goes under
+            if (!P.wet) { P.wet = true; if (!P.shard) triggerWaterSplash(gp.clone()); if (P.fire) P.fire.visible = false; P.burn = 0; }
+            P.vel.multiplyScalar(1 - Math.min(1, 3 * dt)); P.vel.y = -1.2; P.spin *= 1 - Math.min(1, dt);
+            if (gp.y < WATER_LEVEL - 6) P.sunk = true;
+          } else if (gp.y - P.r * 0.35 < gh) {
+            gp.y = gh + P.r * 0.35;
+            var vy = P.vel.y;
+            P.vel.y = vy < -3 ? -vy * 0.3 : 0;
+            P.vel.x *= 0.6; P.vel.z *= 0.6;
+            P.spin *= 0.6;
+            if (vy < -8 && !P.shard) { if (Math.random() < 0.5) playMissileImpactSound(); samEmitSmoke(gp, _wkV.set(0, 2, 0), P.r * 4, 2.5, 0.5, 0.45, new THREE.Color(0.45, 0.38, 0.3)); }
+            if (P.vel.lengthSq() < 1.5 && Math.abs(vy) < 3) { P.rest = true; P.spin = 0; }
+          }
+        }
+        if (P.burn > 0) {
+          P.burn -= dt * (P.rest ? 0.4 : 1);
+          if (P.fire) {
+            P.fire.visible = true;
+            P.fire.position.copy(gp);
+            var fl = Math.min(1, P.burn / 3) * (0.75 + 0.25 * Math.sin(P.age * 17 + i));
+            P.fire.material.opacity = fl * 0.9;
+            P.fire.scale.set(P.r * (2.5 + fl), P.r * (3 + fl * 1.5), 1);
+          }
+          WRECK.smokeT += dt;
+          if (Math.random() < dt * 14) samEmitSmoke(gp, _wkV.set(P.vel.x * 0.15, 3 + Math.random() * 2, P.vel.z * 0.15), P.r * 5 + 3, 3.5, 0.6, 0.12);
+        } else if (P.fire && P.fire.visible) { P.fire.visible = false; }
+      }
+      // camera rides with the wreck
+      if (crashing && WRECK.follow && !ejecting) {
+        var M = WRECK.main;
+        if (M) WRECK.look.lerp(M.g.position, Math.min(1, 6 * dt));
+        WRECK.camDir.applyAxisAngle(FR_UP, dt * 0.35);
+        WRECK.camDist += (26 - WRECK.camDist) * Math.min(1, dt * 0.8);
+        _wkV.copy(WRECK.look).addScaledVector(WRECK.camDir, WRECK.camDist);
+        _wkV.y = WRECK.look.y + 7;
+        var cgh = Math.max(getEffectiveGroundHeight(_wkV.x, _wkV.z), WATER_LEVEL) + 3;
+        if (_wkV.y < cgh) _wkV.y = cgh;
+        WRECK.cam.lerp(_wkV, Math.min(1, 3.5 * dt));
+        camera.position.copy(WRECK.cam);
+        camera.up.set(0, 1, 0);
+        camera.lookAt(WRECK.look);
+        shakeBase.copy(WRECK.cam);
+      }
+      // battle damage in flight
+      var D = WRECK.dmg;
+      if (D && !crashing && started) {
+        D.t += dt;
+        D.sev = Math.min(1.5, D.sev + dt * 0.025);
+        if (!wasGrounded) {
+          if (D.heli && isHelicopterMode) {
+            // no tail rotor, nothing fights the main rotor's torque: the airframe spins up
+            heliYawRate += (1.6 + D.sev) * Math.max(0.3, heliRpm) * dt;
+          } else if (!isHelicopterMode) {
+            // one wing has lost lift: it rolls toward the damage; full opposite stick only holds
+            // it for so long, and the bank turns into a descending spiral
+            rollRate += D.side * ROLL_LERP * MAX_ROLL * (0.95 + 0.6 * D.sev) * dt;
+            pitchRate -= 0.25 * D.sev * dt;
+            verticalVel -= 2.2 * D.sev * dt;
+            speed = Math.max(0, speed - 2 * D.sev * dt);
+          }
+        }
+        // the torn edge burns and trails smoke
+        WRECK.smokeT += dt;
+        if (WRECK.smokeT > 0.05) {
+          WRECK.smokeT = 0;
+          var tw = plane.localToWorld(_wkV2.copy(D.tip));
+          samEmitSmoke(tw, _wkV.set((Math.random() - 0.5) * 2, 1.5, (Math.random() - 0.5) * 2), 5 + D.sev * 4, 2.6, 0.55, 0.1);
+          if (Math.random() < 0.5) samEmitSmoke(tw, _wkV.set(0, 0.5, 0), 2.2, 0.35, 0.9, 1, new THREE.Color(1, 0.55, 0.15));
+        }
+      }
     }
 
     /* ============================================================
@@ -13617,6 +13961,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (mapAccum > 0.05) { mapAccum = 0; if (!miniMapWrapEl.classList.contains('hidden')) drawMiniMap(); }
       updateWaterSplash(dt);
       updateSonicBoom(dt, position, forwardVec);
+      wreckUpdate(dt);
       updateCrashShake(dt);
       if (started) updateWingtipTrails(speed, rollAngle);
       updateEject(dt);
@@ -15887,6 +16232,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       samEngineKilled = true;
       keys.boost = false;
       samToast('ENGINE FIRE — EJECT OR GLIDE HOME', '#ff3b30', 4);
+      wreckDamage('sam');
       var cf = document.getElementById('crashFlash');
       if (cf) { cf.style.opacity = '0.5'; setTimeout(function() { cf.style.opacity = '0'; }, 140); }
     }
@@ -17431,7 +17777,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var cf = document.getElementById('crashFlash');
       if (cf) { cf.style.opacity = '0.28'; setTimeout(function() { cf.style.opacity = '0'; }, 90); }
       if (pvp.hull <= 0) { samToast('SHOT DOWN', '#ff3b30', 2.5); triggerCrash(false, false); }
-      else if (pvp.hull < 35 && !samEngineKilled && amount >= 20) { samEngineKilled = true; keys.boost = false; samToast('ENGINE HIT — EJECT OR GLIDE HOME', '#ff3b30', 3); }
+      else if (pvp.hull < 35 && !samEngineKilled && amount >= 20) { samEngineKilled = true; keys.boost = false; samToast('ENGINE HIT — EJECT OR GLIDE HOME', '#ff3b30', 3); wreckDamage('pvp'); }
     }
     // called from triggerCrash: credit whoever hit you recently, then announce it to the room
     function pvpOnCrash() {
