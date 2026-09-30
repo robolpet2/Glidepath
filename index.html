@@ -577,7 +577,12 @@
   .livePlaneOpt.active{ background:rgba(225,6,0,.14); border-color:var(--red); }
   .livePlaneOpt.active .pName{ color:var(--red); }
   #livePlaneHint{ margin-top:6px; font-size:10px; color:#9aa3ad; letter-spacing:.02em; opacity:.75; }
-  #weatherPresets{ display:flex; gap:6px; }
+  #weatherPresets, #seasonPresets{ display:flex; gap:6px; }
+  #seasonRow{ margin-top:10px; }
+  #seasonRow h3{ margin:0 0 8px; font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:#9aa3ad; font-weight:600; }
+  #seasonPresets button{ flex:1; font-size:10.5px; padding:6px 4px; border-radius:6px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.04); color:var(--off); cursor:pointer; }
+  #seasonPresets button.active{ background:var(--red); color:#fff; border-color:var(--red); }
   #weatherPresets button{ flex:1; font-size:10.5px; padding:6px 4px; border-radius:6px; border:1px solid rgba(255,255,255,.14);
     background:rgba(255,255,255,.06); color:var(--off); cursor:pointer; letter-spacing:.02em; }
   #weatherPresets button.active{ background:var(--red); color:#fff; border-color:var(--red); }
@@ -1354,6 +1359,15 @@
         <button data-weather="storm">Storm</button>
       </div>
     </div>
+    <div id="seasonRow">
+      <h3>Season</h3>
+      <div id="seasonPresets">
+        <button data-season="spring">Spring</button>
+        <button data-season="summer">Summer</button>
+        <button data-season="autumn">Autumn</button>
+        <button data-season="winter">Winter</button>
+      </div>
+    </div>
     <div id="livePlaneRow">
       <h3>Aircraft</h3>
       <div id="livePlaneOptions">
@@ -1840,6 +1854,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
       }
 
+      // the abandoned airstrip: its old grading still holds, flat along the strip and its shoulders
+      if (OLD_STRIP) {
+        var osx = x - OLD_STRIP.x, osz = z - OLD_STRIP.z;
+        var osu = Math.abs(osx * OLD_STRIP.ux + osz * OLD_STRIP.uz), osv = Math.abs(-osx * OLD_STRIP.uz + osz * OLD_STRIP.ux);
+        var osd = Math.hypot(Math.max(0, osu - OLD_STRIP.L / 2 - 30), Math.max(0, osv - OLD_STRIP.W / 2 - 45));
+        if (osd < 170) {
+          var ost = 1 - osd / 170; ost = ost * ost * (3 - 2 * ost);
+          naturalHeight = naturalHeight * (1 - ost) + OLD_STRIP.y * ost;
+        }
+      }
+
       // Distance from the runway pad's paved edge (0 = under/at the pad itself).
       var apx = x - RUNWAY_CENTER_X, apz = z - RUNWAY_CENTER_Z;
       var dx = Math.max(0, AIRPORT_PAD.x0 - apx, apx - AIRPORT_PAD.x1);
@@ -1898,8 +1923,61 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       best.y = Math.max(best.y, WATER_LEVEL + 10);
       SAM_BASE = best;
     })();
+
+    // ---- secrets: an abandoned airstrip on the flattest open ground far from everything else, and a
+    // crashed saucer high up in the hills. Chosen once, deterministically, from the raw landscape.
+    var OLD_STRIP = null, UFO_SITE = null;
+    (function chooseSecretSites() {
+      function raw(x, z) { return oceanShape(x, z, Math.pow(fbm(x * 0.0009, z * 0.0009, 6), 2.2) * 300 - 40); }
+      var CITY_C = { x: RUNWAY_CENTER_X + 1450, z: RUNWAY_CENTER_Z + 950 };
+      function clearOf(x, z, pad) {
+        if (Math.hypot(x - SAM_BASE.x, z - SAM_BASE.z) < 1750 + pad) return false;   // outside the SAM radar
+        if (Math.hypot(x - CITY_C.x, z - CITY_C.z) < 1000 + pad) return false;
+        if (Math.hypot(x - RUNWAY_CENTER_X, z - RUNWAY_CENTER_Z) < 1500 + pad) return false;
+        if (Math.abs(z - RIVER_Z) < 220 + pad || oceanFactor(x, z) > 0 || z > oceanCoastZ(x) - 500) return false;
+        return true;
+      }
+      var best = null, L = 640;
+      for (var r = 1800; r <= 3800; r += 200) {
+        for (var a = 0; a < 360; a += 12) {
+          var ang = a * Math.PI / 180, x = RUNWAY_CENTER_X + Math.cos(ang) * r, z = RUNWAY_CENTER_Z + Math.sin(ang) * r;
+          if (!clearOf(x, z, 0)) continue;
+          for (var o = 0; o < 4; o++) {
+            var dir = o * Math.PI / 4, ux = Math.cos(dir), uz = Math.sin(dir), sum = 0, sum2 = 0, n = 0, lo = 1e9, hi = -1e9;
+            for (var k = -4; k <= 4; k++) for (var q = -1; q <= 1; q++) {
+              var px = x + ux * k * L / 8 - uz * q * 40, pz = z + uz * k * L / 8 + ux * q * 40, h = raw(px, pz);
+              sum += h; sum2 += h * h; n++; if (h < lo) lo = h; if (h > hi) hi = h;
+            }
+            if (lo < WATER_LEVEL + 8 || hi > 120) continue;
+            var mean = sum / n, sd = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
+            var score = sd + (hi - lo) * 0.3;
+            if (!best || score < best.score) best = { x: x, z: z, y: mean, ang: dir, score: score };
+          }
+        }
+      }
+      if (best) OLD_STRIP = { x: best.x, z: best.z, y: best.y, ang: best.ang, ux: Math.cos(best.ang), uz: Math.sin(best.ang), L: L, W: 30 };
+      var bu = null;
+      for (var r2 = 1500; r2 <= 4200; r2 += 150) {
+        for (var a2 = 0; a2 < 360; a2 += 8) {
+          var ang2 = a2 * Math.PI / 180, x2 = RUNWAY_CENTER_X + Math.cos(ang2) * r2, z2 = RUNWAY_CENTER_Z + Math.sin(ang2) * r2;
+          if (!clearOf(x2, z2, -200)) continue;
+          if (OLD_STRIP && Math.hypot(x2 - OLD_STRIP.x, z2 - OLD_STRIP.z) < 1000) continue;
+          var h0 = raw(x2, z2);
+          var sl = Math.max(Math.abs(raw(x2 + 25, z2) - raw(x2 - 25, z2)), Math.abs(raw(x2, z2 + 25) - raw(x2, z2 - 25)));
+          if (sl > 30 || h0 < 60) continue;
+          var sc = h0 - sl * 2;
+          if (!bu || sc > bu.score) bu = { x: x2, z: z2, y: h0, score: sc };
+        }
+      }
+      if (bu) UFO_SITE = { x: bu.x, z: bu.z, y: bu.y, yaw: (bu.x * 0.37 + bu.z * 0.11) % (Math.PI * 2) };
+    })();
     // no forest trees on the city, the highway corridor (incl. embankments), the airfield or the SAM base
     function treeBlockedAt(wx, wz) {
+      if (OLD_STRIP) {
+        var obx = wx - OLD_STRIP.x, obz = wz - OLD_STRIP.z;
+        if (Math.abs(obx * OLD_STRIP.ux + obz * OLD_STRIP.uz) < OLD_STRIP.L / 2 + 90 && Math.abs(-obx * OLD_STRIP.uz + obz * OLD_STRIP.ux) < 110) return true;
+      }
+      if (UFO_SITE && Math.hypot(wx - UFO_SITE.x, wz - UFO_SITE.z) < 45) return true;
       if (CITY_FLAT) { var cdx = wx - CITY_FLAT.x, cdz = wz - CITY_FLAT.z; if (cdx * cdx + cdz * cdz < Math.pow(CITY_FLAT.r + 20, 2)) return true; }
       if (SAM_BASE) { var sdx = wx - SAM_BASE.x, sdz = wz - SAM_BASE.z; if (sdx * sdx + sdz * sdz < 300 * 300) return true; }
       var hwp = window.__highwayPath;
@@ -1912,6 +1990,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var ax = wx - RUNWAY_CENTER_X, az = wz - RUNWAY_CENTER_Z;
       if (ax > AIRPORT_PAD.x0 - 25 && ax < AIRPORT_PAD.x1 + 25 && az > AIRPORT_PAD.z0 - 25 && az < AIRPORT_PAD.z1 + 25) return true;
       return isOverRunway(wx, wz, 45);
+    }
+    // other places a plane can put down: the abandoned airstrip, and frozen water in winter
+    function worldLandable(x, z, margin) {
+      if (OLD_STRIP) {
+        var ox = x - OLD_STRIP.x, oz = z - OLD_STRIP.z;
+        if (Math.abs(ox * OLD_STRIP.ux + oz * OLD_STRIP.uz) < OLD_STRIP.L / 2 + (margin || 0) && Math.abs(-ox * OLD_STRIP.uz + oz * OLD_STRIP.ux) < OLD_STRIP.W / 2 + (margin || 0)) return true;
+      }
+      return typeof SEASON !== 'undefined' && SEASON && iceAt(x, z, getTerrainHeight(x, z));
     }
     function isOverRunway(x, z, margin) {
       return Math.abs(x - RUNWAY_CENTER_X) < RUNWAY_HALF_WIDTH + margin &&
@@ -1980,6 +2066,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (cBlend > 0) return natural * (1 - cBlend) + cs.groundY * cBlend;
         }
       }
+      // winter ice over the shallows, rivers and lakes carries your weight
+      if (typeof SEASON !== 'undefined' && SEASON && iceAt(x, z, natural)) return WATER_LEVEL + 0.25;
 
       return natural;
     }
@@ -3732,8 +3820,22 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       [agents, busAgents].forEach(function(list) { list.forEach(function(a) { var t = 0; while (!validDir(a, a.dir) && t++ < 4) a.dir = (a.dir + 1) % 4; }); });
       // parked cars stay put (instances after the moving ones)
       parked.forEach(function(p, k) { fleetSet(cars, CAR_N + k, p[0], 0.21, p[1], p[2]); });
+      // traffic reacts to you: drivers brake hard when you come in low over the street or sit
+      // in the road ahead of them, lean on the horn, and pull away again once you've gone
+      var trafficPl = { x: 0, z: 0, low: false, onRoad: false };
       function stepAgent(a, dt) {
-        a.s += a.speed * dt;
+        if (a.cur === undefined) a.cur = a.speed;
+        var want = a.speed;
+        if (trafficPl.low && a.x !== undefined) {
+          var tdx = trafficPl.x - a.x, tdz = trafficPl.z - a.z, td = Math.sqrt(tdx * tdx + tdz * tdz);
+          var ahead = (tdx * DIRS[a.dir][0] + tdz * DIRS[a.dir][1]) > -4;
+          if ((trafficPl.onRoad && td < 34 && ahead) || (!trafficPl.onRoad && td < 60)) {
+            want = 0;
+            if (!a.honked && Math.random() < 0.4) { a.honked = true; if (typeof worldHonk === 'function') worldHonk(cx + a.x, groundY, cz + a.z); }
+          } else if (td > 90) a.honked = false;
+        }
+        a.cur += (want - a.cur) * Math.min(1, dt * (want < a.cur ? 3.5 : 0.8));
+        a.s += a.cur * dt;
         if (a.s >= PITCH) {
           a.s -= PITCH; a.gi += DIRS[a.dir][0]; a.gj += DIRS[a.dir][1];
           var back = a.dir ^ 1, opts = [];
@@ -3743,6 +3845,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var dx = DIRS[a.dir][0], dz = DIRS[a.dir][1];
         // right-hand traffic: lane offset to the right of travel = (-dz, dx)
         var x = LINES[a.gi] + dx * a.s + (-dz) * a.lane, z = LINES[a.gj] + dz * a.s + dx * a.lane;
+        a.x = x; a.z = z;
         var yaw = Math.atan2(dx, dz);
         var dy = Math.atan2(Math.sin(yaw - a.yaw), Math.cos(yaw - a.yaw));
         a.yaw += THREE.MathUtils.clamp(dy, -4 * dt, 4 * dt);
@@ -3752,6 +3855,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var beaconT = 0;
       updateCityTraffic = function(dt) {
         var night = cityNightFactor();
+        var havePos = !!position;
+        trafficPl.x = havePos ? position.x - cx : 1e9; trafficPl.z = havePos ? position.z - cz : 1e9;
+        trafficPl.low = havePos && started && !crashing && position.y - groundY < (wasGrounded ? 6 : 45) && Math.abs(trafficPl.x) < EXT + 60 && Math.abs(trafficPl.z) < EXT + 60;
+        trafficPl.onRoad = wasGrounded || isCarMode;
         for (var i = 0; i < agents.length; i++) { var r = stepAgent(agents[i], dt); fleetSet(cars, i, r[0], 0.05, r[1], r[2]); }
         for (var j = 0; j < busAgents.length; j++) { var rb = stepAgent(busAgents[j], dt); fleetSet(buses, j, rb[0], 0.05, rb[1], rb[2]); }
         fleetCommit(cars); fleetCommit(buses);
@@ -6508,6 +6615,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         birdFlocks.push({ center: center, birds: birds, orbitRadius: 20 + Math.random() * 25, orbitSpeed: 0.15 + Math.random() * 0.15, orbitPhase: Math.random() * Math.PI * 2 });
       }
     })();
+    // flocks circle quietly until something big and loud comes through them — then they burst
+    // apart in every direction, climbing and flapping hard, and drift back together once it's gone
+    var _bdV = new THREE.Vector3();
     function updateBirds(dt, elapsed, px, pz) {
       for (var f = 0; f < birdFlocks.length; f++) {
         var flock = birdFlocks[f];
@@ -6516,16 +6626,43 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           var angle = Math.random() * Math.PI * 2;
           var radius = 900 + Math.random() * 900;
           flock.center.set(px + Math.sin(angle) * radius, 60 + Math.random() * 90, pz + Math.cos(angle) * radius);
+          flock.scare = 0;
         }
         var orbitAngle = flock.orbitPhase + elapsed * flock.orbitSpeed;
         var flockX = flock.center.x + Math.sin(orbitAngle) * flock.orbitRadius;
         var flockZ = flock.center.z + Math.cos(orbitAngle) * flock.orbitRadius;
         var headingAngle = orbitAngle + Math.PI / 2;
+        if (!flock.scare) flock.scare = 0;
+        var near = Math.hypot(flockX - px, flock.center.y - position.y, flockZ - pz);
+        if (flock.scare <= 0 && started && !crashing && near < (isHelicopterMode ? 140 : 110)) {
+          flock.scare = 7 + Math.random() * 3;
+          for (var sb = 0; sb < flock.birds.length; sb++) {
+            var bs = flock.birds[sb];
+            if (!bs.sp) { bs.sp = new THREE.Vector3(); bs.sv = new THREE.Vector3(); }
+            _bdV.set(flockX + bs.offset.x - px, flock.center.y + bs.offset.y - position.y, flockZ + bs.offset.z - pz).normalize();
+            bs.sv.copy(_bdV).multiplyScalar(12 + Math.random() * 10);
+            bs.sv.x += (Math.random() - 0.5) * 8; bs.sv.z += (Math.random() - 0.5) * 8; bs.sv.y = Math.abs(bs.sv.y) * 0.5 + 5 + Math.random() * 6;
+          }
+          if (typeof worldBirdCry === 'function') worldBirdCry(near);
+        }
+        if (flock.scare > 0) flock.scare -= dt;
         for (var b = 0; b < flock.birds.length; b++) {
           var bird = flock.birds[b];
-          bird.mesh.position.set(flockX + bird.offset.x, flock.center.y + bird.offset.y, flockZ + bird.offset.z);
-          bird.mesh.rotation.y = headingAngle;
-          bird.mesh.rotation.z = Math.sin(elapsed * bird.flapSpeed + bird.flapPhase) * 0.5;
+          var bx = flockX + bird.offset.x, by = flock.center.y + bird.offset.y, bz = flockZ + bird.offset.z, flap = 1;
+          if (bird.sp) {
+            if (flock.scare > 0) {
+              bird.sp.addScaledVector(bird.sv, dt);
+              bird.sv.multiplyScalar(1 - Math.min(1, dt * 0.35));
+              flap = 2.6;
+            } else {
+              bird.sp.multiplyScalar(1 - Math.min(1, dt * 0.4));
+              flap = bird.sp.lengthSq() > 4 ? 1.7 : 1;
+            }
+            bx += bird.sp.x; by += bird.sp.y; bz += bird.sp.z;
+          }
+          bird.mesh.position.set(bx, by, bz);
+          bird.mesh.rotation.y = bird.sp && flock.scare > 0 ? Math.atan2(bird.sv.x, bird.sv.z) + Math.PI : headingAngle;
+          bird.mesh.rotation.z = Math.sin(elapsed * bird.flapSpeed * flap + bird.flapPhase) * 0.5 * (flap > 1 ? 1.4 : 1);
         }
       }
     }
@@ -6636,19 +6773,21 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       _rainPrevCam.copy(cam); _rainHavePrev = true;
       if (!on) { rainShafts.forEach(function(m) { m.visible = false; }); return; }
-      var fall = 9 + intensity * 3;                               // terminal velocity of a real raindrop, m/s
+      var snowing = SEASON.snow > 0.5;
+      var fall = snowing ? 1.3 + intensity * 0.3 : 9 + intensity * 3;   // terminal velocity: raindrop vs snowflake, m/s
       var off = U.uOff.value;
       off.x = (off.x + windPush.x * dt * 1.4) % RAIN_BOX.x;
       off.y = (off.y - fall * dt + RAIN_BOX.y * 100) % RAIN_BOX.y;
       off.z = (off.z + windPush.z * dt * 1.4) % RAIN_BOX.z;
       U.uCam.value.copy(cam);
       // streak = motion during a ~1/25 s exposure, seen from the moving camera
-      U.uStreak.value.set(windPush.x * 1.4 - _rainCamVel.x, -fall - _rainCamVel.y, windPush.z * 1.4 - _rainCamVel.z).multiplyScalar(0.045);
+      U.uStreak.value.set(windPush.x * 1.4 - _rainCamVel.x, -fall - _rainCamVel.y, windPush.z * 1.4 - _rainCamVel.z).multiplyScalar(snowing ? 0.012 : 0.045);
+      if (snowing) { off.x += Math.sin(elapsedSeconds * 0.7) * dt * 0.8; off.z += Math.cos(elapsedSeconds * 0.53) * dt * 0.8; }
       if (U.uStreak.value.lengthSq() < 0.25) U.uStreak.value.setLength(0.5);
       U.uAmt.value = Math.min(1, intensity * 0.62);
       var lum = THREE.MathUtils.clamp(hemiLight.intensity * 1.4 + sunLight.intensity * 0.3, 0.05, 1);
-      U.uColor.value.copy(scene.fog.color).lerp(_wxWhite, 0.45).multiplyScalar(0.55 + lum * 0.6 + wxFlash * 2.5);
-      U.uAlpha.value = 0.3 + Math.min(1, intensity) * 0.3;
+      U.uColor.value.copy(scene.fog.color).lerp(_wxWhite, snowing ? 0.85 : 0.45).multiplyScalar(0.55 + lum * (snowing ? 0.9 : 0.6) + wxFlash * 2.5);
+      U.uAlpha.value = snowing ? 0.75 : 0.3 + Math.min(1, intensity) * 0.3;
 
       // rain shafts
       rainShaftTex.offset.y = (rainShaftTex.offset.y + dt * 0.9) % 1;
@@ -6681,7 +6820,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var scale = 0.5;
       var w = Math.round(window.innerWidth * scale), h = Math.round(window.innerHeight * scale);
       if (w !== lensW || h !== lensH) { lensW = lensCv.width = w; lensH = lensCv.height = h; }
-      var exposed = intensity > 0.08 && started && !crashing && !(typeof droneCamActive !== 'undefined' && droneCamActive);
+      var exposed = intensity > 0.08 && SEASON.snow < 0.5 && started && !crashing && !(typeof droneCamActive !== 'undefined' && droneCamActive);
       if (exposed) {
         lensSpawn += dt * intensity * 22;
         while (lensSpawn > 1) {
@@ -6732,6 +6871,45 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       rain:  { density: 0.0026,            layer: 0.006, layerH: 140, banks: 0.5, rain: 1,   dim: 0.36, wind: 0.3, lightning: false },
       storm: { density: 0.0036,            layer: 0.010, layerH: 190, banks: 0.7, rain: 1.6, dim: 0.72, wind: 1,   lightning: true }
     };
+
+    /* ---- SEASONS — the island through the year. The game starts in the real-world season
+       (by your device's calendar); the settings panel can change it.
+         winter: snow on the ground and on the conifers, bare deciduous trees, rain falls as
+                 snow, and the shallows, rivers and lakes freeze over — solid enough to land on
+         spring: lush green, blossom in the broadleaf woods
+         summer: as it always was
+         autumn: grass dries to straw, oaks and birches turn gold, orange and red
+       One shared uniform (x snow, y autumn, z spring, w ice) drives terrain, trees and water. ---- */
+    var SEASON_PRESETS = {
+      spring: { x: 0, y: 0, z: 1, w: 0 }, summer: { x: 0, y: 0, z: 0, w: 0 },
+      autumn: { x: 0, y: 1, z: 0, w: 0 }, winter: { x: 1, y: 0, z: 0, w: 1 }
+    };
+    function seasonFromDate() { var m = new Date().getMonth(); return (m <= 1 || m === 11) ? 'winter' : m <= 4 ? 'spring' : m <= 7 ? 'summer' : 'autumn'; }
+    var SEASON = { name: 'summer', target: SEASON_PRESETS.summer, ice: 0, snow: 0 };
+    var SEASON_U = { value: new THREE.Vector4() };
+    var seasonBtns = document.querySelectorAll('#seasonPresets button');
+    function setSeason(name, save, instant) {
+      if (!SEASON_PRESETS[name]) return;
+      SEASON.name = name; SEASON.target = SEASON_PRESETS[name];
+      if (instant) { var t = SEASON.target; SEASON_U.value.set(t.x, t.y, t.z, t.w); SEASON.snow = t.x; SEASON.ice = t.w; }
+      seasonBtns.forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-season') === name); });
+      if (save) { try { localStorage.setItem('gp-season', name); } catch (e) {} }
+    }
+    (function() {
+      var saved = null; try { saved = localStorage.getItem('gp-season'); } catch (e) {}
+      setSeason(SEASON_PRESETS[saved] ? saved : seasonFromDate(), false, true);
+    })();
+    seasonBtns.forEach(function(b) { b.addEventListener('click', function() { setSeason(b.getAttribute('data-season'), true, false); }); });
+    function updateSeason(dt) {
+      var v = SEASON_U.value, t = SEASON.target, f = Math.min(1, dt * 0.5);
+      v.x += (t.x - v.x) * f; v.y += (t.y - v.y) * f; v.z += (t.z - v.z) * f; v.w += (t.w - v.w) * f;
+      SEASON.snow = v.x; SEASON.ice = v.w;
+    }
+    // frozen water is solid ground: anything shallower than this freezes in winter
+    var ICE_DEPTH = 7;
+    function iceAt(x, z, terrainY) {
+      return SEASON && SEASON.ice > 0.5 && terrainY < WATER_LEVEL && terrainY > WATER_LEVEL - ICE_DEPTH;
+    }
     var weatherTarget = WEATHER_PRESETS.clear;
     var currentFogDensity = FOG_DENSITY_CLEAR, currentRainIntensity = 0, currentMist = 0, currentDim = 0, currentWind = 0;
     var currentLayer = 0, currentLayerH = 30, currentBanks = 0.8;
@@ -7008,13 +7186,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         wxAudio = { rain: mk('bandpass', 3200, 0.5), wind: mk('bandpass', 420, 1.6) };
       }
       var now = audioCtx.currentTime, on = soundEnabled && started;
-      wxAudio.rain.g.gain.setTargetAtTime(on ? Math.min(1, currentRainIntensity) * 0.055 : 0, now, 0.4);
+      wxAudio.rain.g.gain.setTargetAtTime(on ? Math.min(1, currentRainIntensity) * 0.055 * (1 - SEASON.snow * 0.9) : 0, now, 0.4);
       wxAudio.wind.g.gain.setTargetAtTime(on ? currentWind * (0.05 + 0.04 * Math.abs(Math.sin(elapsedSeconds * 0.7))) : 0, now, 0.5);
       wxAudio.wind.f.frequency.setTargetAtTime(300 + 260 * Math.abs(Math.sin(elapsedSeconds * 0.37)) * currentWind, now, 0.6);
     }
 
     var _wxStormFog = new THREE.Color(0x353b43), _wxStormTop = new THREE.Color(0x1b2027);
     function updateWeather(dt) {
+      updateSeason(dt);
       var f = Math.min(1, WEATHER_LERP_SPEED * dt);
       currentFogDensity += (weatherTarget.density - currentFogDensity) * f;
       currentRainIntensity += (weatherTarget.rain - currentRainIntensity) * f;
@@ -13711,6 +13890,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             : (verticalSpeed > SAFE_DESCENT_RATE &&
               (isHelicopterMode || isCarMode || isOverRunway(position.x, position.z, RUNWAY_LANDING_MARGIN) ||
                isOverHighway(position.x, position.z, RUNWAY_LANDING_MARGIN) ||
+               worldLandable(position.x, position.z, RUNWAY_LANDING_MARGIN) ||
                // the carrier deck — but only from above, not by flying into the side of the ship
                (isOverCarrierDeck(position.x, position.z) && position.y > CARRIER.deckY - 1.5)));
           if (canTouchDown) {
@@ -13907,6 +14087,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (lighthouseBeaconPivot) lighthouseBeaconPivot.rotation.y += dt * 1.4;
         if (towerRadarPivot) towerRadarPivot.rotation.y += dt * 2.2;
         updateCityTraffic(dt);
+        worldUpdate(dt);
         updateAirport(dt);
         updateHighwayTraffic(dt);
 
@@ -14251,11 +14432,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     waterMaterial.uniforms.shoreValid = { value: 0 };
     waterMaterial.uniforms.rough      = { value: 0 };
     waterMaterial.uniforms.uRip       = { value: seaRipples };
+    waterMaterial.uniforms.uSeason    = SEASON_U;
     waterMaterial.vertexShader = [
       'uniform float time;',
       'uniform mat4 reflMat;',
       'uniform vec4 uWaveD[6]; uniform vec4 uWaveP[6];',
       'uniform sampler2D tShore; uniform vec2 shoreCenter; uniform float shoreSpan; uniform float shoreValid;',
+      'uniform vec4 uSeason;',
       'varying vec3 vWorldPos;',
       'varying vec2 vFlat;',
       'varying float vDamp;',
@@ -14273,6 +14456,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       '  vec2 suv = (p0 - shoreCenter) / shoreSpan + 0.5;',
       '  float edgeF = shoreValid * (1.0 - smoothstep(0.42, 0.5, max(abs(suv.x - 0.5), abs(suv.y - 0.5))));',
       '  float damp = mix(1.0, 0.12 + 0.88 * smoothstep(0.0, 1.0, texture2D(tShore, clamp(suv, 0.0, 1.0)).g), edgeF);',
+      // frozen shallows don't move
+      '  damp *= 1.0 - uSeason.w * edgeF * (1.0 - smoothstep(0.26, 0.36, texture2D(tShore, clamp(suv, 0.0, 1.0)).g));',
       // Gerstner waves: water particles move in circles, so crests bunch up sharp and troughs flatten
       '  float r = length(p0 - modelMatrix[3].xz);',
       '  vec3 disp = vec3(0.0);',
@@ -14302,6 +14487,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       'uniform sampler2D tShore; uniform vec2 shoreCenter; uniform float shoreSpan; uniform float shoreValid;',
       'uniform float rough;',
       'uniform vec4 uRip[4];',
+      'uniform vec4 uSeason;',
       'uniform vec4 uWaveD[6]; uniform vec4 uWaveP[6]; uniform float uAmpSum; uniform float uFoamAmt;',
       'varying vec3 vWorldPos; varying vec2 vFlat; varying float vDamp; varying float vMeshR; varying vec3 vViewDir; varying vec4 vReflUv;',
       '#include <fog_pars_fragment>',
@@ -14364,7 +14550,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // shoreline depth (signed metres / 3, baked around the player): 1 = open water, 0 = waterline
       '  vec2 suv = (p - shoreCenter) / shoreSpan + 0.5;',
       '  float edgeF = shoreValid * (1.0 - smoothstep(0.42, 0.5, max(abs(suv.x - 0.5), abs(suv.y - 0.5))));',
-      '  float s = mix(1.0, texture2D(tShore, clamp(suv, 0.0, 1.0)).r * 2.0 - 1.0, edgeF);',
+      '  vec4 shoreTx = texture2D(tShore, clamp(suv, 0.0, 1.0));',
+      '  float s = mix(1.0, shoreTx.r * 2.0 - 1.0, edgeF);',
+      '  float iceM = uSeason.w * edgeF * (1.0 - smoothstep(0.26, 0.34, shoreTx.g + (wNoise(p * 0.05) - 0.5) * 0.06));',
       '  vec3 L = normalize(sunDir);',
       '  float sunUp = clamp(L.y * 4.0 + 0.3, 0.0, 1.0);',
       '  float NdotV = clamp(dot(N, V), 0.0, 1.0);',
@@ -14417,6 +14605,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       '  float surf = clamp(edge + lines * 0.55, 0.0, 1.0) * edgeF;',
       '  vec3 foamCol = vec3(0.9) * light + sunColor * 0.08 * sunI;',
       '  color = mix(color, foamCol, max(max(foam * (0.35 + 0.35 * detailFade), surf * 0.8), clamp(ripFoam, 0.0, 1.0) * 0.55));',
+      // winter ice: pale blue-white sheet with dark cracks and drifts of snow on top
+      '  if (iceM > 0.001) {',
+      '    float in1 = wNoise(p * 0.08), in2 = wNoise(p * 0.9 + 7.0);',
+      '    float crack = smoothstep(0.035, 0.0, abs(wNoise(p * 0.12 + 3.0) - 0.5)) * (1.0 - smoothstep(60.0, 500.0, dist));',
+      '    vec3 iceCol = mix(vec3(0.46, 0.6, 0.7), vec3(0.78, 0.85, 0.9), in1) * light * 1.05;',
+      '    iceCol = mix(iceCol, vec3(0.86, 0.88, 0.92) * light * 1.15, smoothstep(0.45, 0.8, in1 + in2 * 0.3));',
+      '    iceCol *= 1.0 - crack * 0.45;',
+      '    iceCol += sunColor * pow(max(dot(reflect(-V, vec3(0.0, 1.0, 0.0)), L), 0.0), 60.0) * 0.4 * sunI * sunUp;',
+      '    color = mix(color, iceCol, iceM);',
+      '  }',
       '  gl_FragColor = vec4(color, 1.0);',
       '  #include <fog_fragment>',
       '}'
@@ -14549,6 +14747,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     terrainMaterial.roughness = 0.95;
     terrainMaterial.onBeforeCompile = function(shader) {
       shader.uniforms.uScorch = { value: NUKE_SCORCH };
+      shader.uniforms.uSeason = SEASON_U;
       shader.uniforms.uTime = gfxTimeU;
       shader.vertexShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\n' +
         shader.vertexShader.replace('#include <begin_vertex>', [
@@ -14556,7 +14755,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           'vGfxWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;',
           'vGfxWorldNormal = normalize(mat3(modelMatrix) * objectNormal);'
         ].join('\n'));
-      shader.fragmentShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\nuniform vec4 uScorch[2];\nuniform float uTime;\n' +
+      shader.fragmentShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\nuniform vec4 uScorch[2];\nuniform float uTime;\nuniform vec4 uSeason;\n' +
         shader.fragmentShader
           .replace('#include <map_fragment>', '')
           .replace('#include <color_fragment>', [
@@ -14577,6 +14776,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             'float gSnowLine = 118.0 + (gFar - 0.5) * 40.0;',
             'float gSnow = smoothstep(gSnowLine, gSnowLine + 18.0, vGfxWorldPos.y) * (1.0 - smoothstep(0.35, 0.6, gSlope));',
             'gBase = mix(gBase, vec3(0.78, 0.8, 0.84), gSnow);',
+            // seasons: autumn dries the grass to straw and gold, spring greens it up, winter
+            // buries everything that isn't steep rock under snow (thin at the waterline)
+            'float gVeg = (1.0 - gRock) * (1.0 - gSnow) * smoothstep(' + (WATER_LEVEL + 3).toFixed(1) + ', ' + (WATER_LEVEL + 8).toFixed(1) + ', vGfxWorldPos.y);',
+            'gBase = mix(gBase, gBase * vec3(1.45, 1.08, 0.55) + vec3(0.012, 0.006, 0.0), uSeason.y * 0.75 * gVeg);',
+            'gBase = mix(gBase, gBase * vec3(0.82, 1.22, 0.78), uSeason.z * 0.6 * gVeg);',
+            'float gWSnow = uSeason.x * smoothstep(0.46, 0.3, gSlope + (gMid - 0.5) * 0.25) * smoothstep(' + (WATER_LEVEL + 0.4).toFixed(1) + ', ' + (WATER_LEVEL + 2.5).toFixed(1) + ', vGfxWorldPos.y);',
+            'gBase = mix(gBase, vec3(0.8, 0.82, 0.87) * (0.92 + gNear * 0.16), gWSnow * 0.94);',
+            'gSnow = max(gSnow, gWSnow);',
             // darker, wetter band right along the waterline
             'float gShore = 1.0 - smoothstep(' + (WATER_LEVEL + 0.2).toFixed(1) + ', ' + (WATER_LEVEL + 2.8).toFixed(1) + ', vGfxWorldPos.y);',
             'gBase *= mix(1.0, 0.6, gShore);',
@@ -14903,23 +15110,57 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       { name: 'oak',    g: [frOak(0),    frOak(1),    frOak(2)],    top: 11.4, bot: 4.8, r: 4.8 },
       { name: 'birch',  g: [frBirch(0),  frBirch(1),  frBirch(2)],  top: 12.4, bot: 5.4, r: 2.4 }
     ];
+    // broadleaf foliage is flagged 2 (conifer needles 1, bark 0) so the seasons can colour it,
+    // drop it in winter, and blossom it in spring
+    [2, 3].forEach(function(si) { FOREST_SP[si].g.forEach(function(g) {
+      var a = g.attributes.aLeaf; for (var i = 0; i < a.count; i++) if (a.getX(i) > 0.5) a.setX(i, 2);
+    }); });
     var forestMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0 });
+    var FOREST_VERT_MOTION = [
+      '#ifdef USE_INSTANCING',
+      'float fLeaf = min(aLeaf, 1.0), fDecid = step(1.5, aLeaf);',
+      // winter: broadleaf trees drop their leaves — the foliage collapses away, leaving trunk and limbs
+      'transformed = mix(transformed, vec3(0.0, 7.0, 0.0), fDecid * smoothstep(0.35, 0.9, uSeason.x));',
+      'float gPh = uTime * 1.25 + instanceMatrix[3].x * 0.05 + instanceMatrix[3].z * 0.04;',
+      'float gW = max(transformed.y - 1.0, 0.0) * 0.011 * (1.0 + uWind * 3.2) * (0.75 + 0.25 * sin(uTime * 0.55 + instanceMatrix[3].x * 0.013));',
+      'transformed.x += sin(gPh) * gW;',
+      'transformed.z += cos(gPh * 0.83) * gW * 0.7;',
+      // leaves shiver, harder in a storm
+      'transformed += normal * fLeaf * sin(uTime * 6.5 + position.x * 2.1 + position.y * 1.7) * (0.03 + uWind * 0.09);',
+      '#endif'
+    ].join('\n');
+    var FOREST_SEASON_COLOR = [
+      '#ifdef USE_INSTANCING',
+      'float sLeaf = min(aLeaf, 1.0), sDecid = step(1.5, aLeaf);',
+      'float sH = fract(sin(dot(instanceMatrix[3].xz, vec2(12.9898, 78.233))) * 43758.5453);',
+      'float sLum = clamp(dot(vColor.rgb, vec3(0.3, 0.59, 0.11)) / 0.075, 0.35, 1.6);',
+      // autumn: oaks and birches go gold, orange and red; a few hang on to their green
+      'vec3 sAut = sH < 0.34 ? vec3(0.42, 0.13, 0.015) : (sH < 0.7 ? vec3(0.5, 0.3, 0.02) : (sH < 0.9 ? vec3(0.34, 0.05, 0.02) : vColor.rgb / max(sLum, 0.01)));',
+      'vColor.rgb = mix(vColor.rgb, sAut * sLum * 0.55, uSeason.y * sDecid);',
+      // spring: fresh bright leaves, some trees in white-pink blossom
+      'vec3 sSpr = sH < 0.14 ? vec3(0.75, 0.55, 0.6) : vec3(0.1, 0.24, 0.04);',
+      'vColor.rgb = mix(vColor.rgb, sSpr * sLum * 0.5, uSeason.z * sDecid * 0.8);',
+      // winter: snow lying on the upper faces of the needles (and bark)
+      'float sSnow = uSeason.x * smoothstep(-0.1, 0.55, normal.y) * (0.55 + 0.45 * sLeaf);',
+      'vColor.rgb = mix(vColor.rgb, vec3(0.62, 0.65, 0.7), sSnow * 0.85);',
+      '#endif'
+    ].join('\n');
     forestMat.onBeforeCompile = function(shader) {
       shader.uniforms.uTime = gfxTimeU;
       shader.uniforms.uWind = gfxWindU;
-      shader.vertexShader = 'uniform float uTime;\nuniform float uWind;\nattribute float aLeaf;\n' + shader.vertexShader
-        .replace('#include <color_vertex>', THREE.ShaderChunk.color_vertex.replace('vColor.xyz *= instanceColor.xyz;', 'vColor.xyz *= mix(vec3(1.0), instanceColor.xyz, aLeaf);'))
-        .replace('#include <begin_vertex>', [
-          '#include <begin_vertex>',
-          '#ifdef USE_INSTANCING',
-          'float gPh = uTime * 1.25 + instanceMatrix[3].x * 0.05 + instanceMatrix[3].z * 0.04;',
-          'float gW = max(transformed.y - 1.0, 0.0) * 0.011 * (1.0 + uWind * 3.2) * (0.75 + 0.25 * sin(uTime * 0.55 + instanceMatrix[3].x * 0.013));',
-          'transformed.x += sin(gPh) * gW;',
-          'transformed.z += cos(gPh * 0.83) * gW * 0.7;',
-          // leaves shiver, harder in a storm
-          'transformed += objectNormal * aLeaf * sin(uTime * 6.5 + position.x * 2.1 + position.y * 1.7) * (0.03 + uWind * 0.09);',
-          '#endif'
-        ].join('\n'));
+      shader.uniforms.uSeason = SEASON_U;
+      shader.vertexShader = 'uniform float uTime;\nuniform float uWind;\nuniform vec4 uSeason;\nattribute float aLeaf;\n' + shader.vertexShader
+        .replace('#include <color_vertex>', THREE.ShaderChunk.color_vertex.replace('vColor.xyz *= instanceColor.xyz;', 'vColor.xyz *= mix(vec3(1.0), instanceColor.xyz, min(aLeaf, 1.0));') + '\n' + FOREST_SEASON_COLOR)
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + FOREST_VERT_MOTION);
+    };
+    // shadows follow the same motion (so bare winter trees don't cast full-crown shadows)
+    var forestDepthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+    forestDepthMat.onBeforeCompile = function(shader) {
+      shader.uniforms.uTime = gfxTimeU;
+      shader.uniforms.uWind = gfxWindU;
+      shader.uniforms.uSeason = SEASON_U;
+      shader.vertexShader = 'uniform float uTime;\nuniform float uWind;\nuniform vec4 uSeason;\nattribute float aLeaf;\n' + shader.vertexShader
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + FOREST_VERT_MOTION);
     };
 
     function forestDensityAt(wx, wz, h) {
@@ -15007,6 +15248,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       for (var s = 0; s < 4; s++) {
         if (!cnt[s]) continue;
         var m = new THREE.InstancedMesh(FOREST_SP[s].g[0], forestMat, cnt[s]);
+        m.customDepthMaterial = forestDepthMat;
         m.position.set(ox, 0, oz);
         m.castShadow = true; m.receiveShadow = true;
         F.meshes[s] = m; F.full[s] = cnt[s];
@@ -18343,7 +18585,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         away: kjFmtDur(kj.awayMs / 1000), battery: kj.battery === null ? '?' : Math.round(kj.battery), sessions: s.sessions, missed: s.missed,
         deliveries: s.deliveries, cargo: o ? o.cargo.name : 'nothing', dest: o ? o.dest.name : 'nowhere', cond: o ? Math.round(o.cond * 100) : 100,
         weather: kjWeatherName(), codec: s.codec, hint: nextTape ? nextTape.hint : 'nowhere — you found them all', boxes: s.boxes, alerts: s.alerts, photos: s.photos,
-        nukes: s.nukes || 0, fireballs: typeof meteorSky !== 'undefined' ? meteorSky.fireballs : 0,
+        nukes: s.nukes || 0, season: SEASON.name,
+        seasonTip: SEASON.name === 'winter' ? 'The shallows and the river have frozen solid — thick enough to land on, if you trust it.' : SEASON.name === 'autumn' ? 'The woods have gone gold and red. Fly low over the oaks before the leaves come down.' : 'Enjoy the green while it lasts.', fireballs: typeof meteorSky !== 'undefined' ? meteorSky.fireballs : 0,
         shower: kj.meteorShower && kj.meteorShower !== 'shower'
           ? 'It\'s the ' + kj.meteorShower + '. The real ones — they\'re peaking over your actual house tonight too. Go outside after this. I mean it.'
           : 'It\'s not on any calendar. Just ours. The radiant is where they all seem to start from.'
@@ -18421,6 +18664,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         { id: 'w_g2', pri: 5, p: [['T', 'Every rivet on that thing has a story. Most of them end with "and then {cs} landed it."']] }
       ],
       luna: [
+        { id: 'l_airstrip', pri: 94, when: function() { return !!(kj.stats.secrets && kj.stats.secrets.airstrip); }, p: [
+          ['T', 'Oh — {cs}, you found the old field.'], ['Y', 'Someone built a runway out here. What happened to it?'],
+          ['T', 'That was the island\'s first airstrip, before the airport. Grass, one tin hangar, a windsock. My grandfather flew mail from there.'],
+          ['T', 'One winter they just... stopped using it. The wreck by the hangar has been there since before I was born. Nobody will say whose it was.'],
+          ['T', 'The strip is still flat, you know. You could land on it. I think someone should.'] ] },
+        { id: 'l_whales', pri: 70, once: true, when: function() { return !!kj.whaleSeen; }, p: [
+          ['T', '{cs}! Whales, right below you — humpbacks! Look at the spray!'],
+          ['T', 'Stay high and keep it quiet. Sometimes they jump clean out of the water. If you see that, you\'ve seen something most people never will.'] ] },
+        { id: 'l_season', pri: 30, when: function() { return SEASON.name === 'winter' || SEASON.name === 'autumn'; }, p: [
+          ['T', 'It\'s {season} on the island. {seasonTip}'] ] },
         { id: 'l_meteor', pri: 72, when: function() { return !!kj.meteorShower && kjNightSky(); }, p: [
           ['T', 'Look up, {cs}. Meteor shower tonight.'], ['T', '{shower}'],
           ['Y', 'Should I make a wish?'],
@@ -18450,6 +18703,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         { id: 'l_g2', pri: 5, p: [['T', 'At night the lighthouse beam sweeps the whole bay. If you park under it, you can hear the ocean breathe.']] }
       ],
       archivist: [
+        { id: 'a_ufo', pri: 96, when: function() { return !!(kj.stats.secrets && kj.stats.secrets.ufo); }, p: [
+          ['T', 'So. You found the object.'], ['Y', 'What IS that thing?'],
+          ['T', 'I have a file on it. The file says "weather balloon". The file is lying, {cs}. Weather balloons do not dig trenches.'],
+          ['T', 'Something came a very long way to fall onto a hill on an island nobody visits. Its lights have not stopped running since.'],
+          ['T', 'Don\'t stay long. And don\'t come back at night unless you want to see what the light is for.'] ] },
         { id: 'a_nuke', pri: 98, when: function() { return (kj.stats.nukes || 0) > 0; }, p: [
           ['T', 'Do you know what I archive, {cs}? Flashes. Every one of them, since the first.'],
           ['T', 'In the real world there are still more than twelve thousand of these. Right now someone is sitting within reach of a button like yours.'],
@@ -18834,6 +19092,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (!kj.fireballLiked) { kj.fireballLiked = true; kjLike(2, '🌠 FIREBALL — MAKE A WISH'); }
       else samToast('🌠 FIREBALL', '#bff5c8', 1.6);
     }
+    function kjWhaleSeen() { if (kj.whaleSeen) return; kj.whaleSeen = true; setTimeout(function() { kjRing('luna', 'l_whales'); }, 1500); }
     function kjNukeReleased() { if (kj.stats) kj.bpmSpike += 30; }
     function kjOnNuke(d) {
       if (!kj.stats) return;
@@ -18990,7 +19249,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       { id: 'sea', title: 'Swell (Side B)', artist: 'Albatross', year: 1981, hint: 'the open sea, far beyond the carrier',
         bpm: 72, root: 38, scale: [0, 2, 4, 7, 9], prog: [0, 3, 4, 3], lead: 'sine', bass: 'sine', drums: 0, delay: 0.55, seed: 88 },
       { id: 'sky', title: 'Stratosphere Lullaby', artist: 'Nobody, Nowhere', year: 1989, hint: 'the sky, very high above the runway',
-        bpm: 64, root: 50, scale: [0, 2, 4, 7, 9], prog: [0, 4, 5, 3], lead: 'triangle', bass: 'sine', drums: 0, delay: 0.6, seed: 99, radius: 70 }
+        bpm: 64, root: 50, scale: [0, 2, 4, 7, 9], prog: [0, 4, 5, 3], lead: 'triangle', bass: 'sine', drums: 0, delay: 0.6, seed: 99, radius: 70 },
+      { id: 'ufo', title: 'Unidentified', artist: 'Project Sign', year: 1987, hint: 'where something fell out of the sky, high up in the hills',
+        bpm: 76, root: 44, scale: [0, 1, 4, 6, 7, 10], prog: [0, 1, 4, 1], lead: 'sine', bass: 'triangle', drums: 1, delay: 0.66, seed: 111, radius: 30 },
+      { id: 'airstrip', title: 'Grass Strip Serenade', artist: 'The Forgotten Squadron', year: 1980, hint: 'the old field, where nobody flies any more',
+        bpm: 92, root: 46, scale: [0, 2, 4, 5, 7, 9, 11], prog: [0, 5, 1, 4], lead: 'triangle', bass: 'sine', drums: 1, delay: 0.38, seed: 122, radius: 24 },
+      { id: 'harbour', title: 'Harbour Lights', artist: 'Foghorn & The Moorings', year: 1985, hint: 'the end of the harbour pier',
+        bpm: 82, root: 42, scale: [0, 2, 3, 5, 7, 9, 10], prog: [0, 3, 5, 4], lead: 'square', bass: 'sine', drums: 2, delay: 0.45, seed: 133 }
     ];
     var kjTapeObjs = [], kjTapesPlaced = false;
     // nearest dry, reasonably flat spot around a landmark (the lighthouse stands right on the waterline)
@@ -19016,6 +19281,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         case 'city': s = window.__citySpot; return s ? g(s.x, s.z) : null;
         case 'sea': return new THREE.Vector3(CARRIER.x + 1600, WATER_LEVEL + 2.2, CARRIER.z + 1200);
         case 'sky': return new THREE.Vector3(RUNWAY_CENTER_X, 1450, RUNWAY_CENTER_Z);
+        case 'ufo': return UFO_SITE ? g(UFO_SITE.x + Math.sin(UFO_SITE.yaw) * -24, UFO_SITE.z + Math.cos(UFO_SITE.yaw) * -24) : null;
+        case 'airstrip': return OLD_STRIP ? g(OLD_STRIP.x - OLD_STRIP.uz * (OLD_STRIP.W / 2 + 34) + OLD_STRIP.ux * 12, OLD_STRIP.z + OLD_STRIP.ux * (OLD_STRIP.W / 2 + 34) + OLD_STRIP.uz * 12) : null;
+        case 'harbour': return (typeof HARBOUR !== 'undefined' && HARBOUR) ? HARBOUR.pierEnd.clone() : null;
       }
       return null;
     }
@@ -19633,6 +19901,1022 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     kjLoad();
     if (kjLikeValEl) kjLikeValEl.textContent = kj.stats.likes;
     kjWalkStop();
+
+
+    /* ============================================================
+       THE LIVING WORLD — a stadium with a match on, a city skyline that comes alive at night,
+       deer in the woods, a harbour with boats coming and going, whales offshore, and two secrets:
+       a crashed saucer in the hills and an abandoned airstrip nobody has used in decades.
+       ============================================================ */
+    function wcol(hex) { return new THREE.Color(hex).convertSRGBToLinear(); }
+    function wstd(hex, rough, metal) { return new THREE.MeshStandardMaterial({ color: wcol(hex), roughness: rough == null ? 0.85 : rough, metalness: metal || 0 }); }
+    function wadd(parent, geo, mat, x, y, z, shadow) {
+      var m = new THREE.Mesh(geo, mat); m.position.set(x || 0, y || 0, z || 0);
+      if (shadow !== false) { m.castShadow = true; m.receiveShadow = true; }
+      parent.add(m); return m;
+    }
+    function wCanvasTex(w, h, draw, srgb) {
+      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      draw(cv.getContext('2d'), w, h);
+      var t = new THREE.CanvasTexture(cv); if (srgb !== false) t.encoding = THREE.sRGBEncoding;
+      t.anisotropy = 4; return t;
+    }
+    var W_GLOW = makeRadialGlowTexture('255,255,255', '255,255,255');
+    function wNight() { return typeof cityNightFactor === 'function' ? cityNightFactor() : 0; }
+    function wDistXZ(x, z) { var dx = x - position.x, dz = z - position.z; return Math.sqrt(dx * dx + dz * dz); }
+
+    /* ---------- sound effects ---------- */
+    var wSndT = 0;
+    function wTone(type, f0, f1, dur, vol, delay, filt) {
+      if (!audioCtx || !soundEnabled || vol < 0.002) return;
+      var t = audioCtx.currentTime + (delay || 0), o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.05, dur * 0.2)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      var node = o.connect(g);
+      if (filt) { var lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = filt; g.connect(lp).connect(audioCtx.destination); }
+      else g.connect(audioCtx.destination);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+    var wNoiseBuf = null;
+    function wEnsureNoise() {
+      if (!wNoiseBuf && audioCtx) { wNoiseBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 3, audioCtx.sampleRate); var d = wNoiseBuf.getChannelData(0); for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+      return wNoiseBuf;
+    }
+    function wNoise(dur, vol, ftype, freq, q, attack, delay) {
+      if (!audioCtx || !soundEnabled || vol < 0.002) return;
+      wEnsureNoise();
+      var t = audioCtx.currentTime + (delay || 0), s = audioCtx.createBufferSource(), f = audioCtx.createBiquadFilter(), g = audioCtx.createGain();
+      s.buffer = wNoiseBuf; s.loop = true; f.type = ftype; f.frequency.value = freq; f.Q.value = q || 0.7;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + (attack || 0.05)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      s.connect(f).connect(g).connect(audioCtx.destination); s.start(t); s.stop(t + dur + 0.05);
+    }
+    function wVolAt(x, y, z, range) { var d = camera.position.distanceTo(_wV.set(x, y, z)); return Math.max(0, 1 - d / range); }
+    var _wV = new THREE.Vector3(), _wV2 = new THREE.Vector3(), _wM = new THREE.Matrix4(), _wQ = new THREE.Quaternion(), _wS = new THREE.Vector3(), _wE = new THREE.Euler();
+    function worldHonk(x, y, z) {
+      if (wSndT > 0) return; wSndT = 0.35;
+      var v = wVolAt(x, y, z, 260) * 0.09;
+      wTone('square', 420, 410, 0.22, v, 0, 1800); wTone('square', 330, 325, 0.22, v, 0, 1800);
+      if (Math.random() < 0.5) { wTone('square', 420, 410, 0.35, v, 0.3, 1800); wTone('square', 330, 325, 0.35, v, 0.3, 1800); }
+    }
+    function worldBirdCry(dist) {
+      var v = Math.max(0, 1 - dist / 220) * 0.05;
+      for (var i = 0; i < 5; i++) wTone('sine', 2600 + Math.random() * 900, 1800 + Math.random() * 500, 0.12, v, i * 0.09 + Math.random() * 0.05);
+    }
+    function worldHorn(x, z, big) {
+      var v = Math.max(0, 1 - wDistXZ(x, z) / 900) * (big ? 0.2 : 0.12);
+      var f = big ? 92 : 170;
+      wTone('sawtooth', f, f * 0.98, big ? 2.2 : 1.1, v, 0, big ? 380 : 700); wTone('sawtooth', f * 1.26, f * 1.24, big ? 2.2 : 1.1, v * 0.7, 0, big ? 380 : 700);
+    }
+    function worldRoar(v, dur) { wNoise(dur || 3.5, v, 'bandpass', 900, 0.6, 0.6); wNoise(dur || 3.5, v * 0.6, 'bandpass', 2200, 0.8, 0.8); }
+
+    /* ============================================================
+       STADIUM — on the edge of the city: a floodlit bowl with a match going on. Fly over it low
+       and the crowd loses it; at night there are fireworks after every goal and all through the
+       evening.
+       ============================================================ */
+    var STADIUM = null;
+    (function buildStadium() {
+      var C = CITY_ORIGIN; if (!C || !C.r) return;
+      var ang = -0.52, R = 405;
+      var sx = C.x + Math.cos(ang) * R, sz = C.z + Math.sin(ang) * R, gy = C.y;
+      var g = new THREE.Group(); g.position.set(sx, gy, sz); g.rotation.y = -ang - Math.PI / 2;
+      scene.add(g);
+      var A0 = 62, B0 = 44;      // inner edge of the stands (ellipse semi-axes)
+      // pitch
+      var pitchTex = wCanvasTex(512, 332, function(c, w, h) {
+        for (var i = 0; i < 12; i++) { c.fillStyle = i % 2 ? '#3f7d34' : '#468a3a'; c.fillRect(i * w / 12, 0, w / 12 + 1, h); }
+        var k = w / 105; c.strokeStyle = 'rgba(255,255,255,0.92)'; c.lineWidth = 2.2;
+        c.strokeRect(2, 2, w - 4, h - 4);
+        c.beginPath(); c.moveTo(w / 2, 2); c.lineTo(w / 2, h - 2); c.stroke();
+        c.beginPath(); c.arc(w / 2, h / 2, 9.15 * k, 0, 7); c.stroke();
+        [0, 1].forEach(function(s) {
+          var x0 = s ? w - 2 - 16.5 * k : 2;
+          c.strokeRect(x0, h / 2 - 20.15 * k, 16.5 * k, 40.3 * k);
+          c.strokeRect(s ? w - 2 - 5.5 * k : 2, h / 2 - 9.16 * k, 5.5 * k, 18.32 * k);
+          c.beginPath(); c.arc(s ? w - 11 * k : 11 * k, h / 2, 1.5, 0, 7); c.fillStyle = '#fff'; c.fill();
+        });
+      });
+      var pitchMat = new THREE.MeshStandardMaterial({ map: pitchTex, roughness: 0.95, emissive: new THREE.Color(0xffffff), emissiveMap: pitchTex, emissiveIntensity: 0 });
+      var pitch = new THREE.Mesh(new THREE.PlaneGeometry(105, 68), pitchMat);
+      pitch.rotation.x = -Math.PI / 2; pitch.position.y = 0.18; pitch.receiveShadow = true; g.add(pitch);
+      var apron = new THREE.Mesh(new THREE.PlaneGeometry(A0 * 2 + 4, B0 * 2 + 4), wstd(0x3a6a30, 1));
+      apron.rotation.x = -Math.PI / 2; apron.position.y = 0.12; apron.receiveShadow = true; g.add(apron);
+      // goals
+      var white = wstd(0xf2f2f2, 0.5);
+      [-1, 1].forEach(function(s) {
+        wadd(g, new THREE.BoxGeometry(0.15, 2.44, 0.15), white, s * 52.5, 1.4, -3.66);
+        wadd(g, new THREE.BoxGeometry(0.15, 2.44, 0.15), white, s * 52.5, 1.4, 3.66);
+        wadd(g, new THREE.BoxGeometry(0.15, 0.15, 7.5), white, s * 52.5, 2.6, 0);
+        var net = new THREE.Mesh(new THREE.BoxGeometry(2, 2.44, 7.3), new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.35 }));
+        net.position.set(s * 53.5, 1.4, 0); g.add(net);
+      });
+      // stands: an elliptical bowl of stepped terraces packed with people
+      var crowdTex = wCanvasTex(512, 128, function(c, w, h) {
+        c.fillStyle = '#8f8d88'; c.fillRect(0, 0, w, h);
+        c.fillStyle = '#26282c'; c.fillRect(0, 0, w, h - 14);
+        var cols = ['#d33a2c', '#d33a2c', '#2b5fb5', '#2b5fb5', '#f0e6d8', '#e8c23a', '#1d1d1d', '#e07a3c', '#6aa84f'];
+        for (var i = 0; i < 5200; i++) { c.fillStyle = cols[(Math.random() * cols.length) | 0]; c.fillRect(Math.random() * w, Math.random() * (h - 16), 2, 2); }
+      });
+      crowdTex.wrapS = THREE.RepeatWrapping;
+      var standPts = [[0, 0.3], [0, 1.4]];
+      for (var k = 0; k < 6; k++) { var y0 = 1.4 + k * 2.2; standPts.push([k * 4 + 4, y0]); standPts.push([k * 4 + 4, y0 + 2.2]); }
+      standPts.push([25, 1.4 + 6 * 2.2]); standPts.push([25, 0]);
+      var N = 112, pos = [], uvs = [];
+      function ep(d, t) { return [(A0 + d) * Math.cos(t), (B0 + d) * Math.sin(t)]; }
+      for (var i = 0; i < N; i++) {
+        var t0 = i / N * Math.PI * 2, t1 = (i + 1) / N * Math.PI * 2;
+        for (var j = 0; j < standPts.length - 1; j++) {
+          var p0 = standPts[j], p1 = standPts[j + 1], a = ep(p0[0], t0), b = ep(p0[0], t1), c2 = ep(p1[0], t1), d = ep(p1[0], t0);
+          var outer = j >= standPts.length - 3;
+          var v0 = outer ? 0.02 : 0.14 + 0.85 * (p0[1] / 15), v1 = outer ? 0.09 : 0.14 + 0.85 * (p1[1] / 15);
+          var u0 = i / N * 28, u1 = (i + 1) / N * 28;
+          pos.push(a[0], p0[1], a[1], d[0], p1[1], d[1], b[0], p0[1], b[1], b[0], p0[1], b[1], d[0], p1[1], d[1], c2[0], p1[1], c2[1]);
+          uvs.push(u0, v0, u0, v1, u1, v0, u1, v0, u0, v1, u1, v1);
+        }
+      }
+      var sg = new THREE.BufferGeometry();
+      sg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      sg.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      sg.computeVertexNormals();
+      var stands = new THREE.Mesh(sg, new THREE.MeshStandardMaterial({ map: crowdTex, roughness: 0.9, side: THREE.DoubleSide }));
+      stands.castShadow = true; stands.receiveShadow = true; g.add(stands);
+      // cantilevered roof over the upper terraces
+      var rp = [];
+      for (var ri = 0; ri < N; ri++) {
+        var r0 = ri / N * Math.PI * 2, r1 = (ri + 1) / N * Math.PI * 2, ia = ep(11, r0), ib = ep(11, r1), oa = ep(28, r0), ob = ep(28, r1), yi = 19.5, yo = 18.2;
+        rp.push(ia[0], yi, ia[1], oa[0], yo, oa[1], ib[0], yi, ib[1], ib[0], yi, ib[1], oa[0], yo, oa[1], ob[0], yo, ob[1]);
+      }
+      var rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.Float32BufferAttribute(rp, 3)); rg.computeVertexNormals();
+      var roof = new THREE.Mesh(rg, new THREE.MeshStandardMaterial({ color: wcol(0xe9ecef), roughness: 0.4, metalness: 0.3, side: THREE.DoubleSide }));
+      roof.castShadow = true; g.add(roof);
+      // floodlight masts, with light cones that show up after dark
+      var lampMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: new THREE.Color(1, 0.97, 0.9), emissiveIntensity: 0, roughness: 0.3 });
+      var coneMat = new THREE.MeshBasicMaterial({ map: wCanvasTex(16, 128, function(c, w, h) { var gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, 'rgba(255,250,235,0)'); gr.addColorStop(1, 'rgba(255,250,235,1)'); c.fillStyle = gr; c.fillRect(0, 0, w, h); }),
+        transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+      var masts = [];
+      [0.62, Math.PI - 0.62, Math.PI + 0.62, -0.62].forEach(function(t) {
+        var p = ep(33, t);
+        wadd(g, new THREE.CylinderGeometry(0.5, 0.8, 44, 8), wstd(0x9aa0a6, 0.5, 0.5), p[0], 22, p[1]);
+        var head = wadd(g, new THREE.BoxGeometry(7, 3.5, 0.8), lampMat, p[0], 45, p[1], false);
+        head.rotation.set(0, Math.atan2(-p[0], -p[1]), 0); head.rotateX(0.5);
+        var len = Math.hypot(p[0], p[1], 44);
+        var cone = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 34, len, 20, 1, true), coneMat);
+        cone.geometry.translate(0, -len / 2, 0);
+        cone.position.set(p[0], 45, p[1]);
+        cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), new THREE.Vector3(-p[0], -44, -p[1]).normalize());
+        cone.frustumCulled = false; g.add(cone);
+        masts.push(cone);
+      });
+      // scoreboard
+      var sbCv = document.createElement('canvas'); sbCv.width = 256; sbCv.height = 80;
+      var sbTex = new THREE.CanvasTexture(sbCv); sbTex.encoding = THREE.sRGBEncoding;
+      var sbMat = new THREE.MeshBasicMaterial({ map: sbTex, toneMapped: false });
+      [-1, 1].forEach(function(s) {
+        var sb = wadd(g, new THREE.PlaneGeometry(18, 5.6), sbMat, s * (A0 + 16), 23, 0, false);
+        sb.rotation.y = s > 0 ? -Math.PI / 2 : Math.PI / 2;
+        wadd(g, new THREE.BoxGeometry(1, 20, 1), wstd(0x55595e, 0.6, 0.4), s * (A0 + 16.5), 10, 0);
+      });
+      // teams
+      var plGeo = new THREE.CylinderGeometry(0.42, 0.36, 1.7, 6); plGeo.translate(0, 0.85, 0);
+      var players = new THREE.InstancedMesh(plGeo, new THREE.MeshStandardMaterial({ roughness: 0.7 }), 23);
+      players.frustumCulled = false; players.castShadow = true; g.add(players);
+      var ball = wadd(g, new THREE.SphereGeometry(0.45, 10, 8), white, 0, 0.6, 0);
+      var P = [];
+      var formation = [[-50, 0], [-36, -20], [-38, -7], [-38, 7], [-36, 20], [-18, -24], [-20, -8], [-20, 8], [-18, 24], [-6, -10], [-6, 10]];
+      for (var pi = 0; pi < 23; pi++) {
+        var team = pi < 11 ? 0 : pi < 22 ? 1 : 2, f = formation[pi % 11];
+        var hx = team === 2 ? 0 : (team === 0 ? f[0] : -f[0]), hz = team === 2 ? 12 : f[1];
+        P.push({ team: team, hx: hx, hz: hz, x: hx, z: hz, ph: Math.random() * 6 });
+        players.setColorAt(pi, team === 0 ? wcol(0xd33a2c) : team === 1 ? wcol(0x2b5fb5) : wcol(0x111111));
+      }
+      players.instanceColor.needsUpdate = true;
+      // camera flashes in the stands when you fly over
+      var flashes = [];
+      for (var fi = 0; fi < 40; fi++) {
+        var fs = new THREE.Sprite(new THREE.SpriteMaterial({ map: W_GLOW, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+        var ft = Math.random() * Math.PI * 2, fd = 2 + Math.random() * 20, fp = ep(fd, ft);
+        fs.position.set(fp[0], 2 + fd * 0.55, fp[1]); fs.scale.set(2.2, 2.2, 1); g.add(fs); flashes.push(fs);
+      }
+      STADIUM = { g: g, x: sx, z: sz, y: gy, ang: ang, pitchMat: pitchMat, lampMat: lampMat, coneMat: coneMat, sbCv: sbCv, sbTex: sbTex,
+        players: players, ball: ball, P: P, bx: 0, bz: 0, bvx: 0, bvz: 0, score: [0, 0], clock: 0, kickT: 0, goalT: 0, flashT: 0, flashes: flashes,
+        flybyCd: 0, fwT: 4, ambient: null, ep: ep };
+      stadiumBoard();
+    })();
+    function stadiumBoard() {
+      var S = STADIUM, c = S.sbCv.getContext('2d');
+      c.fillStyle = '#07090c'; c.fillRect(0, 0, 256, 80);
+      c.fillStyle = '#ffcc33'; c.font = 'bold 13px monospace'; c.textAlign = 'center';
+      c.fillText('GLIDEPATH FC  vs  CODEC UNITED', 128, 18);
+      c.font = 'bold 34px monospace'; c.fillStyle = '#ffffff';
+      c.fillText(S.score[0] + ' - ' + S.score[1], 128, 56);
+      c.font = 'bold 12px monospace'; c.fillStyle = '#7dff8a';
+      var m = Math.floor(S.clock / 60) % 90;
+      c.fillText((m < 10 ? '0' : '') + m + "'", 128, 74);
+      S.sbTex.needsUpdate = true;
+    }
+
+    /* ---------- fireworks ---------- */
+    var FW = { parts: [], shells: [] };
+    (function() {
+      for (var i = 0; i < 260; i++) {
+        var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: W_GLOW, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+        sp.visible = false; scene.add(sp);
+        FW.parts.push({ s: sp, v: new THREE.Vector3(), life: 0, max: 1, col: new THREE.Color(), size: 1 });
+      }
+    })();
+    var FW_TRAIL = new THREE.Color(1, 0.75, 0.4);
+    var FW_COLS = [0xff4a3a, 0x3aa0ff, 0xffd23a, 0x7dff8a, 0xff7ae0, 0xffffff, 0xff9a2a];
+    var fwCursor = 0;
+    function fwSpark(p, v, life, col, size) {
+      var P = FW.parts[fwCursor]; fwCursor = (fwCursor + 1) % FW.parts.length;
+      P.s.position.copy(p); P.v.copy(v); P.life = life; P.max = life; P.col.copy(col); P.size = size;
+      P.s.material.color.copy(col); P.s.material.opacity = 1; P.s.visible = true; P.s.scale.set(size, size, 1);
+    }
+    function fwLaunch(x, y, z) {
+      FW.shells.push({ p: new THREE.Vector3(x, y, z), v: new THREE.Vector3((Math.random() - 0.5) * 8, 55 + Math.random() * 18, (Math.random() - 0.5) * 8),
+        fuse: 1.8 + Math.random() * 0.9, col: new THREE.Color(FW_COLS[(Math.random() * FW_COLS.length) | 0]), trail: 0 });
+      wNoise(0.6, wVolAt(x, y, z, 1500) * 0.04, 'highpass', 2500, 0.5, 0.02);
+    }
+    function fwUpdate(dt) {
+      for (var i = FW.shells.length - 1; i >= 0; i--) {
+        var S = FW.shells[i];
+        S.v.y -= 9.8 * dt; S.p.addScaledVector(S.v, dt); S.fuse -= dt; S.trail -= dt;
+        if (S.trail <= 0) { S.trail = 0.03; fwSpark(S.p, _wV.set(0, -2, 0), 0.5, FW_TRAIL, 1.4); }
+        if (S.fuse <= 0) {
+          var n = 34 + (Math.random() * 16 | 0), ring = Math.random() < 0.3;
+          for (var k = 0; k < n; k++) {
+            var u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2, r = Math.sqrt(1 - u * u);
+            if (ring) { u = 0; r = 1; th = k / n * Math.PI * 2; }
+            var sp = 16 + Math.random() * (ring ? 0 : 8);
+            fwSpark(S.p, _wV.set(r * Math.cos(th) * sp, u * sp, r * Math.sin(th) * sp), 1.6 + Math.random() * 0.8, S.col, 3.2);
+          }
+          var vb = wVolAt(S.p.x, S.p.y, S.p.z, 2200);
+          var delay = camera.position.distanceTo(S.p) / 343;
+          wTone('sine', 110, 40, 0.8, vb * 0.18, delay); wNoise(0.9, vb * 0.08, 'lowpass', 900, 0.7, 0.01, delay);
+          FW.shells.splice(i, 1);
+        }
+      }
+      for (var j = 0; j < FW.parts.length; j++) {
+        var P = FW.parts[j]; if (P.life <= 0) continue;
+        P.life -= dt;
+        if (P.life <= 0) { P.s.visible = false; P.s.material.opacity = 0; continue; }
+        P.v.y -= 5 * dt; P.v.multiplyScalar(1 - dt * 0.9);
+        P.s.position.addScaledVector(P.v, dt);
+        var f = P.life / P.max;
+        P.s.material.opacity = f * (0.75 + 0.25 * Math.sin(P.life * 40 + j));
+        P.s.scale.setScalar(P.size * (0.6 + f * 0.6));
+      }
+    }
+
+    function stadiumUpdate(dt) {
+      var S = STADIUM; if (!S) return;
+      var night = wNight();
+      S.pitchMat.emissiveIntensity = night * 0.5;
+      S.lampMat.emissiveIntensity = night * 3.5;
+      S.coneMat.opacity = night * 0.07;
+      var d = wDistXZ(S.x, S.z);
+      if (S.flybyCd > 0) S.flybyCd -= dt;
+      // the match (only simulated when you're near enough to watch)
+      if (d < 1800) {
+        S.clock += dt * 12;
+        S.kickT -= dt; S.goalT -= dt;
+        S.bvx *= 1 - Math.min(1, dt * 0.7); S.bvz *= 1 - Math.min(1, dt * 0.7);
+        S.bx += S.bvx * dt; S.bz += S.bvz * dt;
+        if (Math.abs(S.bz) > 33.5) { S.bz = Math.sign(S.bz) * 33.5; S.bvz *= -0.6; }
+        if (Math.abs(S.bx) > 52.5) {
+          if (Math.abs(S.bz) < 3.66 && S.goalT <= 0) {
+            var scorer = S.bx > 0 ? 0 : 1;
+            S.score[scorer]++; S.goalT = 4; stadiumBoard();
+            var v = Math.max(0, 1 - d / 1200) * 0.12;
+            worldRoar(v, 4.5);
+            if (night > 0.4) for (var fw = 0; fw < 5; fw++) setTimeout(function() { var p = S.ep(30, Math.random() * 6.28); _wV.set(p[0], 0, p[1]).applyEuler(_wE.set(0, S.g.rotation.y, 0)); fwLaunch(S.x + _wV.x, S.y + 2, S.z + _wV.z); }, fw * 350);
+            S.bx = 0; S.bz = 0; S.bvx = 0; S.bvz = 0;
+            S.P.forEach(function(p) { p.x = p.hx; p.z = p.hz; });
+          } else { S.bx = Math.sign(S.bx) * 52.5; S.bvx *= -0.5; }
+        }
+        // two nearest players of each side go for the ball; the rest hold their shape
+        var nearest = [[-1, 1e9, -1, 1e9], [-1, 1e9, -1, 1e9]];
+        S.P.forEach(function(p, i) {
+          if (p.team === 2) return;
+          var dd = Math.hypot(p.x - S.bx, p.z - S.bz), n = nearest[p.team];
+          if (dd < n[1]) { n[2] = n[0]; n[3] = n[1]; n[0] = i; n[1] = dd; } else if (dd < n[3]) { n[2] = i; n[3] = dd; }
+        });
+        for (var i = 0; i < S.P.length; i++) {
+          var p = S.P[i], tx, tz, sp = 4;
+          var chase = p.team < 2 && (nearest[p.team][0] === i || nearest[p.team][2] === i);
+          if (chase) { tx = S.bx; tz = S.bz; sp = 7.5; }
+          else if (p.team === 2) { tx = S.bx * 0.8; tz = S.bz * 0.5 + 12; sp = 5; }
+          else { var att = (p.team === 0 ? 1 : -1) * S.bx > 0 ? 12 : -6; tx = p.hx + S.bx * 0.45 + (p.team === 0 ? att : -att); tz = p.hz + (S.bz - p.hz) * 0.3; }
+          var dx = tx - p.x, dz = tz - p.z, dl = Math.hypot(dx, dz);
+          var mv = Math.min(dl, sp * dt);
+          if (dl > 0.01) { p.x += dx / dl * mv; p.z += dz / dl * mv; }
+          p.ph += dt * (mv > 0.02 ? 12 : 2);
+          if (chase && dl < 1.3 && S.kickT <= 0) {
+            var gx = (p.team === 0 ? 55 : -55) - S.bx, gz = (Math.random() - 0.5) * 14 - S.bz, gl = Math.hypot(gx, gz);
+            var pw = gl < 30 ? 22 + Math.random() * 6 : 10 + Math.random() * 8;
+            S.bvx = gx / gl * pw + (Math.random() - 0.5) * 6; S.bvz = gz / gl * pw + (Math.random() - 0.5) * 10; S.kickT = 0.5;
+          }
+          _wM.compose(_wV.set(p.x, 0.18 + Math.abs(Math.sin(p.ph)) * 0.15, p.z), _wQ.identity(), _wS.set(1.3, 1.3, 1.3));
+          S.players.setMatrixAt(i, _wM);
+        }
+        S.players.instanceMatrix.needsUpdate = true;
+        S.ball.position.set(S.bx, 0.62 + Math.min(2, Math.hypot(S.bvx, S.bvz) * 0.04), S.bz);
+        if (Math.floor(S.clock) % 60 === 0) stadiumBoard();
+      }
+      // the crowd, and what happens when you buzz them
+      if (!S.ambient && audioCtx) {
+        var src = audioCtx.createBufferSource(); wEnsureNoise();
+        src.buffer = wNoiseBuf; src.loop = true;
+        var bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 700; bp.Q.value = 0.5;
+        var gn = audioCtx.createGain(); gn.gain.value = 0; src.connect(bp).connect(gn).connect(audioCtx.destination); src.start();
+        S.ambient = gn;
+      }
+      if (S.ambient) S.ambient.gain.setTargetAtTime(soundEnabled && started ? Math.max(0, 1 - d / 650) * 0.05 : 0, audioCtx.currentTime, 0.5);
+      var agl = position.y - S.y;
+      if (started && !crashing && !wasGrounded && d < 125 && agl < 170 && S.flybyCd <= 0) {
+        S.flybyCd = 40; S.flashT = 3;
+        worldRoar(0.16, 4);
+        if (typeof kjLike === 'function') kjLike(2, '🏟 STADIUM FLYBY — THE CROWD GOES WILD');
+        if (night > 0.4) for (var q = 0; q < 4; q++) fwLaunch(S.x + (Math.random() - 0.5) * 80, S.y + 2, S.z + (Math.random() - 0.5) * 80);
+      }
+      if (S.flashT > 0) S.flashT -= dt;
+      for (var k = 0; k < S.flashes.length; k++) S.flashes[k].material.opacity = S.flashT > 0 && Math.random() < 0.08 ? 1 : 0;
+      // a fireworks show over the stadium through the evening
+      if (night > 0.6 && d < 2600) {
+        S.fwT -= dt;
+        if (S.fwT <= 0) { S.fwT = 4 + Math.random() * 9; var nsh = 1 + (Math.random() * 3 | 0); for (var sh = 0; sh < nsh; sh++) fwLaunch(S.x + (Math.random() - 0.5) * 90, S.y + 2, S.z + (Math.random() - 0.5) * 90); }
+      }
+    }
+
+    /* ---------- city searchlights sweeping the night sky ---------- */
+    var SEARCHLIGHTS = [];
+    (function() {
+      var beamTex = wCanvasTex(32, 256, function(c, w, h) {
+        var gr = c.createLinearGradient(0, h, 0, 0); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+        c.fillStyle = gr; c.fillRect(0, 0, w, h);
+        var gx = c.createLinearGradient(0, 0, w, 0); gx.addColorStop(0, 'rgba(0,0,0,0.6)'); gx.addColorStop(0.5, 'rgba(0,0,0,0)'); gx.addColorStop(1, 'rgba(0,0,0,0.6)');
+        c.globalCompositeOperation = 'destination-out'; c.fillStyle = gx; c.fillRect(0, 0, w, h);
+      });
+      var spots = [];
+      if (LANDMARK_SET) spots.push([LANDMARK_X, LANDMARK_ROOF_Y + 1, LANDMARK_Z]);
+      if (STADIUM) { [0.4, 2.7].forEach(function(t) { var p = STADIUM.ep(40, t); _wV.set(p[0], 0, p[1]).applyEuler(_wE.set(0, STADIUM.g.rotation.y, 0)); spots.push([STADIUM.x + _wV.x, STADIUM.y + 1, STADIUM.z + _wV.z]); }); }
+      spots.forEach(function(sp, i) {
+        var pivot = new THREE.Group(); pivot.position.set(sp[0], sp[1], sp[2]); scene.add(pivot);
+        var geo = new THREE.CylinderGeometry(26, 0.9, 1100, 16, 1, true); geo.translate(0, 550, 0);
+        var beam = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: beamTex, color: 0xcfe0ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
+        beam.frustumCulled = false; pivot.add(beam);
+        SEARCHLIGHTS.push({ pivot: pivot, beam: beam, ph: i * 2.1, sp: 0.25 + i * 0.07 });
+      });
+    })();
+    function searchlightsUpdate(dt) {
+      var night = wNight(), on = night > 0.35 && currentDim < 0.7;
+      for (var i = 0; i < SEARCHLIGHTS.length; i++) {
+        var L = SEARCHLIGHTS[i];
+        L.beam.visible = on;
+        if (!on) continue;
+        L.beam.material.opacity = Math.min(0.5, (night - 0.35) * 0.75 * (1 + currentLayer * 20));
+        var t = elapsedSeconds * L.sp + L.ph;
+        L.pivot.rotation.set(0.35 + Math.sin(t * 0.7) * 0.25, t, 0, 'YXZ');
+      }
+    }
+
+    /* ============================================================
+       DEER — small herds grazing along the forest edges. They wander and crop the grass until
+       something loud comes in low (or a car comes too close), then bolt away in long bounds.
+       ============================================================ */
+    var DEER = { herds: [], n: 0, body: null, legs: null, antl: null, checkT: 0 };
+    (function buildDeer() {
+      var rng = mulberry32(777);
+      var brown = frCol(0x7b5534), dark = frCol(0x3d2a1a), belly = frCol(0xcdb99a), white = frCol(0xf0efe8), bone = frCol(0xcdbd9e);
+      var B = new FrB();
+      frBlob(B, 0, 1.05, -0.05, 0.3, 0.36, 0.76, 1, brown, rng, 0.04);
+      frBlob(B, 0, 1.1, 0.45, 0.28, 0.34, 0.33, 1, brown, rng, 0.04);
+      frBlob(B, 0, 0.88, 0, 0.2, 0.12, 0.58, 0, belly, rng, 0.02);
+      frTube(B, 0, 1.2, 0.62, 0, 1.64, 0.88, 0.14, 0.09, 6, 1, function() { return [brown, 1]; });
+      frBlob(B, 0, 1.7, 0.98, 0.11, 0.12, 0.25, 1, brown, rng, 0.03);
+      frBlob(B, 0, 1.65, 1.2, 0.07, 0.07, 0.09, 0, dark, rng, 0.02);
+      frBlob(B, 0.1, 1.84, 0.9, 0.04, 0.1, 0.03, 0, brown, rng, 0.02);
+      frBlob(B, -0.1, 1.84, 0.9, 0.04, 0.1, 0.03, 0, brown, rng, 0.02);
+      frBlob(B, 0, 1.18, -0.8, 0.07, 0.11, 0.06, 0, white, rng, 0.02);
+      var L = new FrB();
+      frTube(L, 0, 0, 0, 0, -0.9, 0.02, 0.07, 0.035, 5, 2, function(t) { return [t > 0.9 ? dark : brown, 0.9]; });
+      var A = new FrB();
+      [-1, 1].forEach(function(s) {
+        frTube(A, s * 0.06, 1.82, 0.92, s * 0.3, 2.35, 0.72, 0.03, 0.018, 4, 2, function() { return [bone, 1]; });
+        frTube(A, s * 0.2, 2.08, 0.82, s * 0.26, 2.3, 0.98, 0.02, 0.012, 3, 1, function() { return [bone, 1]; });
+        frTube(A, s * 0.27, 2.26, 0.75, s * 0.42, 2.45, 0.86, 0.018, 0.01, 3, 1, function() { return [bone, 1]; });
+      });
+      var mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+      var MAXD = 24;
+      DEER.body = new THREE.InstancedMesh(B.geo(), mat, MAXD);
+      DEER.legs = new THREE.InstancedMesh(L.geo(), mat, MAXD * 4);
+      DEER.antl = new THREE.InstancedMesh(A.geo(), mat, MAXD);
+      [DEER.body, DEER.legs, DEER.antl].forEach(function(m) { m.frustumCulled = false; m.castShadow = true; m.count = 0; scene.add(m); });
+      DEER.max = MAXD;
+    })();
+    var _wLegM = new THREE.Matrix4(), _wLegT = new THREE.Matrix4(), _wLegR = new THREE.Matrix4(), _wLegZero = new THREE.Matrix4().makeScale(0, 0, 0), _wC = new THREE.Color();
+    var DEER_HIPS = [[-0.16, 0.98, 0.5], [0.16, 0.98, 0.5], [-0.16, 0.98, -0.48], [0.16, 0.98, -0.48]];
+    function deerFindSpot(px, pz) {
+      for (var i = 0; i < 60; i++) {
+        var a = Math.random() * Math.PI * 2, r = 280 + Math.random() * 700;
+        var x = px + Math.cos(a) * r, z = pz + Math.sin(a) * r, h = getTerrainHeight(x, z);
+        if (h < 6 || h > 95) continue;
+        var d = forestDensityAt(x, z, h);
+        if (d < 0.05 || d > 0.7 || treeBlockedAt(x, z)) continue;
+        return { x: x, z: z };
+      }
+      return null;
+    }
+    function deerPlaceHerd(H, px, pz) {
+      var sp = deerFindSpot(px, pz); if (!sp) return false;
+      H.cx = sp.x; H.cz = sp.z; H.flee = 0;
+      H.deer.forEach(function(d) { d.x = sp.x + (Math.random() - 0.5) * 24; d.z = sp.z + (Math.random() - 0.5) * 24; d.yaw = Math.random() * 6.28; d.v = 0; d.walkT = Math.random() * 6; d.tx = d.x; d.tz = d.z; });
+      return true;
+    }
+    (function() {
+      var idx = 0;
+      for (var h = 0; h < 3; h++) {
+        var H = { deer: [], cx: 0, cz: 0, flee: 0, placed: false };
+        var n = 6 + (h % 2) * 2;
+        for (var k = 0; k < n && idx < DEER.max; k++, idx++) H.deer.push({ i: idx, stag: k === 0, x: 0, z: 0, yaw: 0, v: 0, ph: Math.random() * 6, walkT: 0, tx: 0, tz: 0, sc: 0.92 + Math.random() * 0.16 });
+        DEER.herds.push(H);
+      }
+      DEER.n = idx;
+    })();
+    function deerUpdate(dt) {
+      if (!started) return;
+      DEER.checkT -= dt;
+      if (DEER.checkT <= 0) {
+        DEER.checkT = 2;
+        DEER.herds.forEach(function(H) { if (!H.placed || wDistXZ(H.cx, H.cz) > 1500) H.placed = deerPlaceHerd(H, position.x, position.z); });
+      }
+      var agl = kjAgl(), vis = 0;
+      DEER.herds.forEach(function(H) {
+        if (!H.placed) { H.deer.forEach(function(d) { d.hidden = true; }); return; }
+        var dd = wDistXZ(H.cx, H.cz);
+        var loud = isCarMode ? dd < 55 : (dd < 160 && agl < 100 && (Math.abs(speed) > 4 || isHelicopterMode));
+        if (loud && H.flee <= 0) H.flee = 6 + Math.random() * 2;
+        if (H.flee > 0) H.flee -= dt;
+        var sx = 0, sz = 0;
+        H.deer.forEach(function(d) {
+          d.hidden = false;
+          var want = 0, ty;
+          if (H.flee > 0) {
+            ty = Math.atan2(d.x - position.x, d.z - position.z) + Math.sin(d.i * 7.1) * 0.5;
+            want = 9 + (d.i % 3);
+          } else {
+            d.walkT -= dt;
+            if (d.walkT <= 0) { d.walkT = 3 + Math.random() * 7; d.tx = H.cx + (Math.random() - 0.5) * 30; d.tz = H.cz + (Math.random() - 0.5) * 30; d.moving = Math.random() < 0.45; }
+            if (d.moving && Math.hypot(d.tx - d.x, d.tz - d.z) > 1) { ty = Math.atan2(d.tx - d.x, d.tz - d.z); want = 1.1; }
+            else ty = d.yaw;
+          }
+          var dyaw = Math.atan2(Math.sin(ty - d.yaw), Math.cos(ty - d.yaw));
+          d.yaw += THREE.MathUtils.clamp(dyaw, -3 * dt, 3 * dt);
+          d.v += (want - d.v) * Math.min(1, dt * (want > d.v ? 2.5 : 1.5));
+          var nx = d.x + Math.sin(d.yaw) * d.v * dt, nz = d.z + Math.cos(d.yaw) * d.v * dt;
+          var nh = getTerrainHeight(nx, nz);
+          if (nh < WATER_LEVEL + 1.5) { d.yaw += Math.PI * 0.6; } else { d.x = nx; d.z = nz; }
+          d.ph += dt * (d.v > 4 ? 9 : 5.5) * Math.min(1, d.v + 0.1);
+          sx += d.x; sz += d.z;
+        });
+        H.cx = sx / H.deer.length; H.cz = sz / H.deer.length;
+      });
+      // write the instances
+      DEER.herds.forEach(function(H) {
+        H.deer.forEach(function(d) {
+          var i = d.i;
+          if (d.hidden) { _wM.makeScale(0, 0, 0); DEER.body.setMatrixAt(i, _wM); DEER.antl.setMatrixAt(i, _wM); for (var l = 0; l < 4; l++) DEER.legs.setMatrixAt(i * 4 + l, _wM); return; }
+          var run = d.v > 4, bound = run ? Math.abs(Math.sin(d.ph)) * 0.45 : 0;
+          var gy = getTerrainHeight(d.x, d.z);
+          var graze = (!run && d.v < 0.3) ? 0.28 * (0.5 + 0.5 * Math.sin(elapsedSeconds * 0.5 + i)) : 0;
+          _wQ.setFromEuler(_wE.set(graze + (run ? Math.cos(d.ph) * 0.12 : 0), d.yaw, 0, 'YXZ'));
+          var s = d.sc * (d.stag ? 1.12 : 1);
+          _wM.compose(_wV.set(d.x, gy + bound, d.z), _wQ, _wS.set(s, s, s));
+          DEER.body.setMatrixAt(i, _wM);
+          if (d.stag) DEER.antl.setMatrixAt(i, _wM); else DEER.antl.setMatrixAt(i, _wLegZero);
+          for (var l2 = 0; l2 < 4; l2++) {
+            var h = DEER_HIPS[l2], front = l2 < 2;
+            var sw = run ? Math.sin(d.ph + (front ? 0 : 2.2)) * 0.9 : Math.sin(d.ph + (l2 === 0 || l2 === 3 ? 0 : Math.PI)) * 0.4 * Math.min(1, d.v);
+            _wLegM.copy(_wM).multiply(_wLegT.makeTranslation(h[0], h[1], h[2])).multiply(_wLegR.makeRotationX(sw));
+            DEER.legs.setMatrixAt(i * 4 + l2, _wLegM);
+          }
+        });
+      });
+      DEER.body.count = DEER.antl.count = DEER.n; DEER.legs.count = DEER.n * 4;
+      DEER.body.instanceMatrix.needsUpdate = DEER.legs.instanceMatrix.needsUpdate = DEER.antl.instanceMatrix.needsUpdate = true;
+    }
+
+    /* ============================================================
+       HARBOUR — on the coast just north of the city: a stone quay, two timber piers with boats
+       tied up, a breakwater, sheds and a crane.
+       ============================================================ */
+    var HARBOUR = null;
+    function wBoatHull(len, beam, depth, colTop, colBottom) {
+      var geo = new THREE.BoxGeometry(beam, depth, len, 2, 2, 8), p = geo.attributes.position;
+      for (var i = 0; i < p.count; i++) {
+        var x = p.getX(i), y = p.getY(i), z = p.getZ(i), f = z / (len / 2);
+        var taper = f > 0 ? 1 - Math.pow(f, 1.6) * 0.95 : 1 - Math.pow(-f, 3) * 0.35;
+        var keel = y < 0 ? 0.45 + 0.55 * (1 - Math.abs(f) * 0.3) : 1;
+        p.setX(i, x * taper * keel);
+        if (y > 0 && f > 0.4) p.setY(i, y + (f - 0.4) * depth * 0.4);
+      }
+      geo.computeVertexNormals();
+      var g = new THREE.Group();
+      var hull = new THREE.Mesh(geo, wstd(colTop, 0.5, 0.1)); hull.castShadow = true; g.add(hull);
+      var stripe = new THREE.Mesh(geo, wstd(colBottom, 0.6)); stripe.scale.set(1.01, 0.4, 1.005); stripe.position.y = -depth * 0.32; g.add(stripe);
+      return g;
+    }
+    function wMakeSailboat(sailHex) {
+      var g = wBoatHull(9, 2.8, 1.4, 0xf4f4f0, 0x1d3f6e);
+      wadd(g, new THREE.BoxGeometry(1.6, 0.8, 3), wstd(0xe8e4dc, 0.6), 0, 1.0, -0.8);
+      wadd(g, new THREE.CylinderGeometry(0.07, 0.09, 11, 6), wstd(0xcfd3d6, 0.4, 0.6), 0, 6.2, 0.6);
+      var sg = new THREE.BufferGeometry();
+      sg.setAttribute('position', new THREE.Float32BufferAttribute([0, 1.2, 0.5, 0, 11.4, 0.6, 0, 1.3, -3.4, 0, 1.2, 0.8, 0, 10, 0.75, 0, 1.2, 4.2], 3));
+      sg.computeVertexNormals();
+      var sail = new THREE.Mesh(sg, new THREE.MeshStandardMaterial({ color: wcol(sailHex), roughness: 0.8, side: THREE.DoubleSide }));
+      sail.castShadow = true; g.add(sail); g.userData.sail = sail;
+      g.userData.len = 9; g.userData.draft = 0.5;
+      return g;
+    }
+    function wMakeTrawler() {
+      var g = wBoatHull(16, 5, 2.6, 0x9e2b25, 0x1b1b1b);
+      wadd(g, new THREE.BoxGeometry(3.8, 2.6, 4.5), wstd(0xf2efe6, 0.6), 0, 2.4, -3.5);
+      wadd(g, new THREE.BoxGeometry(3.9, 0.3, 4.7), wstd(0x2f3a45, 0.5), 0, 3.8, -3.5);
+      wadd(g, new THREE.CylinderGeometry(0.12, 0.14, 9, 6), wstd(0x44484c, 0.5, 0.5), 0, 5.5, 1.5);
+      var boom = wadd(g, new THREE.CylinderGeometry(0.08, 0.08, 9, 6), wstd(0x44484c, 0.5, 0.5), 0, 5, 2.5); boom.rotation.z = 1.1;
+      g.userData.len = 16; g.userData.draft = 1.1;
+      return g;
+    }
+    function wMakeCargo() {
+      var g = wBoatHull(64, 11, 6, 0x1f3552, 0x8e2a22);
+      wadd(g, new THREE.BoxGeometry(10, 9, 8), wstd(0xf0f0ea, 0.6), 0, 7.2, -25);
+      wadd(g, new THREE.BoxGeometry(10.4, 0.6, 8.4), wstd(0x333a40, 0.6), 0, 11.9, -25);
+      wadd(g, new THREE.CylinderGeometry(1.2, 1.4, 5, 10), wstd(0xd6452f, 0.5), 0, 13.5, -28);
+      var cols = [0xc0392b, 0x2e86c1, 0xf1c40f, 0x27ae60, 0xe67e22, 0x7f8c8d];
+      for (var r = 0; r < 5; r++) for (var c = 0; c < 2; c++) for (var h = 0; h < (r % 2 ? 2 : 3); h++)
+        wadd(g, new THREE.BoxGeometry(4.6, 2.6, 7.6), wstd(cols[(r * 3 + c + h) % cols.length], 0.7, 0.2), c ? 2.4 : -2.4, 4.3 + h * 2.6, -10 + r * 8.2);
+      g.userData.len = 64; g.userData.draft = 3.2;
+      return g;
+    }
+    function wMakeMotorboat() {
+      var g = wBoatHull(6.5, 2.4, 1.1, 0xf6f6f6, 0x2a8fbf);
+      wadd(g, new THREE.BoxGeometry(1.8, 0.8, 1.8), wstd(0x2a8fbf, 0.4, 0.2), 0, 0.9, -0.3);
+      g.userData.len = 6.5; g.userData.draft = 0.35;
+      return g;
+    }
+    // boats float on the actual swell: height at the hull, and pitch/roll from the slope under it
+    function wFloat(b, dt) {
+      var u = b.userData, L = (u.len || 8) * 0.45, Bm = (u.len || 8) * 0.12 + 1;
+      var sx = Math.sin(b.rotation.y), sz = Math.cos(b.rotation.y);
+      var hb = seaMeshWaveHeight(b.position.x + sx * L, b.position.z + sz * L), hs = seaMeshWaveHeight(b.position.x - sx * L, b.position.z - sz * L);
+      var hp = seaMeshWaveHeight(b.position.x + sz * Bm, b.position.z - sx * Bm), hq = seaMeshWaveHeight(b.position.x - sz * Bm, b.position.z + sx * Bm);
+      var y = WATER_LEVEL + (hb + hs + hp + hq) * 0.25 - (u.draft || 0.5) + 0.6;
+      b.position.y += (y - b.position.y) * Math.min(1, dt * 4);
+      var pitch = Math.atan2(hs - hb, L * 2), roll = Math.atan2(hp - hq, Bm * 2);
+      u.pitch = (u.pitch || 0) + (pitch - (u.pitch || 0)) * Math.min(1, dt * 3);
+      u.roll = (u.roll || 0) + (roll - (u.roll || 0)) * Math.min(1, dt * 3);
+      b.rotation.x = u.pitch; b.rotation.z = u.roll + (u.heel || 0);
+    }
+    (function buildHarbour() {
+      var hx0 = RUNWAY_CENTER_X + 1450, best = null;
+      for (var dx = -260; dx <= 260; dx += 20) {
+        var x = hx0 + dx;
+        for (var z = RUNWAY_CENTER_Z + 1150; z < RUNWAY_CENTER_Z + 2400; z += 4) {
+          if (getTerrainHeight(x, z) < WATER_LEVEL - 0.5) {
+            if (getTerrainHeight(x, z + 120) < WATER_LEVEL - 4 && (!best || Math.abs(dx) < Math.abs(best.dx))) best = { x: x, z: z, dx: dx };
+            break;
+          }
+        }
+      }
+      if (!best) return;
+      var landY = getTerrainHeight(best.x, best.z - 14);
+      var qy = THREE.MathUtils.clamp(landY + 0.2, WATER_LEVEL + 2.5, WATER_LEVEL + 9);
+      var g = new THREE.Group(); g.position.set(best.x, 0, best.z); scene.add(g);
+      var stone = wstd(0x8c8a84, 0.95), timber = wstd(0x6b5238, 0.9), iron = wstd(0x3a3f44, 0.6, 0.6);
+      wadd(g, new THREE.BoxGeometry(240, qy - WATER_LEVEL + 8, 24), stone, 0, (qy + WATER_LEVEL - 8) / 2, -4);
+      var piers = [-55, 48];
+      piers.forEach(function(px) {
+        wadd(g, new THREE.BoxGeometry(7, 0.5, 100), timber, px, qy - 0.4, 58);
+        var posts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.28, 0.28, 12, 6), timber, 26);
+        for (var k = 0; k < 13; k++) for (var s = 0; s < 2; s++) { _wM.makeTranslation(px + (s ? 3.2 : -3.2), qy - 6.5, 12 + k * 7.6); posts.setMatrixAt(k * 2 + s, _wM); }
+        posts.castShadow = true; g.add(posts);
+      });
+      // breakwater of piled boulders curving out to shelter the basin
+      var rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), wstd(0x6f6d68, 1), 46);
+      for (var r = 0; r < 46; r++) {
+        var t = r / 45, bxp = 120 + Math.sin(t * 1.6) * -60 - t * 40, bzp = t * 190;
+        var rs = 3.2 + Math.random() * 2.4;
+        _wQ.setFromEuler(_wE.set(Math.random() * 3, Math.random() * 3, Math.random() * 3));
+        _wM.compose(_wV.set(bxp + (Math.random() - 0.5) * 5, WATER_LEVEL + 0.5 + Math.random() * 1.5, bzp + (Math.random() - 0.5) * 5), _wQ, _wS.set(rs, rs * 0.8, rs));
+        rocks.setMatrixAt(r, _wM);
+      }
+      rocks.castShadow = true; rocks.receiveShadow = true; g.add(rocks);
+      // sheds and a crane on the quay
+      [[-80, 0x8e3b2f], [-30, 0x2f6f7a]].forEach(function(w) {
+        var sh = wadd(g, new THREE.BoxGeometry(34, 10, 13), wstd(w[1], 0.8), w[0], qy + 5, -10);
+        var rf = wadd(g, new THREE.CylinderGeometry(7.2, 7.2, 34.5, 3, 1), wstd(0x55595d, 0.6, 0.4), w[0], qy + 10, -10);
+        rf.rotation.z = Math.PI / 2; rf.scale.set(1, 1, 0.9);
+      });
+      var yel = wstd(0xe8b41c, 0.6, 0.3);
+      [[-6, -8], [6, -8], [-6, 6], [6, 6]].forEach(function(l) { wadd(g, new THREE.BoxGeometry(0.8, 18, 0.8), yel, 80 + l[0], qy + 9, l[1]); });
+      wadd(g, new THREE.BoxGeometry(14, 1.6, 16), yel, 80, qy + 18.5, -1);
+      var jib = wadd(g, new THREE.BoxGeometry(1.2, 1.2, 34), yel, 80, qy + 19.5, 16);
+      // quayside lamps
+      var lampHead = new THREE.MeshStandardMaterial({ color: 0xfff3d6, emissive: new THREE.Color(1, 0.85, 0.55), emissiveIntensity: 0 });
+      for (var lp = -100; lp <= 100; lp += 25) {
+        wadd(g, new THREE.CylinderGeometry(0.12, 0.15, 6, 6), iron, lp, qy + 3, 6);
+        wadd(g, new THREE.SphereGeometry(0.4, 8, 6), lampHead, lp, qy + 6.2, 6, false);
+      }
+      // boats tied up along the piers
+      var moored = [];
+      [[wMakeSailboat(0xffffff), -55 + 7, 30, 0], [wMakeSailboat(0xf2d7a0), -55 - 7, 55, Math.PI], [wMakeMotorboat(), -55 + 6.5, 78, 0],
+       [wMakeTrawler(), 48 + 9.5, 40, Math.PI], [wMakeMotorboat(), 48 - 6, 25, 0], [wMakeSailboat(0xd9534f), 48 - 7, 70, Math.PI]].forEach(function(m) {
+        var b = m[0]; b.position.set(best.x + m[1], WATER_LEVEL, best.z + m[2]); b.rotation.y = m[3]; scene.add(b); moored.push(b);
+      });
+      HARBOUR = { x: best.x, z: best.z, y: qy, g: g, lampHead: lampHead, moored: moored, pierEnd: new THREE.Vector3(best.x - 55, qy + 1.4, best.z + 104) };
+    })();
+
+    /* ---------- boats under way ---------- */
+    var BOATS = [];
+    var WAKE = null;
+    (function() {
+      if (!HARBOUR) return;
+      var H = HARBOUR, mouth = [H.x + 20, H.z + 240];
+      function route(pts) { return pts.map(function(p) { return new THREE.Vector3(p[0], 0, p[1]); }); }
+      var defs = [
+        [wMakeSailboat(0xffffff), 5.5, route([[H.x - 300, H.z + 500], [H.x - 800, H.z + 900], [H.x - 300, H.z + 1300], [H.x + 250, H.z + 850]])],
+        [wMakeSailboat(0xe8563f), 5, route([[H.x + 500, H.z + 700], [H.x + 1100, H.z + 1200], [H.x + 400, H.z + 1500], [H.x - 100, H.z + 900]])],
+        [wMakeTrawler(), 4, route([mouth, [H.x - 900, H.z + 1600], [H.x - 2200, H.z + 2100], [H.x - 1200, H.z + 1300]])],
+        [wMakeCargo(), 8, route([[H.x + 3200, H.z + 1500], [H.x - 2800, H.z + 1800], [H.x - 5200, H.z + 1400], [H.x - 2600, H.z + 1150], [H.x + 3000, H.z + 1100]])]
+      ];
+      defs.forEach(function(d) {
+        var b = d[0]; b.position.copy(d[2][0]); scene.add(b);
+        BOATS.push({ b: b, speed: d[1], route: d[2], wp: 1, hornCd: 0, wakeT: 0, big: d[1] >= 8 });
+      });
+      var wg = new THREE.PlaneGeometry(1, 1); wg.rotateX(-Math.PI / 2);
+      WAKE = new THREE.InstancedMesh(wg, new THREE.MeshBasicMaterial({ map: W_GLOW, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: 0xffffff }), 120);
+      WAKE.frustumCulled = false; WAKE.count = 120; scene.add(WAKE);
+      WAKE.userData = { list: [], cursor: 0 };
+      for (var i = 0; i < 120; i++) { WAKE.userData.list.push({ x: 0, z: 0, life: 0, size: 1, yaw: 0 }); WAKE.setColorAt(i, new THREE.Color(0, 0, 0)); }
+    })();
+    function boatsUpdate(dt) {
+      var night = wNight();
+      if (HARBOUR) {
+        HARBOUR.lampHead.emissiveIntensity = night * 3;
+        HARBOUR.moored.forEach(function(b) { wFloat(b, dt); });
+      }
+      BOATS.forEach(function(B) {
+        var b = B.b, tgt = B.route[B.wp];
+        var dx = tgt.x - b.position.x, dz = tgt.z - b.position.z;
+        if (dx * dx + dz * dz < 80 * 80) { B.wp = (B.wp + 1) % B.route.length; }
+        var want = Math.atan2(dx, dz), dy = Math.atan2(Math.sin(want - b.rotation.y), Math.cos(want - b.rotation.y));
+        b.rotation.y += THREE.MathUtils.clamp(dy, -0.12 * dt, 0.12 * dt);
+        b.position.x += Math.sin(b.rotation.y) * B.speed * dt; b.position.z += Math.cos(b.rotation.y) * B.speed * dt;
+        if (b.userData.sail) b.userData.heel = Math.sin(elapsedSeconds * 0.3 + B.speed) * 0.08 + 0.12;
+        wFloat(b, dt);
+        B.wakeT -= dt;
+        var near = wDistXZ(b.position.x, b.position.z);
+        if (B.wakeT <= 0 && near < 1600 && WAKE) {
+          B.wakeT = B.big ? 0.12 : 0.22;
+          var W = WAKE.userData.list[WAKE.userData.cursor]; WAKE.userData.cursor = (WAKE.userData.cursor + 1) % WAKE.userData.list.length;
+          var L = (b.userData.len || 8) * 0.5;
+          W.x = b.position.x - Math.sin(b.rotation.y) * L; W.z = b.position.z - Math.cos(b.rotation.y) * L;
+          W.life = W.max = B.big ? 9 : 6; W.size = (b.userData.len || 8) * 0.35; W.yaw = b.rotation.y;
+        }
+        B.hornCd -= dt;
+        if (B.hornCd <= 0 && near < (B.big ? 120 : 70) && kjAgl() < 60 && started && !crashing) { B.hornCd = 25; worldHorn(b.position.x, b.position.z, B.big); }
+      });
+      if (WAKE) {
+        var list = WAKE.userData.list;
+        for (var i = 0; i < list.length; i++) {
+          var W2 = list[i];
+          if (W2.life > 0) {
+            W2.life -= dt;
+            var f = Math.max(0, W2.life / W2.max), sz = W2.size * (1 + (1 - f) * 4);
+            _wQ.setFromAxisAngle(FR_UP, W2.yaw);
+            _wM.compose(_wV.set(W2.x, WATER_LEVEL + 0.35 + seaMeshWaveHeight(W2.x, W2.z), W2.z), _wQ, _wS.set(sz, 1, sz * 1.8));
+            WAKE.setMatrixAt(i, _wM);
+            WAKE.setColorAt(i, _wC.setRGB(f * 0.32, f * 0.34, f * 0.36));
+          } else if (W2.life > -1) { W2.life = -2; _wM.makeScale(0, 0, 0); WAKE.setMatrixAt(i, _wM); }
+        }
+        WAKE.instanceMatrix.needsUpdate = true; if (WAKE.instanceColor) WAKE.instanceColor.needsUpdate = true;
+      }
+    }
+
+    /* ============================================================
+       WHALES — a pair of humpbacks in the deep water offshore. They cruise under the surface,
+       come up to blow, show their flukes as they dive — and every so often one launches itself
+       clean out of the sea.
+       ============================================================ */
+    var WHALES = [];
+    var SPOUT = [];
+    (function() {
+      function whaleModel() {
+        var g = new THREE.Group();
+        var prof = [[0.05, -7], [0.45, -5.6], [1.1, -3.2], [1.65, -0.8], [1.8, 1.4], [1.6, 3.6], [1.1, 5.6], [0.45, 6.8], [0.05, 7.1]].map(function(p) { return new THREE.Vector2(p[0], p[1]); });
+        var geo = new THREE.LatheGeometry(prof, 20); geo.rotateX(Math.PI / 2);
+        var n = geo.attributes.normal, cols = new Float32Array(n.count * 3), top = wcol(0x323c46), bot = wcol(0xb9c1c4);
+        for (var i = 0; i < n.count; i++) { var k = THREE.MathUtils.smoothstep(n.getY(i), -0.55, -0.1); cols[i * 3] = bot.r + (top.r - bot.r) * k; cols[i * 3 + 1] = bot.g + (top.g - bot.g) * k; cols[i * 3 + 2] = bot.b + (top.b - bot.b) * k; }
+        geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+        var mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.05 });
+        var body = new THREE.Mesh(geo, mat); body.scale.set(1.15, 0.9, 1); body.castShadow = true; g.add(body);
+        var fin = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.15, 1.1), wstd(0x3a4550, 0.5));
+        [-1, 1].forEach(function(s) { var f = fin.clone(); f.position.set(s * 2.9, -0.6, 2.4); f.rotation.set(0, s * -0.5, s * -0.35); g.add(f); });
+        wadd(g, new THREE.SphereGeometry(0.5, 8, 6), wstd(0x323c46, 0.5), 0, 1.45, -2.6).scale.set(0.8, 0.6, 1.4);
+        var tail = new THREE.Group(); tail.position.set(0, 0, -6.6); g.add(tail);
+        var fs = new THREE.Shape(); fs.moveTo(0, 0); fs.quadraticCurveTo(1.8, -0.6, 3.2, -2.2); fs.quadraticCurveTo(1.6, -1.6, 0, -1.2); fs.quadraticCurveTo(-1.6, -1.6, -3.2, -2.2); fs.quadraticCurveTo(-1.8, -0.6, 0, 0);
+        var fg = new THREE.ExtrudeGeometry(fs, { depth: 0.18, bevelEnabled: false }); fg.rotateX(Math.PI / 2); fg.translate(0, 0.09, 0);
+        var fluke = new THREE.Mesh(fg, wstd(0x2e3842, 0.5)); fluke.castShadow = true; tail.add(fluke);
+        g.userData.tail = tail;
+        return g;
+      }
+      for (var w = 0; w < 2; w++) {
+        var m = whaleModel(); m.scale.setScalar(w ? 0.85 : 1); m.visible = false; scene.add(m);
+        WHALES.push({ m: m, x: 0, z: 0, y: WATER_LEVEL - 8, yaw: Math.random() * 6, state: 'swim', t: Math.random() * 10, dur: 12, pitch: 0, roll: 0, placed: false, off: w * 45 });
+      }
+      for (var s = 0; s < 36; s++) {
+        var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeGlowTexture, transparent: true, opacity: 0, depthWrite: false, color: 0xeef4f8 }));
+        sp.visible = false; scene.add(sp); SPOUT.push({ s: sp, v: new THREE.Vector3(), life: 0 });
+      }
+    })();
+    var spoutCursor = 0, whaleCheck = 0;
+    function whaleSpray(x, y, z, n, up, spread, size) {
+      for (var i = 0; i < n; i++) {
+        var P = SPOUT[spoutCursor]; spoutCursor = (spoutCursor + 1) % SPOUT.length;
+        P.s.position.set(x, y, z); P.v.set((Math.random() - 0.5) * spread, up * (0.7 + Math.random() * 0.5), (Math.random() - 0.5) * spread);
+        P.life = 2.2 + Math.random(); P.max = P.life; P.size = size; P.s.visible = true; P.s.material.opacity = 0.8;
+      }
+    }
+    function whalesDeep(x, z) { return getTerrainHeight(x, z) < WATER_LEVEL - 28; }
+    function whalesUpdate(dt) {
+      if (!started) return;
+      whaleCheck -= dt;
+      if (whaleCheck <= 0) {
+        whaleCheck = 3;
+        var far = WHALES[0].placed ? wDistXZ(WHALES[0].x, WHALES[0].z) : 1e9;
+        var nearSea = position.z > oceanCoastZ(position.x) - 1500;
+        if (far > 2200 && nearSea) {
+          for (var tries = 0; tries < 30; tries++) {
+            var a = heading + Math.PI + (Math.random() - 0.5) * 2.2, r = 700 + Math.random() * 700;
+            var fx = position.x - Math.sin(a) * r, fz = position.z - Math.cos(a) * r;
+            if (whalesDeep(fx, fz) && whalesDeep(fx + 150, fz) && whalesDeep(fx, fz + 150)) {
+              WHALES.forEach(function(W, i) { W.x = fx + i * 30; W.z = fz + i * 25; W.placed = true; W.state = 'swim'; W.t = i * 6; W.dur = 8 + Math.random() * 8; });
+              break;
+            }
+          }
+        }
+      }
+      WHALES.forEach(function(W, i) {
+        if (!W.placed) return;
+        W.t += dt;
+        var speed = W.state === 'swim' ? 3.2 : W.state === 'surface' ? 1.8 : W.state === 'breach' ? 6 : 2.5;
+        // wander, and turn back from the shallows
+        W.yaw += Math.sin(elapsedSeconds * 0.05 + i * 3) * 0.05 * dt;
+        var nx = W.x + Math.sin(W.yaw) * speed * dt, nz = W.z + Math.cos(W.yaw) * speed * dt;
+        if (!whalesDeep(nx + Math.sin(W.yaw) * 60, nz + Math.cos(W.yaw) * 60)) W.yaw += 1.2 * dt; else { W.x = nx; W.z = nz; }
+        var tgtY = WATER_LEVEL - 9, pitch = 0, roll = 0, flukeA = Math.sin(W.t * 1.4) * 0.25;
+        var surf = WATER_LEVEL + seaMeshWaveHeight(W.x, W.z);
+        if (W.state === 'swim') {
+          if (W.t > W.dur) { W.t = 0; W.state = Math.random() < 0.22 ? 'breach' : 'surface'; W.spouts = 0; }
+        } else if (W.state === 'surface') {
+          tgtY = surf - 1.0 + Math.sin(W.t * 0.9) * 0.2; pitch = Math.sin(W.t * 0.8) * 0.05; flukeA = Math.sin(W.t * 0.9) * 0.12;
+          if ((W.t > 1.5 && W.spouts === 0) || (W.t > 6.5 && W.spouts === 1)) {
+            W.spouts++;
+            var hp = W.m.localToWorld(_wV.set(0, 1.5, 4.8));
+            whaleSpray(hp.x, surf + 0.5, hp.z, 10, 9, 1.4, 5);
+            var vv = wVolAt(hp.x, surf, hp.z, 500);
+            if (vv > 0) wNoise(1.2, vv * 0.09, 'bandpass', 700, 0.6, 0.02);
+            if (typeof kjWhaleSeen === 'function' && wDistXZ(W.x, W.z) < 900) kjWhaleSeen();
+          }
+          if (W.t > 10) { W.t = 0; W.state = 'dive'; }
+        } else if (W.state === 'dive') {
+          var k = Math.min(1, W.t / 3.5);
+          pitch = 0.95 * k; tgtY = surf - 1 - k * 5; flukeA = -0.3 * k;
+          if (W.t > 5) { W.t = 0; W.state = 'swim'; W.dur = 12 + Math.random() * 16; }
+        } else if (W.state === 'breach') {
+          // straight up out of the deep, half a whale into the air, rolling, then the crash back down
+          var tb = W.t;
+          if (tb < 2.2) { tgtY = WATER_LEVEL - 9 + tb * 3; pitch = -0.6; }
+          else {
+            var ta = tb - 2.2, y = WATER_LEVEL - 3 + 16 * ta - 4.9 * ta * ta;
+            W.y = y; tgtY = y; pitch = -1.25 + ta * 0.75; roll = ta * 0.9;
+            if (!W.splashed && ta > 0.3 && y < WATER_LEVEL + 1 && 16 - 9.8 * ta < 0) {
+              W.splashed = true;
+              triggerWaterSplash(new THREE.Vector3(W.x, WATER_LEVEL, W.z));
+              whaleSpray(W.x, WATER_LEVEL + 1, W.z, 20, 14, 12, 12);
+              var vb = wVolAt(W.x, WATER_LEVEL, W.z, 900);
+              if (vb > 0) { wNoise(2.2, vb * 0.25, 'lowpass', 600, 0.7, 0.01); wTone('sine', 70, 30, 0.9, vb * 0.2); }
+            }
+            if (ta > 4.2) { W.t = 0; W.state = 'swim'; W.dur = 15 + Math.random() * 20; W.splashed = false; }
+          }
+        }
+        if (W.state !== 'breach' || W.t < 2.2) W.y += (tgtY - W.y) * Math.min(1, dt * (W.state === 'breach' ? 3 : 0.8));
+        W.pitch += (pitch - W.pitch) * Math.min(1, dt * 2); W.roll += (roll - W.roll) * Math.min(1, dt * 2);
+        W.m.position.set(W.x, W.y, W.z);
+        W.m.rotation.set(W.pitch, W.yaw, W.roll, 'YXZ');
+        W.m.userData.tail.rotation.x = flukeA;
+        W.m.visible = W.y > WATER_LEVEL - 7.5 && wDistXZ(W.x, W.z) < 2300;
+      });
+      for (var s = 0; s < SPOUT.length; s++) {
+        var P = SPOUT[s]; if (P.life <= 0) continue;
+        P.life -= dt;
+        if (P.life <= 0) { P.s.visible = false; P.s.material.opacity = 0; continue; }
+        P.v.y -= 4 * dt; P.v.multiplyScalar(1 - dt * 0.8);
+        P.s.position.addScaledVector(P.v, dt);
+        var f = P.life / P.max, sc = P.size * (0.5 + (1 - f) * 1.5);
+        P.s.scale.set(sc, sc, 1); P.s.material.opacity = f * 0.7;
+      }
+    }
+
+    /* ============================================================
+       SECRET: THE CRASH SITE — high in the hills, a silver saucer lies half-buried at the end of
+       the trench it ploughed. Its rim lights still run. At night a green column of light stands
+       over it. Get close and your instruments stop making sense.
+       ============================================================ */
+    var UFO = null;
+    (function buildUfo() {
+      if (!UFO_SITE) return;
+      var S = UFO_SITE, gy = getTerrainHeight(S.x, S.z);
+      var g = new THREE.Group(); g.position.set(S.x, gy, S.z); g.rotation.y = S.yaw; scene.add(g);
+      var hullMat = new THREE.MeshStandardMaterial({ color: wcol(0x9aa2ab), metalness: 0.75, roughness: 0.32 });
+      var prof = [[0.001, 1.3], [2.2, 1.25], [3.4, 0.95], [3.9, 0.6], [8.4, 0.28], [9.2, 0], [8.7, -0.32], [4.8, -0.85], [0.001, -1.0]].map(function(p) { return new THREE.Vector2(p[0], p[1]); });
+      var saucer = new THREE.Group(); saucer.position.set(0, 1.3, 0); saucer.rotation.set(0.12, 0, 0.46); g.add(saucer);
+      var hull = new THREE.Mesh(new THREE.LatheGeometry(prof, 48), hullMat); hull.castShadow = true; hull.receiveShadow = true; saucer.add(hull);
+      var dome = new THREE.Mesh(new THREE.SphereGeometry(3.1, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: wcol(0x1f4a44), metalness: 0.9, roughness: 0.06, emissive: new THREE.Color(0.05, 0.4, 0.25), emissiveIntensity: 0.4 }));
+      dome.position.y = 1.1; saucer.add(dome);
+      var lights = [];
+      for (var i = 0; i < 14; i++) {
+        var a = i / 14 * Math.PI * 2;
+        var lm = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), new THREE.MeshBasicMaterial({ color: 0x66ffbb, toneMapped: false }));
+        lm.position.set(Math.cos(a) * 8.75, 0.12, Math.sin(a) * 8.75); saucer.add(lm); lights.push(lm);
+      }
+      // the trench it dug, with earth heaped along both sides
+      var tr = [], tc = [], dirt = wcol(0x3a2e24), burnt = wcol(0x191512);
+      var TL = 80, TW = 16, NX = 4, NZ = 32;
+      for (var zi = 0; zi <= NZ; zi++) for (var xi = 0; xi <= NX; xi++) {
+        var lx = (xi / NX - 0.5) * TW * (0.6 + 0.4 * zi / NZ), lz = -8 - zi / NZ * TL;
+        var wx = S.x + Math.cos(S.yaw) * lx + Math.sin(S.yaw) * lz, wz = S.z - Math.sin(S.yaw) * lx + Math.cos(S.yaw) * lz;
+        var edge = Math.abs(xi / NX - 0.5) * 2, depth = (1 - edge * edge) * 1.6 * (1 - zi / NZ * 0.7);
+        tr.push(lx, getTerrainHeight(wx, wz) - gy + 0.18 - depth, lz);
+        var c = edge > 0.8 ? dirt : burnt; tc.push(c.r, c.g, c.b);
+      }
+      var ti = [];
+      for (var z2 = 0; z2 < NZ; z2++) for (var x2 = 0; x2 < NX; x2++) { var a0 = z2 * (NX + 1) + x2; ti.push(a0, a0 + 1, a0 + NX + 1, a0 + 1, a0 + NX + 2, a0 + NX + 1); }
+      var tg = new THREE.BufferGeometry(); tg.setAttribute('position', new THREE.Float32BufferAttribute(tr, 3)); tg.setAttribute('color', new THREE.Float32BufferAttribute(tc, 3)); tg.setIndex(ti); tg.computeVertexNormals();
+      var trench = new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+      trench.receiveShadow = true; g.add(trench);
+      var mounds = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), wstd(0x4a3a2c, 1), 22);
+      for (var m = 0; m < 22; m++) {
+        var ml = (m % 2 ? 1 : -1) * (TW * 0.45 + Math.random() * 3), mz = -10 - Math.random() * 60;
+        var mwx = S.x + Math.cos(S.yaw) * ml + Math.sin(S.yaw) * mz, mwz = S.z - Math.sin(S.yaw) * ml + Math.cos(S.yaw) * mz;
+        var ms = 1.2 + Math.random() * 2;
+        _wQ.setFromEuler(_wE.set(Math.random(), Math.random() * 3, Math.random()));
+        _wM.compose(_wV.set(ml, getTerrainHeight(mwx, mwz) - gy, mz), _wQ, _wS.set(ms * 1.4, ms * 0.6, ms));
+        mounds.setMatrixAt(m, _wM);
+      }
+      mounds.castShadow = true; g.add(mounds);
+      for (var d = 0; d < 9; d++) {
+        var sh = new THREE.Mesh(wreckShardGeo, hullMat); var dl = (Math.random() - 0.5) * 30, dz = -12 - Math.random() * 50;
+        sh.position.set(dl, 0.3, dz); sh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3); sh.scale.setScalar(0.8 + Math.random() * 1.4); g.add(sh);
+      }
+      var beam = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 2.2, 420, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0x55ffaa, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
+      beam.geometry.translate(0, 210, 0); beam.frustumCulled = false; g.add(beam);
+      UFO = { g: g, x: S.x, y: gy, z: S.z, lights: lights, beam: beam, dome: dome, hum: null };
+    })();
+
+    /* ============================================================
+       SECRET: THE OLD FIELD — an abandoned airstrip from before the airport was built: cracked
+       tarmac with weeds coming through, a rusting tin hangar, a wreck nobody hauled away, and a
+       tattered windsock still pointing into the wind. It's still flat, so you can still land.
+       ============================================================ */
+    var OLDFIELD = null;
+    (function buildOldField() {
+      if (!OLD_STRIP) return;
+      var S = OLD_STRIP, g = new THREE.Group(); g.position.set(S.x, S.y, S.z); g.rotation.y = Math.atan2(S.ux, S.uz); scene.add(g);
+      var rng = mulberry32(1947);
+      var stripTex = wCanvasTex(128, 1024, function(c, w, h) {
+        c.fillStyle = '#5b5a55'; c.fillRect(0, 0, w, h);
+        for (var i = 0; i < 9000; i++) { var v = 70 + rng() * 40 | 0; c.fillStyle = 'rgba(' + v + ',' + v + ',' + (v - 4) + ',0.5)'; c.fillRect(rng() * w, rng() * h, 2, 2); }
+        for (var p = 0; p < 26; p++) { c.fillStyle = 'rgba(40,38,34,' + (0.2 + rng() * 0.3) + ')'; c.beginPath(); c.ellipse(rng() * w, rng() * h, 6 + rng() * 22, 10 + rng() * 40, rng() * 3, 0, 7); c.fill(); }
+        c.fillStyle = 'rgba(225,222,205,0.45)';
+        for (var y = 90; y < h - 90; y += 36) if (rng() > 0.2) c.fillRect(w / 2 - 1.5, y, 3, 18);
+        for (var s = 0; s < 2; s++) for (var b = 0; b < 6; b++) if (rng() > 0.25) c.fillRect(10 + b * 18, s ? h - 34 : 10, 8, 24);
+        c.save(); c.font = 'bold 34px sans-serif'; c.fillStyle = 'rgba(225,222,205,0.35)'; c.textAlign = 'center';
+        c.translate(w / 2, 78); c.fillText('09', 0, 0); c.restore();
+        c.save(); c.translate(w / 2, h - 50); c.rotate(Math.PI); c.font = 'bold 34px sans-serif'; c.fillStyle = 'rgba(225,222,205,0.3)'; c.textAlign = 'center'; c.fillText('27', 0, 0); c.restore();
+        c.strokeStyle = 'rgba(25,24,22,0.75)'; c.lineWidth = 1.2;
+        for (var k = 0; k < 90; k++) { var x = rng() * w, yy = rng() * h; c.beginPath(); c.moveTo(x, yy); for (var q = 0; q < 6; q++) { x += (rng() - 0.5) * 20; yy += (rng() - 0.3) * 24; c.lineTo(x, yy); } c.stroke(); }
+        for (var wd = 0; wd < 1500; wd++) { c.fillStyle = rng() < 0.7 ? 'rgba(82,110,48,0.8)' : 'rgba(120,120,60,0.7)'; var ex = rng() < 0.6 ? (rng() < 0.5 ? rng() * 12 : w - rng() * 12) : rng() * w; c.fillRect(ex, rng() * h, 2 + rng() * 3, 2 + rng() * 3); }
+      });
+      var strip = new THREE.Mesh(new THREE.PlaneGeometry(S.W, S.L), new THREE.MeshStandardMaterial({ map: stripTex, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+      strip.rotation.x = -Math.PI / 2; strip.position.y = 0.12; strip.receiveShadow = true; g.add(strip);
+      // corrugated tin hangar, rusting through
+      var rustTex = wCanvasTex(256, 128, function(c, w, h) {
+        c.fillStyle = '#7d7a72'; c.fillRect(0, 0, w, h);
+        for (var i = 0; i < w; i += 4) { c.fillStyle = i % 8 ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.08)'; c.fillRect(i, 0, 2, h); }
+        for (var r = 0; r < 60; r++) { c.fillStyle = 'rgba(' + (120 + rng() * 60 | 0) + ',' + (50 + rng() * 30 | 0) + ',20,' + (0.3 + rng() * 0.5) + ')'; c.beginPath(); c.ellipse(rng() * w, rng() * h, 4 + rng() * 26, 3 + rng() * 14, 0, 0, 7); c.fill(); }
+      });
+      rustTex.wrapS = rustTex.wrapT = THREE.RepeatWrapping; rustTex.repeat.set(3, 1);
+      var rustMat = new THREE.MeshStandardMaterial({ map: rustTex, roughness: 0.8, metalness: 0.35, side: THREE.DoubleSide });
+      var hang = new THREE.Group(); hang.position.set(S.W / 2 + 42, 0, 30); g.add(hang);
+      var arch = new THREE.CylinderGeometry(9, 9, 26, 20, 1, true, 0, Math.PI); arch.rotateZ(Math.PI / 2); arch.rotateY(Math.PI / 2);
+      var shell = new THREE.Mesh(arch, rustMat); shell.castShadow = true; shell.receiveShadow = true; hang.add(shell);
+      var wall = new THREE.Mesh(new THREE.CircleGeometry(9, 20, 0, Math.PI), rustMat); wall.position.z = -13; hang.add(wall);
+      var hole = new THREE.Mesh(new THREE.CircleGeometry(6, 14, 0, Math.PI), new THREE.MeshBasicMaterial({ color: 0x0b0b0a })); hole.position.set(0, 0, 12.9); hang.add(hole);
+      // the wreck: an old prop plane that went in nose-first and was left where it stopped
+      var olive = new THREE.MeshStandardMaterial({ color: wcol(0x55583e), roughness: 0.85, metalness: 0.2 });
+      var wreck = new THREE.Group(); wreck.position.set(-S.W / 2 - 30, 0.8, -60); wreck.rotation.set(0.22, 0.9, 0.18); g.add(wreck);
+      var fus = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.3, 9, 10), olive); fus.rotation.x = Math.PI / 2; fus.castShadow = true; wreck.add(fus);
+      wadd(wreck, new THREE.BoxGeometry(5.5, 0.18, 1.8), olive, -2.9, -0.2, -1.2);
+      var brokenWing = wadd(wreck, new THREE.BoxGeometry(4.2, 0.18, 1.7), olive, 3.8, -0.9, -0.2); brokenWing.rotation.set(0.1, 0.4, -0.5);
+      wadd(wreck, new THREE.BoxGeometry(0.12, 1.6, 1.3), olive, 0, 0.8, 4.2);
+      wadd(wreck, new THREE.BoxGeometry(3, 0.1, 0.9), olive, 0, 0.1, 4.2);
+      var prop = new THREE.Group(); prop.position.set(0, 0, -4.6); wreck.add(prop);
+      for (var pb = 0; pb < 3; pb++) { var bl = wadd(prop, new THREE.BoxGeometry(0.18, 1.6, 0.06), wstd(0x2b2b2b, 0.6, 0.5), 0, 0.8, 0); bl.parent.rotation.z = 0; bl.position.set(Math.cos(pb * 2.09) * 0.8, Math.sin(pb * 2.09) * 0.8, 0); bl.rotation.set(0.4, 0.2, pb * 2.09 + 0.3); }
+      // drums, a fuel bowser, weeds, and the windsock
+      for (var dr = 0; dr < 7; dr++) {
+        var drum = wadd(g, new THREE.CylinderGeometry(0.45, 0.45, 1.3, 10), rustMat, S.W / 2 + 22 + (dr % 3) * 1.1, 0.65, 8 + Math.floor(dr / 3) * 1.1);
+        if (dr > 4) { drum.rotation.z = Math.PI / 2; drum.position.y = 0.45; drum.position.x += 2; }
+      }
+      var bush = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), wstd(0x4d6a2c, 1), 30);
+      for (var bi = 0; bi < 30; bi++) { var bs = 0.6 + rng() * 1.4; _wM.compose(_wV.set((rng() < 0.5 ? -1 : 1) * (S.W / 2 + 2 + rng() * 10), bs * 0.4, (rng() - 0.5) * S.L * 0.9), _wQ.identity(), _wS.set(bs, bs * 0.7, bs)); bush.setMatrixAt(bi, _wM); }
+      g.add(bush);
+      wadd(g, new THREE.CylinderGeometry(0.1, 0.12, 7, 6), wstd(0x8b8f93, 0.5, 0.6), -S.W / 2 - 12, 3.5, S.L * 0.3);
+      var sockPivot = new THREE.Group(); sockPivot.position.set(-S.W / 2 - 12, 6.8, S.L * 0.3); g.add(sockPivot);
+      var sockGeo = new THREE.CylinderGeometry(0.5, 0.18, 3.4, 10, 1, true); sockGeo.rotateX(Math.PI / 2); sockGeo.translate(0, 0, 1.7);
+      var sockTex = wCanvasTex(64, 16, function(c) { for (var i = 0; i < 5; i++) { c.fillStyle = i % 2 ? '#d9d3c7' : '#b8672e'; c.fillRect(i * 13, 0, 13, 16); } });
+      var sock = new THREE.Mesh(sockGeo, new THREE.MeshStandardMaterial({ map: sockTex, side: THREE.DoubleSide, roughness: 0.9 })); sockPivot.add(sock);
+      OLDFIELD = { g: g, x: S.x, z: S.z, y: S.y, sock: sockPivot, hangarWorld: g.localToWorld(new THREE.Vector3(S.W / 2 + 42, 1.6, 36)) };
+    })();
+
+    /* ---------- discovery ---------- */
+    var wSecretT = 0;
+    function worldSecrets(dt) {
+      wSecretT -= dt;
+      var night = wNight();
+      if (UFO) {
+        var t = elapsedSeconds;
+        for (var i = 0; i < UFO.lights.length; i++) {
+          var on = ((Math.floor(t * 8) + i) % 7) < 2;
+          UFO.lights[i].material.color.setRGB(on ? 0.5 : 0.08, on ? 1.6 : 0.35, on ? 1.0 : 0.22);
+        }
+        UFO.dome.material.emissiveIntensity = 0.3 + 0.25 * Math.sin(t * 1.7);
+        UFO.beam.visible = night > 0.3;
+        UFO.beam.material.opacity = (night - 0.3) * 0.25 * (0.75 + 0.25 * Math.sin(t * 2.3));
+        var du = Math.hypot(UFO.x - position.x, UFO.z - position.z, (UFO.y - position.y) * 0.5);
+        // the hum, and the instruments going haywire
+        if (audioCtx) {
+          if (!UFO.hum) {
+            var o1 = audioCtx.createOscillator(), o2 = audioCtx.createOscillator(), lfo = audioCtx.createOscillator(), lg = audioCtx.createGain(), gn = audioCtx.createGain();
+            o1.type = 'sine'; o1.frequency.value = 55; o2.type = 'triangle'; o2.frequency.value = 111.5; lfo.frequency.value = 0.7; lg.gain.value = 18;
+            lfo.connect(lg).connect(o2.frequency); gn.gain.value = 0;
+            o1.connect(gn); o2.connect(gn); gn.connect(audioCtx.destination); o1.start(); o2.start(); lfo.start();
+            UFO.hum = gn;
+          }
+          UFO.hum.gain.setTargetAtTime(soundEnabled && started && !kj.paused ? Math.max(0, 1 - du / 280) * 0.06 : 0, audioCtx.currentTime, 0.3);
+        }
+        if (du < 160 && started && typeof kj !== 'undefined') kj.glitchT = Math.max(kj.glitchT || 0, 0.2);
+      }
+      if (OLDFIELD) {
+        OLDFIELD.sock.rotation.y = Math.PI - windDirAngle - OLDFIELD.g.rotation.y + Math.sin(elapsedSeconds * 1.3) * 0.15 * (0.3 + currentWind);
+        OLDFIELD.sock.rotation.x = -0.9 * (1 - Math.min(1, 0.25 + currentWind * 0.9)) + Math.sin(elapsedSeconds * 2.1) * 0.05;
+      }
+      if (wSecretT > 0 || !started || crashing || typeof kj === 'undefined' || !kj.stats) return;
+      wSecretT = 0.5;
+      var S = kj.stats.secrets = kj.stats.secrets || {};
+      var agl = kjAgl();
+      if (UFO && !S.ufo && Math.hypot(UFO.x - position.x, UFO.z - position.z) < 140 && agl < 170) worldFound('ufo', 'THE CRASH SITE', UFO.x, UFO.z, 'archivist', 'a_ufo');
+      if (OLDFIELD && !S.airstrip && Math.hypot(OLDFIELD.x - position.x, OLDFIELD.z - position.z) < 330 && agl < 140) worldFound('airstrip', 'THE OLD FIELD', OLDFIELD.x, OLDFIELD.z, 'luna', 'l_airstrip');
+    }
+    function worldFound(id, name, x, z, who, talk) {
+      kj.stats.secrets[id] = Date.now();
+      var n = Object.keys(kj.stats.secrets).length;
+      if (typeof kjLike === 'function') kjLike(3, '🔍 SECRET FOUND: ' + name + ' (' + n + '/2)');
+      samToast('🔍 ' + name, '#9dffcf', 3);
+      if (typeof kjSave === 'function') kjSave();
+      worldMarkSecrets();
+      setTimeout(function() { kjRing(who, talk); }, 2500);
+    }
+    function worldMarkSecrets() {
+      var S = (typeof kj !== 'undefined' && kj.stats && kj.stats.secrets) || {};
+      if (S.ufo && UFO && !WAYPOINTS.some(function(w) { return w.name === 'CRASH SITE'; })) WAYPOINTS.push({ name: 'CRASH SITE', x: UFO.x, z: UFO.z, color: '#7dffb2', icon: 'tower' });
+      if (S.airstrip && OLDFIELD && !WAYPOINTS.some(function(w) { return w.name === 'OLD FIELD'; })) WAYPOINTS.push({ name: 'OLD FIELD', x: OLDFIELD.x, z: OLDFIELD.z, color: '#d8c79a', icon: 'tower' });
+    }
+    if (HARBOUR && !WAYPOINTS.some(function(w) { return w.name === 'HARBOUR'; })) WAYPOINTS.push({ name: 'HARBOUR', x: HARBOUR.x, z: HARBOUR.z, color: '#8fd3ff', icon: 'light' });
+    if (STADIUM) WAYPOINTS.push({ name: 'STADIUM', x: STADIUM.x, z: STADIUM.z, color: '#ffd23b', icon: 'city' });
+
+    var wMarkedOnce = false;
+    function worldUpdate(dt) {
+      if (wSndT > 0) wSndT -= dt;
+      if (!wMarkedOnce && typeof kj !== 'undefined' && kj.stats) { wMarkedOnce = true; worldMarkSecrets(); }
+      stadiumUpdate(dt);
+      searchlightsUpdate(dt);
+      fwUpdate(dt);
+      deerUpdate(dt);
+      boatsUpdate(dt);
+      whalesUpdate(dt);
+      worldSecrets(dt);
+    }
 
     /* ============================================================
        START / INIT
