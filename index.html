@@ -18328,7 +18328,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     // a store is a dozen little parts: fold them into one vertex-coloured mesh (one draw, not twelve)
     var ARS_VC = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.25 });
-    function arsBake(g) {
+    function arsBake(g, mat) {
       var P = [], N = [], C = [];
       g.children.slice().forEach(function(c) {
         if (!c.isMesh) return;
@@ -18345,7 +18345,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       out.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
       out.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
       out.computeBoundingSphere();
-      g.add(new THREE.Mesh(out, ARS_VC));     // too small to be worth a shadow pass
+      g.add(new THREE.Mesh(out, mat || ARS_VC));     // stores: too small to be worth a shadow pass
     }
 
     /* ---------- hardpoints + loadout ---------- */
@@ -23778,7 +23778,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // floor + apron outside the door
       var floor = new THREE.Mesh(new THREE.PlaneGeometry(64, 64), hgMat(0xffffff, 0.86, 0, { map: hgFloorTex() }));
       floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; S.add(floor);
-      var apron = new THREE.Mesh(new THREE.PlaneGeometry(220, 120), hgMat(0xc4c0b4, 0.95));
+      var apron = new THREE.Mesh(new THREE.PlaneGeometry(220, 120), hgMat(0x8a877e, 0.95));
       apron.rotation.x = -Math.PI / 2; apron.position.set(0, -0.01, door - 60); apron.receiveShadow = true; S.add(apron);
       // daylight backdrop: sky, haze, far hills, the runway edge lights
       var sky = new THREE.Mesh(new THREE.PlaneGeometry(520, 190), new THREE.MeshBasicMaterial({ fog: false, map: hgTex(1024, 384, function(c, w, h) {
@@ -23893,6 +23893,290 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       S.environment = pm.fromScene(env, 0.04).texture; pm.dispose();
 
       hgProps();
+      hgDetail();
+    }
+
+    /* ---------- second pass of set dressing: the hangar as a working place ----------
+       An overhead gantry crane with its hook, a spare engine on a transport stand with a mechanic
+       working on it, a ground power unit cabled to the aircraft, a crew chief with a clipboard, a
+       tow tractor with its beacon turning, lockers, parts shelving, a lit ops office in the corner,
+       a floor fan, puddles, conduit and wall lights along the walls, squadron banners, and outside:
+       a flag and a windsock in the breeze, a fuel bowser and the next hangars along the line.
+       Static props are baked into one vertex-coloured mesh each to keep the draw count down. */
+    var HG_VC = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.66, metalness: 0.22 });
+    function hgKit(parts, x, z, ry, y) {
+      // parts: [geometry, colour, x, y, z, rx, ry, rz] -> one baked mesh
+      var g = new THREE.Group();
+      parts.forEach(function(p) {
+        var m = new THREE.Mesh(p[0], { color: new THREE.Color(p[1]) });
+        m.position.set(p[2] || 0, p[3] || 0, p[4] || 0); m.rotation.set(p[5] || 0, p[6] || 0, p[7] || 0);
+        g.add(m);
+      });
+      arsBake(g, HG_VC);
+      g.children.forEach(function(m) { m.castShadow = true; m.receiveShadow = true; });
+      g.position.set(x, y || 0, z); g.rotation.y = ry || 0;
+      HG.scene.add(g);
+      return g;
+    }
+    function hgB(w, h, d) { return new THREE.BoxGeometry(w, h, d); }
+    function hgCy(rt, rb, h, n) { return new THREE.CylinderGeometry(rt, rb, h, n || 12); }
+    function hgWheels(list, r, w, col) {
+      return list.map(function(p) { return [hgCy(r, r, w, 14), col || 0x1a1a1a, p[0], r, p[1], 0, 0, Math.PI / 2]; });
+    }
+    var HG_YEL = 0xd8a820, HG_DARK = 0x2a2d30, HG_STEEL = 0x8e959b;
+
+    function hgMechanic(suit, pose) {
+      var g = new THREE.Group(), skin = hgMat(0xb98563, 0.7), cloth = hgMat(suit, 0.85), dark = hgMat(0x1c1c1c, 0.8);
+      var vest = hgMat(0xd9ff3a, 0.6, 0, { emissive: new THREE.Color(0x222a00) });
+      [-1, 1].forEach(function(s) {
+        hgMesh(hgCy(0.1, 0.09, 0.82), cloth, s * 0.12, 0.47, 0, 0, g);
+        hgMesh(hgB(0.15, 0.11, 0.28), dark, s * 0.12, 0.055, -0.04, 0, g);
+      });
+      var torso = hgMesh(hgB(0.44, 0.64, 0.26), cloth, 0, 1.2, 0, 0, g);
+      hgMesh(hgB(0.46, 0.1, 0.28), vest, 0, 1.08, 0, 0, g);
+      hgMesh(hgB(0.46, 0.06, 0.28), dark, 0, 0.9, 0, 0, g);
+      var head = new THREE.Group(); head.position.y = 1.62; g.add(head);
+      hgMesh(hgCy(0.06, 0.07, 0.1), skin, 0, -0.02, 0, 0, head);
+      hgMesh(new THREE.SphereGeometry(0.125, 12, 10), skin, 0, 0.13, 0, 0, head);
+      hgMesh(new THREE.SphereGeometry(0.13, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), cloth, 0, 0.16, 0, 0, head);
+      hgMesh(hgB(0.2, 0.025, 0.12), cloth, 0, 0.165, -0.15, 0, head);
+      [-1, 1].forEach(function(s) { var e = hgMesh(hgCy(0.055, 0.055, 0.05, 10), hgMat(0xe0661c, 0.5), s * 0.13, 0.12, 0, 0, head); e.rotation.z = Math.PI / 2; });
+      var arms = [-1, 1].map(function(s) {
+        var sh = new THREE.Group(); sh.position.set(s * 0.28, 1.47, 0); g.add(sh);
+        hgMesh(hgCy(0.065, 0.058, 0.6), cloth, 0, -0.3, 0, 0, sh);
+        hgMesh(new THREE.SphereGeometry(0.06, 8, 6), skin, 0, -0.62, 0, 0, sh);
+        sh.rotation.z = s * 0.08;
+        return sh;
+      });
+      if (pose === 'wrench') {
+        arms[1].rotation.x = 1.25;
+        hgMesh(hgB(0.04, 0.04, 0.32), hgMat(0xa8adb2, 0.3, 0.9), 0, -0.66, 0.12, 0, arms[1]);
+      } else if (pose === 'clipboard') {
+        arms[0].rotation.x = 0.9; arms[0].rotation.z = 0.5;
+        arms[1].rotation.x = 0.75; arms[1].rotation.z = -0.35;
+        hgMesh(hgB(0.26, 0.34, 0.015), hgMat(0x6b4a2b, 0.8), 0.06, -0.62, 0.1, 0, arms[0]).rotation.x = -0.9;
+      }
+      return { g: g, head: head, arms: arms, torso: torso };
+    }
+
+    function hgDetail() {
+      var S = HG.scene, i, z;
+      HG.anims = [];
+
+      // gantry crane on rails hung from the ribs, its hook let down over the floor
+      var crane = [];
+      [-7, 7].forEach(function(x) {
+        crane.push([hgB(0.42, 0.5, 54), HG_DARK, x, 12.6, 0]);
+        for (z = -24; z <= 24; z += 6) crane.push([hgB(0.14, 2.6, 0.14), HG_DARK, x, 14.1, z]);
+        crane.push([hgB(0.7, 0.55, 1.8), HG_YEL, x, 12.35, -7]);
+      });
+      crane.push([hgB(14.6, 0.75, 0.6), HG_YEL, 0, 12.0, -7], [hgB(14.6, 0.08, 0.62), 0x1c1c1c, 0, 12.4, -7]);
+      for (i = -6; i <= 6; i += 1.5) crane.push([hgB(0.18, 0.08, 0.64), 0x1c1c1c, i, 11.6, -7]);
+      crane.push([hgB(1.1, 0.85, 0.95), 0x3d4247, 2.2, 11.2, -7], [hgCy(0.02, 0.02, 4.2, 6), 0x6f7378, 2.0, 8.7, -7], [hgCy(0.02, 0.02, 4.2, 6), 0x6f7378, 2.4, 8.7, -7],
+                 [hgB(0.5, 0.42, 0.32), HG_YEL, 2.2, 6.45, -7], [new THREE.TorusGeometry(0.2, 0.05, 6, 14, Math.PI * 1.4), 0x3a3d40, 2.2, 6.0, -7, 0, 0, 2.6]);
+      hgKit(crane, 0, 0, 0);
+
+      // spare engine on its transport stand
+      var fan = hgTex(256, 256, function(c, w, h) {
+        c.fillStyle = '#1b1d20'; c.fillRect(0, 0, w, h);
+        c.translate(128, 128);
+        for (var k = 0; k < 22; k++) { c.rotate(Math.PI * 2 / 22); var g = c.createLinearGradient(0, 0, 120, 0); g.addColorStop(0, '#5a6066'); g.addColorStop(1, '#9aa1a8'); c.fillStyle = g; c.beginPath(); c.moveTo(18, -4); c.lineTo(122, -10); c.lineTo(122, 4); c.lineTo(18, 6); c.fill(); }
+        c.fillStyle = '#c9ccd0'; c.beginPath(); c.arc(0, 0, 26, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#1b1d20'; c.beginPath(); c.moveTo(0, -8); c.lineTo(5, 0); c.lineTo(0, 8); c.lineTo(-5, 0); c.fill();
+      });
+      var eng = [
+        [hgB(0.12, 0.12, 3.0), HG_YEL, -0.62, 0.3, 0], [hgB(0.12, 0.12, 3.0), HG_YEL, 0.62, 0.3, 0],
+        [hgB(1.36, 0.12, 0.12), HG_YEL, 0, 0.3, -1.3], [hgB(1.36, 0.12, 0.12), HG_YEL, 0, 0.3, 1.3],
+        [hgB(0.1, 0.75, 0.1), HG_YEL, -0.5, 0.72, -0.9], [hgB(0.1, 0.75, 0.1), HG_YEL, 0.5, 0.72, -0.9],
+        [hgB(0.1, 0.75, 0.1), HG_YEL, -0.5, 0.72, 0.9], [hgB(0.1, 0.75, 0.1), HG_YEL, 0.5, 0.72, 0.9],
+        [hgB(1.1, 0.12, 0.25), HG_YEL, 0, 1.0, -0.9], [hgB(1.1, 0.12, 0.25), HG_YEL, 0, 1.0, 0.9],
+        [hgCy(0.64, 0.56, 2.5, 26), 0x9ea4aa, 0, 1.62, 0.05, Math.PI / 2],
+        [new THREE.TorusGeometry(0.64, 0.07, 8, 28), 0xb9bec3, 0, 1.62, -1.2],
+        [hgCy(0.5, 0.36, 0.75, 22), 0x4d4a46, 0, 1.62, 1.65, Math.PI / 2],
+        [new THREE.TorusGeometry(0.65, 0.025, 6, 26), 0xb0703a, 0, 1.62, -0.5], [new THREE.TorusGeometry(0.62, 0.025, 6, 26), 0xb0703a, 0, 1.62, 0.3],
+        [hgB(0.3, 0.22, 0.6), 0x55595e, 0.55, 1.15, 0.1], [hgCy(0.04, 0.04, 1.6, 6), 0x8a5a2a, -0.6, 1.62, 0.2, Math.PI / 2]
+      ].concat(hgWheels([[-0.62, -1.3], [0.62, -1.3], [-0.62, 1.3], [0.62, 1.3]], 0.14, 0.1));
+      var ekit = hgKit(eng, 9.6, -5.4, 0.15);
+      var face = new THREE.Mesh(new THREE.CircleGeometry(0.62, 28), hgMat(0xffffff, 0.45, 0.6, { map: fan }));
+      face.position.set(0, 1.62, -1.22); face.rotation.y = Math.PI; ekit.add(face);
+      var tag = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.42), hgMat(0xd0201a, 0.7, 0, { side: THREE.DoubleSide }));
+      tag.position.set(0.3, 1.2, -1.3); ekit.add(tag);
+      HG.anims.push(function(dt, t) { tag.rotation.y = Math.sin(t * 1.3) * 0.25; });
+      var m1 = hgMechanic(0x2f4a6b, 'wrench');
+      m1.g.position.set(9.35, 0, -7.25); m1.g.rotation.y = Math.PI - 0.1; S.add(m1.g);
+      HG.anims.push(function(dt, t) {
+        m1.arms[1].rotation.x = 1.25 + Math.sin(t * 5.2) * 0.12 * (Math.sin(t * 0.6) > -0.3 ? 1 : 0);
+        m1.head.rotation.y = Math.sin(t * 0.37) * 0.25;
+      });
+
+      // ground power unit, its cable snaking across the floor to the aircraft
+      var gpuPanel = hgTex(128, 96, function(c, w, h) {
+        c.fillStyle = '#c9a227'; c.fillRect(0, 0, w, h); c.fillStyle = '#222'; c.fillRect(10, 10, 108, 60);
+        [[30, 40], [64, 40], [98, 40]].forEach(function(p) { c.strokeStyle = '#ddd'; c.lineWidth = 2; c.beginPath(); c.arc(p[0], p[1], 13, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.moveTo(p[0], p[1]); c.lineTo(p[0] + 8, p[1] - 8); c.stroke(); });
+        c.fillStyle = '#3c3'; c.fillRect(20, 76, 10, 10); c.fillStyle = '#c33'; c.fillRect(40, 76, 10, 10); c.fillStyle = '#111'; c.font = '700 12px monospace'; c.fillText('28V DC', 66, 86);
+      });
+      var gpu = hgKit([
+        [hgB(1.7, 0.95, 1.15), 0xc9a227, 0, 0.78, 0], [hgB(1.74, 0.08, 1.19), 0x8f7418, 0, 1.28, 0], [hgB(1.4, 0.08, 0.9), 0x3a3a3a, 0, 1.33, 0],
+        [hgB(0.08, 0.08, 1.2), 0x333333, 0, 0.42, -1.1, 0.4], [hgB(0.6, 0.35, 0.02), 0x222222, 0.86, 0.95, 0]
+      ].concat(hgWheels([[-0.6, -0.42], [0.6, -0.42], [-0.6, 0.42], [0.6, 0.42]], 0.22, 0.14)), 4.6, -10.2, -0.5);
+      var gp = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6), hgMat(0xffffff, 0.6, 0, { map: gpuPanel }));
+      gp.position.set(0.87, 0.85, 0); gp.rotation.y = Math.PI / 2; gpu.add(gp);
+      var cable = new THREE.CatmullRomCurve3([new THREE.Vector3(4.2, 0.7, -9.6), new THREE.Vector3(3.8, 0.05, -8.6), new THREE.Vector3(2.4, 0.05, -8.2),
+        new THREE.Vector3(1.8, 0.05, -6.6), new THREE.Vector3(2.4, 0.05, -5.4), new THREE.Vector3(1.3, 0.05, -4.4)]);
+      hgMesh(new THREE.TubeGeometry(cable, 48, 0.035, 6), hgMat(0x111111, 0.6), 0, 0, 0);
+      hgMesh(hgB(0.14, 0.1, 0.24), hgMat(0xc9a227, 0.5), 1.3, 0.06, -4.3, 0.6);
+
+      // crew chief with the clipboard
+      var m2 = hgMechanic(0x5b6237, 'clipboard');
+      S.add(m2.g); HG.crew = m2.g;      // placed in front of the nose by hgPlace, clear of whichever aircraft is in
+      HG.anims.push(function(dt, t) {
+        m2.head.rotation.y = Math.sin(t * 0.23) * 0.5; m2.head.rotation.x = 0.15 + Math.sin(t * 0.31) * 0.08;
+        m2.torso.scale.y = 1 + Math.sin(t * 1.6) * 0.012;
+      });
+
+      // tow tractor by the doors, beacon turning
+      var tug = hgKit([
+        [hgB(2.0, 0.55, 3.4), 0xe2e2dc, 0, 0.62, 0], [hgB(2.04, 0.12, 3.44), 0xd23a1e, 0, 0.42, 0],
+        [hgB(1.7, 1.1, 1.1), 0xe2e2dc, 0, 1.45, 1.0], [hgB(1.5, 0.6, 0.04), 0x2a3640, 0, 1.6, 0.44], [hgB(1.8, 0.07, 1.25), 0x333333, 0, 2.03, 1.0],
+        [hgB(0.12, 0.12, 2.4), 0x333333, 0, 0.45, -2.6, -0.12], [hgB(0.5, 0.2, 0.3), 0x333333, 0, 0.3, -3.8], [hgB(1.9, 0.25, 0.25), 0x222222, 0, 0.45, -1.75]
+      ].concat(hgWheels([[-0.95, -1.1], [0.95, -1.1], [-0.95, 1.1], [0.95, 1.1]], 0.42, 0.34)), -7.2, -21, 0.35);
+      var beacon = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffa020 }));
+      beacon.position.set(0, 2.15, 1.0); tug.add(beacon);
+      HG.anims.push(function(dt, t) { var k = Math.max(0, Math.sin(t * 7)); beacon.material.color.setRGB(0.25 + k, 0.12 + k * 0.5, 0.02); });
+
+      // lockers and a bench along the left wall
+      var lockTex = hgTex(512, 192, function(c, w, h) {
+        for (var k = 0; k < 6; k++) {
+          var x = k * w / 6; c.fillStyle = k % 2 ? '#56646b' : '#5d6c73'; c.fillRect(x, 0, w / 6, h);
+          c.fillStyle = 'rgba(0,0,0,.45)'; c.fillRect(x, 0, 2, h);
+          for (var v = 0; v < 5; v++) c.fillRect(x + 22, 18 + v * 7, 40, 3);
+          c.fillStyle = '#c9ccd0'; c.fillRect(x + 64, 90, 6, 20);
+          c.fillStyle = '#e8e8e0'; c.fillRect(x + 20, 150, 46, 16); c.fillStyle = '#222'; c.font = '700 12px monospace'; c.fillText('CREW ' + (k + 1), x + 22, 162);
+        }
+      });
+      var lockers = hgMesh(hgB(5.4, 2.0, 0.6), [hgMat(0x50606a, 0.6, 0.4), hgMat(0x50606a, 0.6, 0.4), hgMat(0x50606a, 0.6, 0.4), hgMat(0x50606a, 0.6, 0.4), hgMat(0xffffff, 0.6, 0.4, { map: lockTex }), hgMat(0x50606a, 0.6, 0.4)], -14.5, 1.0, -15, -Math.PI / 2);
+      lockers.rotation.y = Math.PI / 2;
+      hgKit([[hgB(3.6, 0.08, 0.42), 0x7a6040, 0, 0.45, 0], [hgB(0.08, 0.42, 0.3), HG_DARK, -1.6, 0.22, 0], [hgB(0.08, 0.42, 0.3), HG_DARK, 1.6, 0.22, 0],
+             [hgB(0.5, 0.3, 0.35), 0x2b3a5a, 1.2, 0.64, 0], [hgCy(0.12, 0.12, 0.3), 0xb32222, -1.1, 0.64, 0]], -13.3, -15, Math.PI / 2);
+      // fire hose cabinet
+      hgKit([[hgB(0.28, 0.9, 0.7), 0xb3201a, 0, 0, 0], [hgB(0.02, 0.6, 0.5), 0xf0f0f0, 0.15, 0.05, 0], [new THREE.TorusGeometry(0.2, 0.05, 6, 16), 0xd8a820, 0.17, 0.05, 0, 0, Math.PI / 2]], -16.5, 2, 0, 1.6);
+
+      // parts shelving on the right wall
+      var shelf = [];
+      [-2.4, 0, 2.4].forEach(function(zz) { [-0.4, 0.4].forEach(function(xx) { shelf.push([hgB(0.07, 2.6, 0.07), 0x3a6aa0, xx, 1.3, zz]); }); });
+      [0.12, 0.9, 1.65, 2.4].forEach(function(y) { shelf.push([hgB(0.86, 0.05, 4.9), 0x9a9a92, 0, y, 0]); });
+      var cols = [0x5e7a3a, 0x8a6a3a, 0x3a5a7a, 0xa0a0a0, 0x6b3a2a, 0xc9a227];
+      [0.12, 0.9, 1.65, 2.4].forEach(function(y, row) {
+        for (var k = 0; k < 6; k++) {
+          var bw = 0.4 + ((row * 7 + k * 3) % 5) * 0.08, bh = 0.25 + ((row + k) % 3) * 0.12;
+          shelf.push([hgB(0.6, bh, bw), cols[(row * 3 + k) % cols.length], 0, y + 0.025 + bh / 2, -2.1 + k * 0.82]);
+        }
+      });
+      hgKit(shelf, 14.4, -15.5, 0);
+
+      // ops office in the back corner, lights on
+      var offTex = hgTex(512, 256, function(c, w, h) {
+        c.fillStyle = '#c9ccc4'; c.fillRect(0, 0, w, h);
+        for (var x = 0; x < w; x += 16) { c.fillStyle = 'rgba(0,0,0,.06)'; c.fillRect(x, 0, 8, h); }
+        c.fillStyle = '#ffdca0'; c.fillRect(40, 70, 190, 90); c.fillRect(300, 70, 150, 90);
+        c.fillStyle = 'rgba(60,40,20,.5)'; for (var b = 0; b < 8; b++) { c.fillRect(40, 74 + b * 11, 190, 3); }
+        c.fillStyle = '#2a2d30'; c.fillRect(36, 66, 198, 4); c.fillRect(296, 66, 158, 4);
+        c.fillStyle = '#3a3d40'; c.fillRect(250, 110, 36, 146);
+        c.fillStyle = '#1f6fae'; c.fillRect(170, 18, 170, 34); c.fillStyle = '#fff'; c.font = '900 26px "Arial Black", sans-serif'; c.textAlign = 'center'; c.fillText('OPS · BRIEFING', 255, 45);
+      });
+      var offGlow = hgTex(512, 256, function(c, w, h) { c.fillStyle = '#000'; c.fillRect(0, 0, w, h); c.fillStyle = '#ffd08a'; c.fillRect(40, 70, 190, 90); c.fillRect(300, 70, 150, 90); c.fillStyle = '#3a6aa0'; c.fillRect(170, 18, 170, 34); });
+      var offMat = hgMat(0xffffff, 0.7, 0.2, { map: offTex, emissiveMap: offGlow, emissive: new THREE.Color(0xffffff), emissiveIntensity: 1.4 }), plain = hgMat(0xb9bcb4, 0.75, 0.2);
+      var office = hgMesh(hgB(6, 3.2, 4), [plain, plain, plain, plain, offMat, plain], 10.4, 1.6, 26.6, Math.PI);
+      hgKit([[hgB(6.3, 0.15, 4.3), 0x3a3d40, 0, 3.27, 0], [hgB(6.3, 0.9, 0.06), 0xd8a820, 0, 3.8, 2.12], [hgB(0.06, 0.9, 4.3), 0xd8a820, -3.12, 3.8, 0],
+             [hgB(0.06, 3.3, 0.06), 0xd8a820, -3.12, 1.65, 2.12]], 10.4, 26.6, Math.PI);
+      office.castShadow = true;
+
+      // floor fan, turning
+      var fanG = new THREE.Group(); fanG.position.set(12.2, 0, -12.5); fanG.rotation.y = Math.atan2(12.2, -12.5) + Math.PI; S.add(fanG);
+      hgMesh(hgCy(0.05, 0.05, 1.4, 8), hgMat(0x2a2a2a, 0.5, 0.6), 0, 0.7, 0, 0, fanG);
+      hgMesh(hgB(1.0, 0.06, 0.6), hgMat(0x2a2a2a, 0.5, 0.6), 0, 0.03, 0, 0, fanG);
+      var cage = hgMesh(new THREE.TorusGeometry(0.72, 0.03, 6, 30), hgMat(0x8c9196, 0.4, 0.8), 0, 1.5, 0, 0, fanG);
+      for (i = 0; i < 6; i++) { var sp = hgMesh(hgB(1.44, 0.015, 0.015), cage.material, 0, 1.5, -0.05, 0, fanG); sp.rotation.z = i * Math.PI / 6; }
+      var rotor = new THREE.Group(); rotor.position.set(0, 1.5, 0.02); fanG.add(rotor);
+      hgMesh(hgCy(0.12, 0.12, 0.2, 12), hgMat(0x2a2a2a, 0.5, 0.6), 0, 0, 0.05, 0, rotor).rotation.x = Math.PI / 2;
+      for (i = 0; i < 3; i++) { var bl = hgMesh(hgB(0.26, 0.62, 0.02), hgMat(0x46607a, 0.5, 0.4), 0, 0.36, 0, 0, rotor); bl.rotation.y = 0.35; var piv = new THREE.Group(); piv.rotation.z = i * Math.PI * 2 / 3; piv.add(bl); rotor.add(piv); }
+      HG.anims.push(function(dt) { rotor.rotation.z += dt * 14; });
+
+      // puddles that catch the light
+      var wet = hgMat(0x3c3f40, 0.04, 0.0, { transparent: true, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2 });
+      [[-5.5, 6.5, 2.2, 1.2, 0.4], [4.8, -12.5, 1.5, 0.9, -0.3], [-2.5, -17, 2.6, 1.0, 1.1]].forEach(function(p) {
+        var m = new THREE.Mesh(new THREE.CircleGeometry(1, 24), wet); m.rotation.x = -Math.PI / 2; m.rotation.z = p[4];
+        m.scale.set(p[2], p[3], 1); m.position.set(p[0], 0.012, p[1]); m.receiveShadow = true; S.add(m);
+      });
+
+      // conduit, junction boxes and wall lights along both walls
+      var wall = [];
+      [-1, 1].forEach(function(s) {
+        wall.push([hgCy(0.07, 0.07, 58, 8), 0x6f767c, s * 16.3, 2.6, 0, Math.PI / 2], [hgCy(0.05, 0.05, 58, 8), 0x8a6a3a, s * 16.25, 3.0, 0, Math.PI / 2]);
+        for (z = -24; z <= 24; z += 12) wall.push([hgB(0.2, 0.45, 0.35), 0x5a6066, s * 16.2, 2.75, z]);
+      });
+      hgKit(wall, 0, 0, 0);
+      var lampMat = new THREE.MeshBasicMaterial({ color: 0xdfe9ff });
+      [-1, 1].forEach(function(s) {
+        for (z = -18; z <= 18; z += 12) { var lm = new THREE.Mesh(hgB(0.12, 0.18, 1.2), lampMat); lm.position.set(s * 16.0, 4.6, z); S.add(lm); }
+      });
+
+      // banners and a flag on the back wall
+      var banner = hgTex(128, 256, function(c, w, h) {
+        c.fillStyle = '#7a1414'; c.fillRect(0, 0, w, h); c.fillStyle = '#e2b224'; c.fillRect(8, 8, w - 16, 4); c.fillRect(8, h - 12, w - 16, 4);
+        c.beginPath(); c.moveTo(64, 50); c.lineTo(100, 110); c.lineTo(64, 95); c.lineTo(28, 110); c.closePath(); c.fill();
+        c.font = '900 18px "Arial Black", sans-serif'; c.textAlign = 'center'; c.fillText('VII', 64, 150); c.font = '700 11px Arial'; c.fillText('STRIKE WING', 64, 175); c.fillText('"FIRST IN"', 64, 195);
+      });
+      var bm = hgMat(0xffffff, 0.9, 0, { map: banner, side: THREE.DoubleSide });
+      // hung from the roof on rods, stirring in the draught from the doors
+      [-4.6, 4.6].forEach(function(x, k) {
+        var hang = new THREE.Group(); hang.position.set(x, 13.4, 22); S.add(hang);
+        hgMesh(hgB(2.6, 0.08, 0.08), hgMat(0x2a2d30, 0.5, 0.6), 0, 0, 0, 0, hang);
+        hgMesh(hgCy(0.01, 0.01, 1.2, 4), hgMat(0x111111, 0.9), 0, 0.6, 0, 0, hang);
+        var bg = new THREE.PlaneGeometry(2.4, 4.8); bg.translate(0, -2.45, 0);
+        var b = new THREE.Mesh(bg, bm); b.rotation.y = Math.PI; b.castShadow = true; hang.add(b);
+        HG.anims.push(function(dt, t) { hang.rotation.x = Math.sin(t * 0.8 + k * 1.7) * 0.05; hang.rotation.y = Math.sin(t * 0.5 + k) * 0.08; });
+      });
+
+      // outside: flag and windsock in the breeze, a fuel bowser, the next hangars along the line
+      var flagTex = hgTex(256, 160, function(c, w, h) {
+        c.fillStyle = '#1f4f8a'; c.fillRect(0, 0, w, h); c.fillStyle = '#f2f2ec'; c.fillRect(0, 60, w, 40); c.fillStyle = '#c8261c'; c.fillRect(0, 70, w, 20);
+        c.fillStyle = '#f2f2ec'; c.beginPath(); c.arc(70, 80, 30, 0, Math.PI * 2); c.fill(); c.fillStyle = '#1f4f8a'; c.beginPath(); c.arc(70, 80, 18, 0, Math.PI * 2); c.fill();
+      });
+      hgMesh(hgCy(0.07, 0.1, 13, 10), hgMat(0xd0d0d0, 0.4, 0.7), 18, 6.5, -58);
+      var flagGeo = new THREE.PlaneGeometry(3.6, 2.2, 16, 6); flagGeo.translate(1.8, 0, 0);
+      var flag = new THREE.Mesh(flagGeo, hgMat(0xffffff, 0.85, 0, { map: flagTex, side: THREE.DoubleSide }));
+      flag.position.set(18.05, 11.6, -58); flag.rotation.y = -0.5; S.add(flag);
+      var fp = flagGeo.attributes.position, fx0 = Float32Array.from(fp.array);
+      HG.anims.push(function(dt, t) {
+        for (var k = 0; k < fp.count; k++) { var x = fx0[k * 3]; fp.array[k * 3 + 2] = Math.sin(x * 1.7 - t * 5) * 0.18 * (x / 3.6) + Math.sin(x * 3.1 - t * 7.3) * 0.05 * (x / 3.6); }
+        fp.needsUpdate = true; flagGeo.computeVertexNormals();
+      });
+      var sockTex = hgTex(128, 16, function(c, w, h) { for (var k = 0; k < 5; k++) { c.fillStyle = k % 2 ? '#f2f2ec' : '#e8561c'; c.fillRect(k * w / 5, 0, w / 5, h); } });
+      hgMesh(hgCy(0.06, 0.08, 7, 8), hgMat(0xd0d0d0, 0.4, 0.7), -24, 3.5, -64);
+      var sockG = new THREE.Group(); sockG.position.set(-24, 6.9, -64); S.add(sockG);
+      var sg = new THREE.CylinderGeometry(0.32, 0.18, 2.6, 14, 1, true); sg.rotateZ(Math.PI / 2); sg.translate(1.35, 0, 0);
+      var sock = new THREE.Mesh(sg, hgMat(0xffffff, 0.8, 0, { map: sockTex, side: THREE.DoubleSide })); sockG.add(sock);
+      HG.anims.push(function(dt, t) { sockG.rotation.y = -0.4 + Math.sin(t * 0.4) * 0.25; sock.rotation.z = -0.12 + Math.sin(t * 2.1) * 0.05; });
+      hgKit([[hgCy(1.05, 1.05, 5.2, 18), 0xd8d8d0, 0, 1.6, 0.5, Math.PI / 2], [hgB(2.3, 1.9, 1.6), 0xd23a1e, 0, 1.45, -2.9], [hgB(2.0, 0.7, 0.05), 0x2a3640, 0, 1.85, -3.71],
+             [hgB(2.3, 0.35, 7.2), 0x2a2a2a, 0, 0.55, -0.5], [hgB(2.4, 0.18, 5.3), 0xd23a1e, 0, 1.6, 0.5]]
+        .concat(hgWheels([[-1.1, -2.9], [1.1, -2.9], [-1.1, 1.2], [1.1, 1.2], [-1.1, 2.4], [1.1, 2.4]], 0.48, 0.38)), 24, -46, -0.9);
+      var archG = new THREE.CylinderGeometry(15, 15, 40, 32, 1, false, Math.PI / 2, Math.PI); archG.rotateX(Math.PI / 2);
+      var archMat = hgMat(0x7d8580, 0.7, 0.3);
+      [[-62, -95], [62, -100]].forEach(function(p) { var a = new THREE.Mesh(archG, archMat); a.position.set(p[0], 0, p[1]); a.rotation.y = Math.PI / 2; a.receiveShadow = true; S.add(a); });
+
+      // traffic cones and a FOD bin by the door
+      var cones = [];
+      [[8.5, -26.5], [10.2, -25.8], [-10.5, -27.2]].forEach(function(p) {
+        cones.push([hgB(0.5, 0.05, 0.5), 0x1a1a1a, p[0], 0.025, p[1]], [new THREE.ConeGeometry(0.2, 0.62, 14), 0xe8561c, p[0], 0.36, p[1]], [hgCy(0.12, 0.14, 0.09, 14), 0xf2f2ec, p[0], 0.36, p[1]]);
+      });
+      cones.push([hgCy(0.34, 0.3, 0.9, 16), 0xb3201a, 12.6, 0.45, -23.5], [hgCy(0.36, 0.36, 0.06, 16), 0x2a2a2a, 12.6, 0.93, -23.5]);
+      hgKit(cones, 0, 0, 0);
+
+      // one work lamp with a tired tube
+      var bad = HG.lamps[3];
+      if (bad) HG.anims.push(function(dt, t) { var f = Math.sin(t * 31) > 0.93 || (Math.sin(t * 0.7) > 0.97 && Math.sin(t * 57) > 0) ? 0.25 : 1; bad.material.color.setRGB(f, f * 0.94, f * 0.82); });
+      if (bad) bad.material = bad.material.clone();
     }
 
     /* ---------- props ---------- */
@@ -23996,6 +24280,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       HG.fitR = Math.max(size.x, size.z) * 0.5;
       HG.target.set(0, Math.max(1, box.getCenter(new THREE.Vector3()).y), 0);
       HG.distT = THREE.MathUtils.clamp(HG.fitR * 2.2 + 3, 9, 26);
+      if (HG.crew) { var cr = Math.max(6.7, HG.fitR + 1.2); HG.crew.position.set(0.98 * cr, 0, -0.2 * cr); HG.crew.rotation.y = Math.atan2(0.98, -0.2); }
     }
 
     /* ---------- panels ---------- */
@@ -24119,6 +24404,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       pos.needsUpdate = true;
       // the heli's rotor idles, the bay doors hold open
       if (isStealthMode) nhAnimate(dt);
+      for (var a = 0; a < HG.anims.length; a++) HG.anims[a](dt, HG.t);
       // the hangar is metered for its own light, not the outdoor exposure
       var ex = renderer.toneMappingExposure;
       renderer.toneMappingExposure = 0.78;
