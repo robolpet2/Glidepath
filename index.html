@@ -13352,13 +13352,19 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     // ---------- respawn ----------
-    function wreckRespawn() {
-      if (!started || ejecting) return;
+    // everything a fresh start at base needs: no rescue mission, no ejection, no wreck
+    function respawnCleanSlate() {
       if (WRECK.resetTimer) { clearTimeout(WRECK.resetTimer); WRECK.resetTimer = null; }
       if (typeof csar !== 'undefined' && csar.active) csarAbort();
-      if (crashing) { resetAfterCrash(); return; }
+      ejectAbort();
+      if (crashing) resetAfterCrash();
       wreckClearDamage();
       wreckClearDebris();
+    }
+    function wreckRespawn() {
+      if (!started) return;
+      if (crashing && !ejecting) { if (typeof csar !== 'undefined' && csar.active) csarAbort(); resetAfterCrash(); return; }
+      respawnCleanSlate();
       spawnAt(RUNWAY_CENTER_X, RUNWAY_CENTER_Z + RUNWAY_HALF_LENGTH - 15);
       samOnPlayerReset();
       samToast('⟲ RESPAWNED AT THE AIRFIELD', '#7dff8a', 1.6);
@@ -13735,6 +13741,19 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         triggerCrash(terrainH < WATER_LEVEL, true);
       }
       if (crashing) resetAfterCrash();
+    }
+    // cut an ejection short (switching aircraft or respawning while the pilot is still in the air):
+    // the pilot, seat and canopy go, the abandoned jet is written off and control comes straight back
+    function ejectAbort() {
+      if (!ejecting) return;
+      if (typeof csar !== 'undefined' && csar.state === 'offer') { csarPromptEl.classList.add('hidden'); csar.state = 'idle'; }
+      ejectPlaneDone = true; clearTimeout(ejectCrashTimer);
+      ejecting = false; ejectPilotLanded = false;
+      ejectPilot.visible = false; ejectSeat.visible = false; ejectSeatFlame.visible = false;
+      ejectCanopy.visible = false; ejectCanopyArmed = false;
+      ejectChute.visible = false; ejectDrogue.visible = false;
+      if (crashing) resetAfterCrash();
+      plane.visible = true;
     }
 
     var EJECT_DIVE_PITCH = THREE.MathUtils.degToRad(45); // negative pitchAngle = nose down in this engine
@@ -22984,8 +23003,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       document.getElementById('startBtn').click();
     });
     document.getElementById('liveCarrierBtn').addEventListener('click', function() {
+      respawnCleanSlate();
       applySelectedPlaneType();
       carrierSpawn();
+      samOnPlayerReset();
     });
     livePlaneOptBtns.forEach(function(btn) {
       btn.addEventListener('click', function() {
@@ -22994,9 +23015,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         planeOptBtns.forEach(function(b) {
           b.classList.toggle('active', b.getAttribute('data-plane') === selectedPlaneType);
         });
+        respawnCleanSlate();     // works mid-ejection or mid-crash too, not just once you've landed
         applySelectedPlaneType();
         renderLiveryRow();
         spawnAt(RUNWAY_CENTER_X, RUNWAY_CENTER_Z + RUNWAY_HALF_LENGTH - 15);
+        samOnPlayerReset();
       });
     });
     syncLivePlaneButtons();
@@ -23545,7 +23568,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       else if (a === 'back') gpBack();
       else if (a.indexOf('page:') === 0) { var pg = a.slice(5); if (pg === 'settings') gpShowTab(gpTab); gpShow(pg); }
       else if (a === 'respawn') { gpClose(); wreckRespawn(); }
-      else if (a === 'hangar') { if (ejecting) return; gpClose(); hgOpen('flight'); }
+      else if (a === 'hangar') { gpClose(); hgOpen('flight'); }
       else if (a === 'reset') {
         (GP_TABS[gpTab] || []).forEach(function(k) { if (k !== 'mute') gpSet[k] = GP_SET_DEF[k]; });
         if (gpTab === 'audio') gpSetMute(false);
@@ -24035,7 +24058,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         Object.keys(keys).forEach(function(k) { keys[k] = false; });
         touchEnd(); flarePress(false); pvpGun(false);
         if (audioCtx && audioCtx.state === 'running') audioCtx.suspend();
-        if (typeof wreckClearDamage === 'function' && !crashing) wreckClearDamage();
+        respawnCleanSlate();     // the hangar is back at base, whatever was happening out there
       }
       document.body.classList.add('hg-open');
       hgEl.classList.remove('hidden');
@@ -24057,9 +24080,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
         applySelectedPlaneType();
         // the hangar is back at base: whatever you were doing, you start again from the airfield
-        if (typeof csar !== 'undefined' && csar.active) csarAbort();
-        if (crashing) resetAfterCrash();
-        wreckClearDamage(); wreckClearDebris();
+        respawnCleanSlate();
         if (carrier) carrierSpawn(); else spawnAt(RUNWAY_CENTER_X, RUNWAY_CENTER_Z + RUNWAY_HALF_LENGTH - 15);
         samOnPlayerReset();
         clock.getDelta();
