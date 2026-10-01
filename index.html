@@ -7024,52 +7024,259 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     /* ============================================================
-       CLOUDS
+       CLOUDS — fields of cumulus that look like the real thing
+       · shapes: flat bases on a shared condensation level and billowing cauliflower tops; mostly
+         fair-weather cumulus, some small scraps, the odd towering congestus
+       · each cloud is one mesh of camera-facing puffs (sorted back to front every frame), so the
+         whole sky is a few dozen draw calls instead of hundreds of sprites
+       · lit per pixel from the sun: every puff lobe carries a baked normal, so the sunward side of
+         each billow is bright and the far side falls into shade; the bases sit in the cloud's own
+         shadow; thin edges glow (silver lining) when you look toward the sun; distant clouds sink
+         into the haze; storms darken them and lightning lights them from inside
+       · they drift with the wind, cast soft moving shadows on the ground, and flying into one
+         wraps you in white mist
        ============================================================ */
-    var cloudMaterials = [
-      new THREE.MeshPhongMaterial({ color: 0xfbfcff, flatShading: true, shininess: 2 }),
-      new THREE.MeshPhongMaterial({ color: 0xf3f5f9, flatShading: true, shininess: 2 }),
-      new THREE.MeshPhongMaterial({ color: 0xe9edf3, flatShading: true, shininess: 2 })
-    ];
+    var CLOUD_COUNT = 30, CLOUD_FIELD_R = 2300, CLOUD_BASE = 420;     // field stays inside the camera's 2400 m far plane
     var clouds = [];
-    (function initClouds() {
-      for (var i = 0; i < 42; i++) {
-        var group = new THREE.Group();
-        var mat = cloudMaterials[Math.floor(Math.random() * cloudMaterials.length)];
-        // occasional big "tower" cloud among the usual low flat ones, for silhouette variety
-        var isTall = Math.random() < 0.16;
-        var puffs = isTall ? (5 + Math.floor(Math.random() * 4)) : (3 + Math.floor(Math.random() * 3));
-        for (var p = 0; p < puffs; p++) {
-          var puff = new THREE.Mesh(new THREE.IcosahedronGeometry(10 + Math.random() * 9, 1), mat);
-          if (isTall) {
-            puff.position.set((Math.random() - 0.5) * 18, p * 7 + Math.random() * 4, (Math.random() - 0.5) * 14);
-            puff.scale.set(1 - p * 0.07, 0.85, 1 - p * 0.07);
-          } else {
-            puff.position.set((Math.random() - 0.5) * 26, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 16);
-            puff.scale.set(1, 0.62, 1);
-          }
-          group.add(puff);
+    var cloudShadowU = { tex: { value: null }, o: { value: new THREE.Vector3(0, 0, 6000) }, k: { value: 0 } };
+    var cloudU = {
+      map: { value: null }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color() },
+      skyCol: { value: new THREE.Color() }, gndCol: { value: new THREE.Color() }, fogCol: { value: new THREE.Color() },
+      fogK: { value: 0.0004 }, storm: { value: 1 }, flash: { value: 0 }
+    };
+    // four puff shapes in a 2x2 atlas: alpha = density, R = billow detail, G/B = baked lobe normal (y, x)
+    function cloudMakeAtlas() {
+      var S = 192, cv = document.createElement('canvas'); cv.width = cv.height = S * 2;
+      var ctx = cv.getContext('2d'), im = ctx.createImageData(S * 2, S * 2), rng = mulberry32(7741);
+      for (var c = 0; c < 4; c++) {
+        var ox = (c % 2) * S, oy = (1 - Math.floor(c / 2)) * S;
+        // lobes: one broad body plus smaller billows piled on its upper half
+        var lobes = [[0, 0.12, 0.62]];
+        var nl = 5 + Math.floor(rng() * 4);
+        for (var l = 0; l < nl; l++) {
+          var la = Math.PI * (0.1 + 0.8 * rng()), lr = 0.2 + rng() * 0.32;
+          lobes.push([Math.cos(la) * (0.62 - lr * 0.6), 0.12 - Math.sin(la) * (0.5 - lr * 0.4), lr]);
         }
-        var angle = Math.random() * Math.PI * 2;
-        var radius = 300 + Math.random() * 2200;
-        group.position.set(Math.sin(angle) * radius, (isTall ? 160 : 220) + Math.random() * 420, Math.cos(angle) * radius);
-        var cloudScale = 0.75 + Math.random() * 0.9;
-        group.scale.setScalar(cloudScale);
-        scene.add(group);
-        clouds.push(group);
+        for (var y = 0; y < S; y++) {
+          for (var x = 0; x < S; x++) {
+            var px = (x / S) * 2 - 1, py = (y / S) * 2 - 1;     // py: -1 top, +1 bottom
+            var dens = 0, best = 0, nx = 0, ny = 0;
+            for (var k = 0; k < lobes.length; k++) {
+              var L = lobes[k], dx = (px - L[0]) / L[2], dy = (py - L[1]) / L[2], q = dx * dx + dy * dy;
+              if (q >= 1) continue;
+              var w = 1 - q; dens += w * w;
+              if (w > best) { best = w; nx = dx; ny = -dy; }
+            }
+            var n = fbm(x * 0.045 + c * 9.1, y * 0.045 + c * 4.7, 4), n2 = fbm(x * 0.14 + c * 3.3, y * 0.14, 3);
+            var d = dens * 1.6 - 0.12 - (n - 0.5) * 0.7 - (n2 - 0.5) * 0.18;
+            d *= 1 - gfxSmoothstepJS(0.42, 0.66, py);          // flat-ish underside
+            var a = gfxSmoothstepJS(0.0, 0.42, d);
+            var k4 = ((oy + y) * S * 2 + ox + x) * 4;
+            im.data[k4] = Math.round((0.55 + 0.45 * n2) * 255);
+            im.data[k4 + 1] = Math.round(THREE.MathUtils.clamp(0.5 + 0.5 * ny * 0.9 - py * 0.12, 0, 1) * 255);
+            im.data[k4 + 2] = Math.round(THREE.MathUtils.clamp(0.5 + 0.5 * nx * 0.9, 0, 1) * 255);
+            im.data[k4 + 3] = Math.round(a * 255);
+          }
+        }
+      }
+      ctx.putImageData(im, 0, 0);
+      var t = new THREE.CanvasTexture(cv); t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+      return t;
+    }
+    cloudU.map.value = cloudMakeAtlas();
+    var cloudMat = new THREE.ShaderMaterial({
+      uniforms: cloudU, transparent: true, depthWrite: false, fog: false,
+      vertexShader: [
+        'attribute vec2 aCorner; attribute vec4 aP;',          // aP: size, mirror, height in cloud 0..1, atlas cell
+        'varying vec2 vUv; varying vec3 vR; varying vec3 vU; varying vec3 vC; varying vec3 vW; varying float vH;',
+        'void main() {',
+        '  vec3 wc = (modelMatrix * vec4(position, 1.0)).xyz;',
+        '  vec3 toCam = normalize(cameraPosition - wc);',
+        // billboard that keeps world-up as up (bases stay flat when the camera banks)
+        '  vec3 u = vec3(0.0, 1.0, 0.0) - toCam.y * toCam;',
+        '  float ul = length(u);',
+        '  vec3 camUp = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);',
+        '  u = normalize(mix(camUp, u / max(ul, 1e-4), smoothstep(0.05, 0.3, ul)));',
+        '  vec3 r = normalize(cross(u, toCam));',
+        '  float size = aP.x * length(modelMatrix[0].xyz);',
+        '  vec3 wv = wc + (r * aCorner.x * aP.y + u * aCorner.y * 0.86) * size * 0.5;',
+        '  vW = wv; vR = r * aP.y; vU = u; vC = toCam; vH = aP.z;',
+        '  vUv = vec2(mod(aP.w, 2.0), floor(aP.w / 2.0)) * 0.5 + (aCorner * 0.5 + 0.5) * 0.5;',
+        '  gl_Position = projectionMatrix * viewMatrix * vec4(wv, 1.0);',
+        '}'
+      ].join('\n'),
+      fragmentShader: [
+        'uniform sampler2D map; uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 skyCol; uniform vec3 gndCol;',
+        'uniform vec3 fogCol; uniform float fogK; uniform float storm; uniform float flash;',
+        'varying vec2 vUv; varying vec3 vR; varying vec3 vU; varying vec3 vC; varying vec3 vW; varying float vH;',
+        'void main() {',
+        '  vec4 t = texture2D(map, vUv);',
+        '  float d = length(vW - cameraPosition);',
+        '  float a = t.a * smoothstep(14.0, 70.0, d) * (1.0 - smoothstep(' + (CLOUD_FIELD_R - 420).toFixed(1) + ', ' + (CLOUD_FIELD_R - 40).toFixed(1) + ', length(vW.xz - cameraPosition.xz)));',
+        '  if (a < 0.004) discard;',
+        '  vec2 nn = vec2(t.b, t.g) * 2.0 - 1.0;',
+        '  vec3 n = normalize(vR * nn.x + vU * nn.y + vC * 0.7);',
+        // wrapped diffuse: light scatters deep into a cloud, so the shade side is never black
+        '  float diff = clamp(dot(n, sunDir) * 0.55 + 0.45, 0.0, 1.0);',
+        '  float base = mix(0.42, 1.0, smoothstep(0.0, 0.7, vH));',
+        '  float detail = 0.82 + 0.36 * t.r;',
+        '  vec3 col = sunCol * diff * base * detail;',
+        '  col += mix(gndCol, skyCol, 0.3 + 0.7 * vH) * (0.75 + 0.25 * t.r);',
+        // silver lining: thin edges light up when the sun is behind the cloud
+        '  float mu = max(dot(normalize(vW - cameraPosition), sunDir), 0.0);',
+        '  float thin = 1.0 - smoothstep(0.05, 0.6, t.a);',
+        '  col += sunCol * (pow(mu, 8.0) * 2.2 + pow(mu, 2.0) * 0.25) * thin;',
+        '  col = col * storm + vec3(0.8, 0.86, 1.0) * flash * (0.5 + 0.5 * thin);',
+        // aerial perspective: far clouds sink into the haze
+        '  col = mix(col, fogCol, 1.0 - exp(-d * fogK));',
+        '  gl_FragColor = vec4(col, a);',
+        '  #include <tonemapping_fragment>',
+        '  #include <encodings_fragment>',
+        '}'
+      ].join('\n')
+    });
+
+    // a cloud: puffs in local space, base at y = 0
+    function cloudBuild(rng) {
+      var r = rng(), puffs = [], W, H, i;
+      var type = r < 0.16 ? 'tower' : r < 0.42 ? 'small' : 'cumulus';
+      if (type === 'small') { W = 130 + rng() * 120; H = W * (0.35 + rng() * 0.2); }
+      else if (type === 'tower') { W = 280 + rng() * 220; H = W * (1.05 + rng() * 0.6); }
+      else { W = 260 + rng() * 320; H = W * (0.38 + rng() * 0.28); }
+      var nBase = type === 'small' ? 4 + Math.floor(rng() * 3) : 7 + Math.floor(rng() * 5);
+      var nBody = type === 'small' ? 6 + Math.floor(rng() * 5) : type === 'tower' ? 22 + Math.floor(rng() * 10) : 14 + Math.floor(rng() * 10);
+      var ez = 0.55 + rng() * 0.35;
+      for (i = 0; i < nBase; i++) {        // the flat, darker base row
+        var ba = rng() * Math.PI * 2, br = Math.sqrt(rng()) * 0.42;
+        var bs = W * (0.3 + rng() * 0.16);
+        puffs.push([Math.cos(ba) * br * W, bs * 0.3, Math.sin(ba) * br * W * ez, bs, 0.05]);
+      }
+      for (i = 0; i < nBody; i++) {        // billows piled into a dome (a tapering tower for congestus)
+        var a = rng() * Math.PI * 2, rr = Math.sqrt(rng());
+        var hf = type === 'tower' ? Math.pow(rng(), 0.75) : Math.pow(rng(), 0.9) * Math.sqrt(Math.max(0, 1 - rr * rr));
+        var spread = type === 'tower' ? 0.36 * (1 - hf * 0.55) : 0.44;
+        var y = H * (0.18 + 0.82 * hf);
+        var s = W * (type === 'tower' ? 0.34 : 0.32) * (0.75 + rng() * 0.5) * (1 - hf * 0.3);
+        puffs.push([Math.cos(a) * rr * spread * W, y, Math.sin(a) * rr * spread * W * ez, s, Math.min(1, y / H)]);
+      }
+      var n = puffs.length, pos = new Float32Array(n * 12), cor = new Float32Array(n * 8), par = new Float32Array(n * 16), idx = new Uint16Array(n * 6);
+      var C = [[-1, -1], [1, -1], [1, 1], [-1, 1]], maxS = 0;
+      for (i = 0; i < n; i++) {
+        var p = puffs[i], mir = rng() < 0.5 ? -1 : 1, cell = Math.floor(rng() * 4);
+        maxS = Math.max(maxS, p[3]);
+        for (var v = 0; v < 4; v++) {
+          pos.set([p[0], p[1], p[2]], (i * 4 + v) * 3);
+          cor.set(C[v], (i * 4 + v) * 2);
+          par.set([p[3], mir, p[4], cell], (i * 4 + v) * 4);
+        }
+        idx.set([i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3], i * 6);
+      }
+      var g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('aCorner', new THREE.BufferAttribute(cor, 2));
+      g.setAttribute('aP', new THREE.BufferAttribute(par, 4));
+      g.setIndex(new THREE.BufferAttribute(idx, 1));
+      g.computeBoundingSphere(); g.boundingSphere.radius += maxS * 0.6;
+      var m = new THREE.Mesh(g, cloudMat);
+      m.userData = { puffs: puffs, W: W, H: H, order: puffs.map(function(_, k) { return k; }), sortT: 0 };
+      return m;
+    }
+    function cloudPlace(c, px, pz, near) {
+      var a = Math.random() * Math.PI * 2, rr = near ? 150 + Math.random() * (CLOUD_FIELD_R - 250) : CLOUD_FIELD_R * (0.72 + Math.random() * 0.24);
+      c.position.set(px + Math.sin(a) * rr, CLOUD_BASE + (Math.random() - 0.5) * 50, pz + Math.cos(a) * rr);
+    }
+    (function initClouds() {
+      var rng = mulberry32(31337);
+      for (var i = 0; i < CLOUD_COUNT; i++) {
+        var c = cloudBuild(rng);
+        cloudPlace(c, 0, 0, true);
+        scene.add(c); clouds.push(c);
       }
     })();
-    function recycleClouds(px, pz) {
-      var maxDistSq = 2600 * 2600;
+    function recycleClouds(px, pz, dt) {
+      // the whole field drifts downwind; anything that falls too far behind reappears ahead
+      var w = 3 + (typeof currentWind === 'number' ? currentWind : 0) * 9, wa = typeof windDirAngle === 'number' ? windDirAngle : 0.7;
+      var mx = Math.sin(wa) * w * (dt || 0), mz = Math.cos(wa) * w * (dt || 0);
+      var maxD2 = CLOUD_FIELD_R * CLOUD_FIELD_R;
       for (var i = 0; i < clouds.length; i++) {
         var c = clouds[i];
+        c.position.x += mx; c.position.z += mz;
         var dx = c.position.x - px, dz = c.position.z - pz;
-        if (dx * dx + dz * dz > maxDistSq) {
-          var angle = Math.random() * Math.PI * 2;
-          var radius = 1500 + Math.random() * 900;
-          c.position.set(px + Math.sin(angle) * radius, 220 + Math.random() * 420, pz + Math.cos(angle) * radius);
-        }
+        if (dx * dx + dz * dz > maxD2) cloudPlace(c, px, pz, false);
       }
+    }
+
+    // soft cloud shadows: blobs painted into a small texture that the terrain shader samples
+    var cloudShCv = document.createElement('canvas'); cloudShCv.width = cloudShCv.height = 128;
+    var cloudShCtx = cloudShCv.getContext('2d');
+    cloudShadowU.tex.value = new THREE.CanvasTexture(cloudShCv);
+    var cloudShT = 0;
+    function cloudUpdateShadows(L) {
+      var cx = camera.position.x, cz = camera.position.z, size = CLOUD_FIELD_R * 2.2, S = 128;
+      cloudShadowU.o.value.set(cx, cz, size);
+      cloudShCtx.globalCompositeOperation = 'source-over';
+      cloudShCtx.fillStyle = '#000'; cloudShCtx.fillRect(0, 0, S, S);
+      cloudShCtx.globalCompositeOperation = 'lighter';
+      var sy = Math.max(0.15, L.y);
+      for (var i = 0; i < clouds.length; i++) {
+        var c = clouds[i], u = c.userData, h = c.position.y + u.H * 0.3;
+        var sx = c.position.x - L.x / sy * h, sz = c.position.z - L.z / sy * h;
+        var px = ((sx - cx) / size + 0.5) * S, pz = (0.5 - (sz - cz) / size) * S, r = u.W * 0.42 / size * S;
+        if (px < -r || px > S + r || pz < -r || pz > S + r) continue;
+        var g = cloudShCtx.createRadialGradient(px, pz, 0, px, pz, r);
+        g.addColorStop(0, 'rgba(255,255,255,0.75)'); g.addColorStop(0.55, 'rgba(255,255,255,0.5)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+        cloudShCtx.fillStyle = g; cloudShCtx.beginPath(); cloudShCtx.ellipse(px, pz, r, r * 0.8, 0, 0, Math.PI * 2); cloudShCtx.fill();
+      }
+      cloudShadowU.tex.value.needsUpdate = true;
+    }
+
+    // flying into a cloud: the view goes white
+    var cloudMistEl = document.createElement('div');
+    cloudMistEl.id = 'cloudMist';
+    cloudMistEl.style.cssText = 'position:fixed;inset:0;z-index:7;pointer-events:none;opacity:0;background:radial-gradient(ellipse at 50% 50%, rgba(235,240,246,.78) 0%, rgba(225,231,238,.96) 75%)';
+    document.body.appendChild(cloudMistEl);
+    var _cloudLast = 0, _cloudV = new THREE.Vector3(), _cloudMist = 0;
+
+    // per frame (from the renderer): light, sort, shadows, mist
+    function gfxUpdateCloudLighting() {
+      var now = performance.now() / 1000, dt = Math.min(0.1, now - (_cloudLast || now)); _cloudLast = now;
+      var L = gfxSkyU.sunDir.value;
+      cloudU.sunDir.value.copy(L);
+      var dayK = THREE.MathUtils.clamp(L.y * 4 + 0.25, 0, 1);
+      cloudU.sunCol.value.copy(sunLight.color).multiplyScalar(sunLight.intensity * 1.15);
+      cloudU.skyCol.value.copy(hemiLight.color).multiplyScalar(hemiLight.intensity * 0.85);
+      cloudU.gndCol.value.copy(hemiLight.groundColor).multiplyScalar(hemiLight.intensity * 0.55);
+      var dim = typeof currentDim === 'number' ? currentDim : 0;
+      cloudU.storm.value = 1 - THREE.MathUtils.clamp((dim - 0.25) * 1.2, 0, 0.66);
+      cloudU.flash.value = typeof wxFlash === 'number' ? wxFlash * 1.6 : 0;
+      if (scene.fog) { cloudU.fogCol.value.copy(scene.fog.color); cloudU.fogK.value = (scene.fog.density || 0.0008) * 0.3; }
+      cloudShadowU.k.value = dayK * (1 - THREE.MathUtils.clamp(dim * 1.3, 0, 0.85)) * 0.6;
+      if ((cloudShT -= dt) <= 0) { cloudShT = 0.25; cloudUpdateShadows(L); }
+      // back-to-front puff order for each cloud in view; mist if the camera is inside one
+      var cp = camera.position, mist = 0;
+      for (var i = 0; i < clouds.length; i++) {
+        var c = clouds[i], u = c.userData;
+        var lx = cp.x - c.position.x, ly = cp.y - c.position.y, lz = cp.z - c.position.z;
+        var far = lx * lx + lz * lz > 1600 * 1600;
+        if (far && (u.sortT -= dt) > 0) continue;
+        u.sortT = far ? 0.8 : 0;
+        var P = u.puffs, d2 = u.d2 || (u.d2 = new Float32Array(P.length));
+        for (var k = 0; k < P.length; k++) {
+          var dx = P[k][0] - lx, dy = P[k][1] - ly, dz = P[k][2] - lz;
+          d2[k] = dx * dx + dy * dy + dz * dz;
+          if (!far) { var rIn = P[k][3] * 0.36; if (d2[k] < rIn * rIn) mist = Math.max(mist, 1 - Math.sqrt(d2[k]) / rIn); }
+        }
+        u.order.sort(function(a, b) { return d2[b] - d2[a]; });
+        var ix = c.geometry.index.array;
+        for (var o = 0; o < u.order.length; o++) {
+          var q = u.order[o] * 4, b6 = o * 6;
+          ix[b6] = q; ix[b6 + 1] = q + 1; ix[b6 + 2] = q + 2; ix[b6 + 3] = q; ix[b6 + 4] = q + 2; ix[b6 + 5] = q + 3;
+        }
+        c.geometry.index.needsUpdate = true;
+      }
+      _cloudMist += (Math.min(1, mist * 1.6) - _cloudMist) * Math.min(1, dt * 6);
+      cloudMistEl.style.opacity = (_cloudMist * (started ? 1 : 0)).toFixed(3);
+      cloudMistEl.style.filter = 'brightness(' + (0.35 + 0.65 * dayK * cloudU.storm.value).toFixed(2) + ')';
     }
 
     /* ============================================================
@@ -14875,7 +15082,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         maybeUpdateChunks(position.x, position.z);
         updateForestLod(dt, camera.position);
         forestCollide(dt);
-        recycleClouds(position.x, position.z);
+        recycleClouds(position.x, position.z, dt);
         updateBirds(dt, elapsedSeconds, position.x, position.z);
         updateAudio(speedRatio, dt);
         updateNpcPlanes(dt);
@@ -15523,6 +15730,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     terrainMaterial.roughness = 0.95;
     terrainMaterial.onBeforeCompile = function(shader) {
       shader.uniforms.uScorch = { value: NUKE_SCORCH };
+      shader.uniforms.uCloudSh = cloudShadowU.tex; shader.uniforms.uCloudShO = cloudShadowU.o; shader.uniforms.uCloudShK = cloudShadowU.k;
       shader.uniforms.uSeason = SEASON_U;
       shader.uniforms.uTime = gfxTimeU;
       shader.vertexShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\n' +
@@ -15531,7 +15739,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           'vGfxWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;',
           'vGfxWorldNormal = normalize(mat3(modelMatrix) * objectNormal);'
         ].join('\n'));
-      shader.fragmentShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\nuniform vec4 uScorch[2];\nuniform float uTime;\nuniform vec4 uSeason;\n' +
+      shader.fragmentShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\nuniform vec4 uScorch[2];\nuniform float uTime;\nuniform vec4 uSeason;\nuniform sampler2D uCloudSh;\nuniform vec3 uCloudShO;\nuniform float uCloudShK;\n' +
         shader.fragmentShader
           .replace('#include <map_fragment>', '')
           .replace('#include <color_fragment>', [
@@ -15577,8 +15785,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             '    gEmber += vec3(1.0, 0.28, 0.05) * burn * sc.w * sc.w * smoothstep(0.55, 0.8, gNear + gMid * 0.4) * fl * 1.4;',
             '  }',
             '}',
-            'diffuseColor.rgb *= gBase * gDetail;'
+            'diffuseColor.rgb *= gBase * gDetail;',
+            'float gCloudSh = texture2D(uCloudSh, vec2((vGfxWorldPos.x - uCloudShO.x) / uCloudShO.z + 0.5, 0.5 - (vGfxWorldPos.z - uCloudShO.y) / uCloudShO.z)).r * uCloudShK;'
           ].join('\n'))
+          .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directDiffuse *= 1.0 - gCloudSh;\nreflectedLight.directSpecular *= 1.0 - gCloudSh;')
           .replace('#include <roughnessmap_fragment>',
             'float roughnessFactor = roughness * mix(1.0, 0.55, gShore) * mix(1.0, 0.8, gSnow);')
           .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += gEmber;');
@@ -16190,79 +16400,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
     }
 
-    /* ---------------- CLOUDS: soft volumetric-looking billboard cumulus, lit by the sun ---------------- */
-    function gfxMakeCloudPuff(seed) {
-      var s = 128, cv = document.createElement('canvas'); cv.width = cv.height = s;
-      var ctx = cv.getContext('2d'), im = ctx.createImageData(s, s);
-      for (var y = 0; y < s; y++) {
-        for (var x = 0; x < s; x++) {
-          var dx = (x - s / 2) / (s / 2), dy = (y - s / 2) / (s / 2);
-          var r = Math.sqrt(dx * dx + dy * dy);
-          var n = fbm(x * 0.06 + seed * 7.1, y * 0.06 + seed * 3.3, 4);
-          var edge = r + (n - 0.5) * 0.6;
-          var a = 1 - gfxSmooth(0.35, 1.0, edge);
-          var shade = 0.8 + 0.2 * fbm(x * 0.11 + seed * 13.0, y * 0.11, 3);
-          var k = (y * s + x) * 4;
-          im.data[k] = im.data[k + 1] = im.data[k + 2] = shade * 255;
-          im.data[k + 3] = a * 235;
-        }
-      }
-      ctx.putImageData(im, 0, 0);
-      return new THREE.CanvasTexture(cv);
-    }
-    var gfxCloudTex = [gfxMakeCloudPuff(1), gfxMakeCloudPuff(2), gfxMakeCloudPuff(3)];
-    var gfxCloudMats = { top: [], mid: [], base: [] };
-    ['top', 'mid', 'base'].forEach(function(layer) {
-      gfxCloudTex.forEach(function(tex, ti) {
-        var m = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: true, opacity: layer === 'base' ? 0.92 : 0.85 });
-        m.rotation = ti * 2.1;
-        gfxCloudMats[layer].push(m);
-      });
-    });
-    clouds.forEach(function(group) {
-      for (var ci = group.children.length - 1; ci >= 0; ci--) {
-        var old = group.children[ci];
-        group.remove(old);
-        if (old.geometry) old.geometry.dispose();
-      }
-      var tall = Math.random() < 0.2;
-      var n = tall ? 24 : 17;
-      var sx = tall ? 24 : 44, sz = tall ? 22 : 30, maxY = tall ? 58 : 16;
-      for (var k = 0; k < n; k++) {
-        var ax = (Math.random() * 2 - 1), az = (Math.random() * 2 - 1);
-        var rr = ax * ax + az * az; if (rr > 1) { ax /= Math.sqrt(rr); az /= Math.sqrt(rr); rr = 1; }
-        var yNorm = Math.pow(Math.random(), tall ? 0.8 : 1.2) * (1 - rr * 0.65);
-        var layer = yNorm < 0.28 ? 'base' : (yNorm < 0.62 ? 'mid' : 'top');
-        var list = gfxCloudMats[layer];
-        var sp = new THREE.Sprite(list[Math.floor(Math.random() * list.length)]);
-        var size = (tall ? 30 : 34) + Math.random() * 24 - yNorm * 8;
-        sp.position.set(ax * sx, yNorm * maxY, az * sz);
-        sp.scale.set(size * (Math.random() < 0.5 ? -1 : 1), size * 0.86, 1);
-        group.add(sp);
-      }
-    });
-    var _gfxC1 = new THREE.Color(), _gfxC2 = new THREE.Color();
-    // THREE.Color has no addScaledVector — combine ambient (C2) and sun (C1) by hand
-    function gfxMixLight(target, ambK, sunK) {
-      target.setRGB(_gfxC2.r * ambK + _gfxC1.r * sunK, _gfxC2.g * ambK + _gfxC1.g * sunK, _gfxC2.b * ambK + _gfxC1.b * sunK);
-    }
-    function gfxUpdateCloudLighting() {
-      var si = sunLight.intensity, hi = hemiLight.intensity;
-      _gfxC1.copy(sunLight.color).multiplyScalar(si);
-      _gfxC2.copy(hemiLight.color).multiplyScalar(hi);
-      var tops = gfxCloudMats.top, mids = gfxCloudMats.mid, bases = gfxCloudMats.base;
-      // storm clouds go dark and heavy; lightning lights them from inside
-      var stormK = typeof currentDim === 'number' ? 1 - THREE.MathUtils.clamp((currentDim - 0.3) * 1.3, 0, 0.62) : 1;
-      var flashK = typeof wxFlash === 'number' ? wxFlash * 1.4 : 0;
-      for (var i = 0; i < tops.length; i++) {
-        gfxMixLight(tops[i].color, 0.75, 1.05);
-        gfxMixLight(mids[i].color, 0.55, 0.45);
-        gfxMixLight(bases[i].color, 0.36, 0.07);
-        tops[i].color.multiplyScalar(stormK).addScalar(flashK);
-        mids[i].color.multiplyScalar(stormK * 0.9).addScalar(flashK * 0.8);
-        bases[i].color.multiplyScalar(stormK * 0.8).addScalar(flashK * 0.6);
-      }
-    }
 
     /* ---------------- AIRCRAFT: smooth tessellated hulls, panel lines, weathered paint ---------------- */
     function gfxMakePanelTextures() {
