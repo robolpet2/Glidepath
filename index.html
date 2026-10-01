@@ -2111,7 +2111,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function getTerrainHeight(x, z) {
       var n = fbm(x * 0.0009, z * 0.0009, 6);
       n = Math.pow(n, 2.2);
-      var naturalHeight = oceanShape(x, z, n * 300 - 40);
+      var naturalHeight = regionHeight(x, z, oceanShape(x, z, n * 300 - 40));
 
       // Steepen the shoreline for the ocean coast (run before river so river isn't undone)
       var SHORE_BAND = 7;
@@ -2166,8 +2166,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
 
       // the enemy's airfields: flat along the runway and out over the apron on one side
-      for (var wsi = 0; wsi < WAR_STRIPS.length; wsi++) {
-        var WS = WAR_STRIPS[wsi], wsx = x - WS.x, wsz = z - WS.z;
+      for (var wsi = 0; wsi < WAR_STRIPS.length + REG_STRIPS.length; wsi++) {
+        var WS = wsi < WAR_STRIPS.length ? WAR_STRIPS[wsi] : REG_STRIPS[wsi - WAR_STRIPS.length], wsx = x - WS.x, wsz = z - WS.z;
         if (wsx * wsx + wsz * wsz > WS.reach2) continue;
         var wsu = Math.abs(wsx * WS.ux + wsz * WS.uz), wsv = -wsx * WS.uz + wsz * WS.ux;
         var wsvo = wsv > 0 ? Math.max(0, wsv - WS.W / 2 - WS.apron) : Math.max(0, -wsv - WS.W / 2 - 40);
@@ -2208,6 +2208,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     // out, on dry, reasonably level ground clear of the river and the coast
     var SAM_BASE = null, SAM_BASE_FLAT_R = 260, SAM_BASE_BLEND_R = 620;
     var WAR_SITES = [], WAR_STRIPS = [];   // campaign sectors + the enemy's airfields (chosen below)
+    var REG_STRIPS = [];                   // the far regions' airfields (chosen below)
     var CITY_FLAT = null; // set by the city builder once its ground level is known
     (function chooseSamBase() {
       function raw(x, z) { return Math.pow(fbm(x * 0.0009, z * 0.0009, 6), 2.2) * 300 - 40; }
@@ -2363,6 +2364,129 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var NAMES = ['ALDER RIDGE', 'BLACKWATER', 'CRESCENT VALE', 'DUNMORE PASS', 'EAGLE LAKE', 'FOXHOLLOW', 'GRANITE FLATS', 'HARROW HILL', 'KESTREL BLUFF', 'LANTERN GAP'];
       WAR_SITES.forEach(function(s, i) { s.type = TYPES[i]; s.name = NAMES[i]; s.rot = (s.x * 0.0131 + s.z * 0.0071) % (Math.PI * 2); });
     })();
+
+    // ---- REGIONS out past the island's heartland, each with its own ground and its own landmark:
+    //   · the DUST SEA, east past ~12 km: dunes rippling in the wind, flat-topped red mesas cut in
+    //     strata, an oil field and a sand strip
+    //   · NORTHREACH, the far north past ~13 km: ridged white mountains, frozen lakes, a research
+    //     station with radomes and a packed-snow runway
+    //   · MOUNT KAELA, a volcanic island 9 km offshore: black basalt, a steaming crater with a lava
+    //     lake, lava channels down its flanks, and eruptions that throw burning rock into the sky
+    var REG_VOLC = { x: -3600, z: 10800, r: 2700, h: 640, crater: 290 };
+    function regArcticW(x, z) { return z > -12500 ? 0 : gfxSmoothstepJS(-12500, -15500, z); }
+    function regDesertW(x, z) {
+      if (x < 11500) return 0;
+      var land = 1 - THREE.MathUtils.clamp((z - (oceanCoastZ(x) - 450)) / 450, 0, 1);
+      return gfxSmoothstepJS(11500, 14500, x) * (1 - regArcticW(x, z)) * land;
+    }
+    function regionHeight(x, z, h) {
+      var dw = regDesertW(x, z);
+      if (dw > 0) {
+        var u = x * 0.8 + z * 0.6, v = -x * 0.6 + z * 0.8;
+        var wob = smoothNoise(x * 0.0011, z * 0.0011) * 6.0;
+        var dune = Math.pow(1 - Math.abs(Math.sin(u * 0.0062 + wob)), 2.2) * (9 + 9 * smoothNoise(v * 0.002, u * 0.002));
+        var m = fbm(x * 0.00055 + 31.7, z * 0.00055 - 12.2, 3);
+        var mesa = gfxSmoothstepJS(0.56, 0.6, m) * (85 + 50 * smoothNoise(x * 0.0008, z * 0.0008));
+        mesa = Math.floor(mesa / 16) * 16 + (mesa % 16) * 0.3;           // stepped strata, not a smooth hill
+        var hd = 10 + dune + mesa;
+        h = h + (hd - h) * dw;
+      }
+      var aw = regArcticW(x, z);
+      if (aw > 0) {
+        var ridge = 1 - Math.abs(fbm(x * 0.0013 + 5.1, z * 0.0013 - 2.7, 4) * 2 - 1);
+        var ha = h * 1.35 + 30 + Math.pow(ridge, 3) * 260;
+        ha = Math.max(ha, WATER_LEVEL + 2.2);                           // no open water up here: frozen flats
+        h = h + (ha - h) * aw;
+      }
+      var V = REG_VOLC, vdx = x - V.x, vdz = z - V.z, vd2 = vdx * vdx + vdz * vdz, R = V.r * 1.35;
+      if (vd2 < R * R) {
+        var vd = Math.sqrt(vd2), t = 1 - vd / R;
+        var cone = Math.pow(Math.max(0, 1 - vd / V.r), 1.5) * V.h;
+        var shelf = OCEAN_FLOOR + (WATER_LEVEL + 10 - OCEAN_FLOOR) * gfxSmoothstepJS(0, 0.4, t);
+        var gully = 1 + 0.13 * Math.sin(Math.atan2(vdz, vdx) * 11 + vd * 0.004) * (vd / V.r);
+        var top = shelf + cone * gully;
+        if (vd < V.crater) top -= Math.pow(1 - vd / V.crater, 1.6) * 170;   // the crater bowl
+        if (top > h) h = top;
+      }
+      return h;
+    }
+    // trees: none on the sand or the lava, thin and stunted in the far north, jungle low on Kaela
+    function regTreeMul(x, z, h) {
+      var m = (1 - regDesertW(x, z)) * (1 - regArcticW(x, z) * 0.85);
+      var V = REG_VOLC, vd = Math.hypot(x - V.x, z - V.z);
+      if (vd < V.r * 1.35) m *= h < 70 && vd > V.r * 0.55 ? 1.4 : 0;
+      return m;
+    }
+    // ground colour + the biome mask the terrain shader reads (desert, arctic, lava)
+    var REG_C = {
+      sand: new THREE.Color(0xc9a77a).convertSRGBToLinear(), sandDark: new THREE.Color(0xa9875c).convertSRGBToLinear(),
+      rock: new THREE.Color(0x9a5236).convertSRGBToLinear(), rockPale: new THREE.Color(0xc48a5e).convertSRGBToLinear(),
+      snow: new THREE.Color(0xe8edf2).convertSRGBToLinear(), ice: new THREE.Color(0xb3cde0).convertSRGBToLinear(),
+      basalt: new THREE.Color(0x221f1d).convertSRGBToLinear(), ash: new THREE.Color(0x5a5650).convertSRGBToLinear(), jungle: new THREE.Color(0x2f4a22).convertSRGBToLinear()
+    };
+    var _regC = new THREE.Color();
+    function regColor(x, z, h, col, bio) {
+      bio[0] = bio[1] = bio[2] = 0;
+      var dw = regDesertW(x, z);
+      if (dw > 0.001 && h > WATER_LEVEL + 0.4) {
+        var n1 = smoothNoise(x * 0.004, z * 0.004);
+        if (h > 34) _regC.copy(Math.floor(h / 9) % 2 ? REG_C.rock : REG_C.rockPale).lerp(REG_C.sandDark, 0.15 + n1 * 0.2);
+        else _regC.copy(REG_C.sand).lerp(REG_C.sandDark, n1 * 0.6);
+        col.lerp(_regC, dw);
+        bio[0] = dw;
+      }
+      var aw = regArcticW(x, z);
+      if (aw > 0.001) {
+        _regC.copy(h < WATER_LEVEL + 3.5 ? REG_C.ice : REG_C.snow);
+        col.lerp(_regC, aw);
+        bio[1] = aw;
+      }
+      var V = REG_VOLC, vdx = x - V.x, vdz = z - V.z, vd = Math.sqrt(vdx * vdx + vdz * vdz);
+      if (vd < V.r * 1.35 && h > WATER_LEVEL - 6) {
+        var vw = 1 - gfxSmoothstepJS(V.r * 1.05, V.r * 1.3, vd);
+        if (h < 70 && vd > V.r * 0.55) _regC.copy(REG_C.jungle).lerp(REG_C.basalt, gfxSmoothstepJS(30, 70, h));
+        else _regC.copy(REG_C.basalt).lerp(REG_C.ash, gfxSmoothstepJS(220, 480, h) * 0.8);
+        col.lerp(_regC, vw);
+        bio[0] = Math.max(bio[0], vw);         // like the sand: no snow line, no seasonal tint
+        // the lava: a lake in the crater and a few channels running down the flanks
+        var lava = 0;
+        if (vd < V.crater * 0.62) lava = 1;
+        else if (vd < V.r * 0.72) {
+          var s = Math.sin(Math.atan2(vdz, vdx) * 6 + 1.3 + Math.sin(vd * 0.0034) * 0.7);
+          if (s > 0.991) lava = gfxSmoothstepJS(0.991, 0.998, s) * (1 - gfxSmoothstepJS(V.r * 0.5, V.r * 0.72, vd));
+        }
+        bio[2] = lava;
+      }
+    }
+    // the regions' runways: the flattest straight ground near each landmark
+    (function chooseRegionStrips() {
+      function raw(x, z) { return regionHeight(x, z, oceanShape(x, z, Math.pow(fbm(x * 0.0009, z * 0.0009, 6), 2.2) * 300 - 40)); }
+      function find(cx, cz, span, L) {
+        var best = null;
+        for (var x = cx - span; x <= cx + span; x += 300) {
+          for (var z = cz - span; z <= cz + span; z += 300) {
+            for (var o = 0; o < 4; o++) {
+              var dir = o * Math.PI / 4, ux = Math.cos(dir), uz = Math.sin(dir), sum = 0, sum2 = 0, n = 0, lo = 1e9, hi = -1e9;
+              for (var k = -4; k <= 4; k++) for (var q = -1; q <= 2; q++) {
+                var h = raw(x + ux * k * L / 8 - uz * q * 50, z + uz * k * L / 8 + ux * q * 50);
+                sum += h; sum2 += h * h; n++; if (h < lo) lo = h; if (h > hi) hi = h;
+              }
+              if (lo < WATER_LEVEL + 2) continue;
+              var mean = sum / n, sd = Math.sqrt(Math.max(0, sum2 / n - mean * mean)), sc = sd + (hi - lo) * 0.3;
+              if (!best || sc < best.score) best = { x: x, z: z, y: mean, ang: dir, score: sc };
+            }
+          }
+        }
+        return best;
+      }
+      function add(b, name, kind, L) {
+        if (!b) return;
+        var W = 40, apron = 150, reach = Math.hypot(L / 2 + 60, W / 2 + apron) + 230;
+        REG_STRIPS.push({ name: name, kind: kind, x: b.x, z: b.z, y: b.y, ux: Math.cos(b.ang), uz: Math.sin(b.ang), L: L, W: W, apron: apron, reach2: reach * reach });
+      }
+      add(find(0, -17000, 1500, 900), 'NORTHREACH STATION', 'arctic', 900);
+      add(find(16500, -4200, 1500, 900), 'DUST SEA STRIP', 'desert', 900);
+    })();
     // no forest trees on the city, the highway corridor (incl. embankments), the airfield or the SAM base
     function treeBlockedAt(wx, wz) {
       if (OLD_STRIP) {
@@ -2370,8 +2494,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (Math.abs(obx * OLD_STRIP.ux + obz * OLD_STRIP.uz) < OLD_STRIP.L / 2 + 90 && Math.abs(-obx * OLD_STRIP.uz + obz * OLD_STRIP.ux) < 110) return true;
       }
       if (UFO_SITE && Math.hypot(wx - UFO_SITE.x, wz - UFO_SITE.z) < 45) return true;
-      for (var wti = 0; wti < WAR_STRIPS.length; wti++) {
-        var WT = WAR_STRIPS[wti], wtx = wx - WT.x, wtz = wz - WT.z;
+      for (var wti = 0; wti < WAR_STRIPS.length + REG_STRIPS.length; wti++) {
+        var WT = wti < WAR_STRIPS.length ? WAR_STRIPS[wti] : REG_STRIPS[wti - WAR_STRIPS.length], wtx = wx - WT.x, wtz = wz - WT.z;
         if (wtx * wtx + wtz * wtz > WT.reach2) continue;
         var wtv = -wtx * WT.uz + wtz * WT.ux;
         if (Math.abs(wtx * WT.ux + wtz * WT.uz) < WT.L / 2 + 90 && wtv > -WT.W / 2 - 60 && wtv < WT.W / 2 + WT.apron + 40) return true;
@@ -2395,8 +2519,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     // other places a plane can put down: the abandoned airstrip, and frozen water in winter
     function worldLandable(x, z, margin) {
-      for (var wli = 0; wli < WAR_STRIPS.length; wli++) {
-        var WL = WAR_STRIPS[wli], wlx = x - WL.x, wlz = z - WL.z;
+      for (var wli = 0; wli < WAR_STRIPS.length + REG_STRIPS.length; wli++) {
+        var WL = wli < WAR_STRIPS.length ? WAR_STRIPS[wli] : REG_STRIPS[wli - WAR_STRIPS.length], wlx = x - WL.x, wlz = z - WL.z;
         if (Math.abs(wlx * WL.ux + wlz * WL.uz) < WL.L / 2 + (margin || 0) && Math.abs(-wlx * WL.uz + wlz * WL.ux) < WL.W / 2 + (margin || 0)) return true;
       }
       if (OLD_STRIP) {
@@ -7051,6 +7175,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
       }
       var normalArray = new Float32Array(posAttr.count * 3);
+      var bioArray = new Float32Array(posAttr.count * 3), bio = [0, 0, 0];
       for (var i = 0; i < posAttr.count; i++) {
         var lx = posAttr.getX(i);
         var lz = posAttr.getZ(i);
@@ -7068,6 +7193,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         // which also keeps distant forests reading as solid masses when their trees thin out
         var fd = forestDensityAt(wx, wz, h);
         if (fd > 0.01 && !treeBlockedAt(wx, wz)) { tmpColor.r *= 1 - fd * 0.5; tmpColor.g *= 1 - fd * 0.36; tmpColor.b *= 1 - fd * 0.52; }
+        regColor(wx, wz, h, tmpColor, bio);
+        bioArray[i * 3] = bio[0]; bioArray[i * 3 + 1] = bio[1]; bioArray[i * 3 + 2] = bio[2];
         var jitter = 1 + (smoothNoise(wx * 0.11, wz * 0.11) - 0.5) * 0.22
                       + (smoothNoise(wx * 0.31, wz * 0.29) - 0.5) * 0.09;
         colorArray[i * 3] = Math.min(1, Math.max(0, tmpColor.r * jitter));
@@ -7076,6 +7203,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       geometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
       geometry.setAttribute('normal', new THREE.BufferAttribute(normalArray, 3));
+      geometry.setAttribute('aBio', new THREE.BufferAttribute(bioArray, 3));
 
       var mesh = new THREE.Mesh(geometry, terrainMaterial);
       mesh.position.set(worldOffsetX, 0, worldOffsetZ);
@@ -14796,7 +14924,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var miniMapCanvas = document.getElementById('miniMap');
     var miniMapCtx = miniMapCanvas.getContext('2d');
     var miniMapWrapEl = document.getElementById('miniMapWrap');
-    var MAP_ZOOMS = [1500, 3000, 6000];
+    var MAP_ZOOMS = [1500, 3000, 6000, 12000];
     var MAP_RANGE_COLLAPSED = 1300;
     var mapZoomIdx = 1;
     var miniMapExpanded = false;
@@ -14845,6 +14973,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           var i = (y + 1) * n + (xx + 1);
           var h = j.H[i];
           mapColorFor(h, col);
+          regMapColor(j.cx - j.span / 2 + xx * step, j.cz - j.span / 2 + y * step, h, col);
           var shade = 1;
           if (h >= WATER_LEVEL + 0.3) {
             var gx = j.H[i - 1] - j.H[i + 1], gz = j.H[i - n] - j.H[i + n];
@@ -15592,7 +15721,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
         if (wasGrounded && !crashing && speed < RUMBLE_MIN_SPEED * 2.5 &&
             (isOverRunway(position.x, position.z, RUNWAY_LANDING_MARGIN + 40) || isOnAirportPavement(position.x, position.z) || nearGasStation ||
-             isOverCarrierDeck(position.x, position.z) || warRearmAt(position.x, position.z))) {
+             isOverCarrierDeck(position.x, position.z) || warRearmAt(position.x, position.z) || regStripAt(position.x, position.z))) {
           isRefueling = fuel < FUEL_MAX;
           if (!nearGasStation) samRearmAtBase();
           if (WAR.on && !nearGasStation) crOnLanded();
@@ -15807,6 +15936,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       airWingUpdate(dt);
       cmdUpdate(dt);
       warUpdate(dt);
+      regUpdate(dt);
       updateStrike(dt);
       updateStrikePostCamera(dt);
       updateCSAR(dt);
@@ -16424,13 +16554,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       shader.uniforms.uCloudSh = cloudShadowU.tex; shader.uniforms.uCloudShO = cloudShadowU.o; shader.uniforms.uCloudShK = cloudShadowU.k;
       shader.uniforms.uSeason = SEASON_U;
       shader.uniforms.uTime = gfxTimeU;
-      shader.vertexShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\n' +
+      shader.vertexShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\nattribute vec3 aBio;\nvarying vec3 vBio;\n' +
         shader.vertexShader.replace('#include <begin_vertex>', [
           '#include <begin_vertex>',
+          'vBio = aBio;',
           'vGfxWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;',
           'vGfxWorldNormal = normalize(mat3(modelMatrix) * objectNormal);'
         ].join('\n'));
-      shader.fragmentShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\nuniform vec4 uScorch[2];\nuniform float uTime;\nuniform vec4 uSeason;\nuniform sampler2D uCloudSh;\nuniform vec3 uCloudShO;\nuniform float uCloudShK;\n' +
+      shader.fragmentShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\nvarying vec3 vBio;\nuniform vec4 uScorch[2];\nuniform float uTime;\nuniform vec4 uSeason;\nuniform sampler2D uCloudSh;\nuniform vec3 uCloudShO;\nuniform float uCloudShK;\n' +
         shader.fragmentShader
           .replace('#include <map_fragment>', '')
           .replace('#include <color_fragment>', [
@@ -16449,14 +16580,19 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             'gBase = mix(gBase, vec3(0.13, 0.118, 0.1) * (0.8 + gNear * 0.5), gRock);',
             // snow only settles on the flatter high ground
             'float gSnowLine = 118.0 + (gFar - 0.5) * 40.0;',
-            'float gSnow = smoothstep(gSnowLine, gSnowLine + 18.0, vGfxWorldPos.y) * (1.0 - smoothstep(0.35, 0.6, gSlope));',
+            'float gSnow = smoothstep(gSnowLine, gSnowLine + 18.0, vGfxWorldPos.y) * (1.0 - smoothstep(0.35, 0.6, gSlope)) * (1.0 - vBio.x);',
             'gBase = mix(gBase, vec3(0.78, 0.8, 0.84), gSnow);',
+            // the far north: everything that isn't a cliff stays white all year
+            'float gArc = vBio.y * (1.0 - gRock);',
+            'gSnow = max(gSnow, gArc);',
             // seasons: autumn dries the grass to straw and gold, spring greens it up, winter
             // buries everything that isn't steep rock under snow (thin at the waterline)
             'float gVeg = (1.0 - gRock) * (1.0 - gSnow) * smoothstep(' + (WATER_LEVEL + 3).toFixed(1) + ', ' + (WATER_LEVEL + 8).toFixed(1) + ', vGfxWorldPos.y);',
+            'gVeg *= 1.0 - max(vBio.x, max(vBio.y, vBio.z));',
             'gBase = mix(gBase, gBase * vec3(1.45, 1.08, 0.55) + vec3(0.012, 0.006, 0.0), uSeason.y * 0.75 * gVeg);',
             'gBase = mix(gBase, gBase * vec3(0.82, 1.22, 0.78), uSeason.z * 0.6 * gVeg);',
             'float gWSnow = uSeason.x * smoothstep(0.46, 0.3, gSlope + (gMid - 0.5) * 0.25) * smoothstep(' + (WATER_LEVEL + 0.4).toFixed(1) + ', ' + (WATER_LEVEL + 2.5).toFixed(1) + ', vGfxWorldPos.y);',
+            'gWSnow *= (1.0 - vBio.x * 0.85) * (1.0 - vBio.z);',
             'gBase = mix(gBase, vec3(0.8, 0.82, 0.87) * (0.92 + gNear * 0.16), gWSnow * 0.94);',
             'gSnow = max(gSnow, gWSnow);',
             // darker, wetter band right along the waterline
@@ -16465,6 +16601,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             // nuclear scar: scorched black ground, fused glassy crust at ground zero, embers that
             // glow and slowly go out
             'vec3 gEmber = vec3(0.0);',
+            // lava on Mount Kaela: a black crust over a glow that breathes
+            'gBase = mix(gBase, vec3(0.05, 0.022, 0.012), vBio.z);',
+            'gEmber += vec3(1.0, 0.3, 0.05) * vBio.z * (0.7 + 0.3 * sin(uTime * 1.7 + vGfxWorldPos.x * 0.05 + vGfxWorldPos.z * 0.03)) * smoothstep(0.35, 0.75, gNear + gMid * 0.5) * 2.4;',
             'for (int si = 0; si < 2; si++) {',
             '  vec4 sc = uScorch[si];',
             '  if (sc.z > 0.0) {',
@@ -16830,8 +16969,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     function forestDensityAt(wx, wz, h) {
       if (h < 3.5 || h > 106) return 0;
+      if (wx > 11500 || wz < -12500 || wz > 6000) { if (regTreeMul(wx, wz, h) <= 0) return 0; }
       var n = fbm(wx * 0.0021 + 17.3, wz * 0.0021 - 4.1, 3) + (smoothNoise(wx * 0.013, wz * 0.013) - 0.5) * 0.08;
-      return gfxSmoothstepJS(0.47, 0.59, n) * gfxSmoothstepJS(3.5, 9, h) * (1 - gfxSmoothstepJS(88, 106, h));
+      return gfxSmoothstepJS(0.47, 0.59, n) * gfxSmoothstepJS(3.5, 9, h) * (1 - gfxSmoothstepJS(88, 106, h)) * regTreeMul(wx, wz, h);
     }
     var _frM = new THREE.Matrix4(), _frQ = new THREE.Quaternion(), _frQ2 = new THREE.Quaternion(), _frV = new THREE.Vector3(), _frS = new THREE.Vector3(), _frAx = new THREE.Vector3(), _frC = new THREE.Color();
     var FR_UP = new THREE.Vector3(0, 1, 0), FR_CELL = CHUNK_SIZE / CHUNK_SEGMENTS, FR_DIM = CHUNK_SEGMENTS;
@@ -16872,7 +17012,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           var ha = hGrid[(iz + 1) * gW + ix + 1], hb = hGrid[(iz + 2) * gW + ix + 1], hc = hGrid[(iz + 2) * gW + ix + 2], hd = hGrid[(iz + 1) * gW + ix + 2];
           var h = fx + fz <= 1 ? ha + (hd - ha) * fx + (hb - ha) * fz : hc + (hb - hc) * (1 - fx) + (hd - hc) * (1 - fz);
           var d = forestDensityAt(wx, wz, h);
-          var p = (d * 0.9 + (h > 4 && h < 90 ? 0.012 : 0)) * (GFX_IS_TOUCH ? 0.62 : 1);
+          var p = (d * 0.9 + (h > 4 && h < 90 ? 0.012 * regTreeMul(wx, wz, h) : 0)) * (GFX_IS_TOUCH ? 0.62 : 1);
           if (r3 >= p) continue;
           var slope = Math.max(Math.abs(hd - ha), Math.abs(hb - ha), Math.abs(hc - hb), Math.abs(hc - hd));
           if (slope > 6.5 || treeBlockedAt(wx, wz)) continue;
@@ -22163,6 +22303,212 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       crDefeatCheck();
       if (CR.dirty) { CR.dirty = false; crSave(); }
     }
+
+
+    /* ============================================================
+       REGIONS — what stands in them
+       Northreach Station: a polar research and listening post on a packed-snow runway, with
+       radomes, hangars and a mast. The Dust Sea strip: an oil field of nodding pumpjacks and
+       derricks around a sand runway. Both are friendly fields: land, stop, refuel and rearm.
+       Mount Kaela: a lava lake glowing in the crater, a steam-and-ash plume, and every minute
+       or two an eruption that throws burning rock high over the island (keep clear).
+       ============================================================ */
+    var REGW = { pumps: [], beacons: [], eruptT: 45, bombs: [], plumeT: 0, lava: null, t: 0 };
+    var REG_LAVA_SMOKE = new THREE.Color(1.0, 0.42, 0.16);
+    function regStripRibbon(st, base, line) {
+      var cv = document.createElement('canvas'); cv.width = 64; cv.height = 1024;
+      var c = cv.getContext('2d');
+      c.fillStyle = base; c.fillRect(0, 0, 64, 1024);
+      for (var i = 0; i < 2200; i++) { c.fillStyle = 'rgba(' + (Math.random() < 0.5 ? '40,40,40' : '255,255,255') + ',' + (Math.random() * 0.08) + ')'; c.fillRect(Math.random() * 64, Math.random() * 1024, 2, 3); }
+      c.fillStyle = line;
+      for (var y = 70; y < 954; y += 34) c.fillRect(31, y, 2, 16);
+      [16, 1008].forEach(function(y0) { for (var k = 0; k < 6; k++) c.fillRect(6 + k * 4.6 + (k > 2 ? 25 : 0), y0 - 12, 3, 24); });
+      var t = new THREE.CanvasTexture(cv); t.anisotropy = gfxAniso;
+      var g = new THREE.Group(); g.position.set(st.x, st.y + 0.12, st.z); g.rotation.y = Math.atan2(st.ux, st.uz);
+      var rw = new THREE.Mesh(new THREE.PlaneGeometry(st.W, st.L), new THREE.MeshStandardMaterial({ map: t, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
+      rw.rotation.x = -Math.PI / 2; rw.receiveShadow = true; g.add(rw);
+      scene.add(g);
+    }
+    function regAt(st, u, v) { return { x: st.x + st.ux * u - st.uz * v, z: st.z + st.uz * u + st.ux * v }; }
+    function regPlace(g, st, u, v, yaw, sink) {
+      var p = regAt(st, u, v);
+      g.position.set(p.x, getTerrainHeight(p.x, p.z) - (sink || 0.1), p.z);
+      g.rotation.y = Math.atan2(st.ux, st.uz) + (yaw || 0);
+      scene.add(g);
+      return g;
+    }
+    function regBuildNorthreach(st) {
+      regStripRibbon(st, '#c9ced3', 'rgba(60,70,80,.75)');
+      var white = samMat(0xe9ecef, 0.6, 0.1), orange = samMat(0xd0561d, 0.55, 0.2), steel = samMat(0x8c939a, 0.4, 0.7), dark = samMat(0x2b3036, 0.6, 0.3);
+      var side = st.W / 2;
+      // hangars (painted white over the war's olive)
+      [-120, -50].forEach(function(u) {
+        var h = warHangarModel(26, 32);
+        h.traverse(function(c) { if (c.isMesh && c.material === SAM_M.roof) c.material = white; });
+        regPlace(warBake(h), st, u, side + 90, Math.PI / 2);
+      });
+      // the station: orange modules on stilts, the way they build them on the ice
+      var stn = new THREE.Group();
+      [[0, 0], [22, 0], [11, 14]].forEach(function(o) {
+        stn.add(samBox(18, 6, 10, orange, o[0], 5.5, o[1]));
+        stn.add(samBox(18.6, 0.4, 10.6, white, o[0], 8.7, o[1]));
+        for (var k = 0; k < 4; k++) stn.add(samCyl(0.3, 0.3, 2.6, 6, steel, o[0] - 7 + k * 4.6, 1.3, o[1] + (k % 2 ? 4 : -4)));
+        for (var w = 0; w < 4; w++) stn.add(samBox(2.2, 1.2, 0.1, dark, o[0] - 6 + w * 4, 6, o[1] + 5.05));
+      });
+      regPlace(warBake(stn), st, 60, side + 110, Math.PI / 2);
+      // radomes: the golf balls on their plinths
+      [[150, 130, 11], [190, 95, 9], [215, 150, 8]].forEach(function(r) {
+        var g = new THREE.Group();
+        g.add(samCyl(r[2] * 0.75, r[2] * 0.85, 5, 14, white, 0, 2.5, 0));
+        var dome = new THREE.Mesh(new THREE.SphereGeometry(r[2], 20, 14), white); dome.position.y = 5 + r[2] * 0.82; g.add(dome);
+        regPlace(warBake(g), st, r[0], side + r[1]);
+      });
+      // mast with an obstruction light
+      var m = new THREE.Group();
+      for (var k = 0; k < 3; k++) { var a = k / 3 * Math.PI * 2; m.add(samCyl(0.12, 0.2, 46, 4, steel, Math.cos(a) * 0.9, 23, Math.sin(a) * 0.9)); }
+      regPlace(warBake(m), st, -10, side + 160);
+      var bp = regAt(st, -10, side + 160);
+      var bl = new THREE.Mesh(new THREE.SphereGeometry(0.6, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a1a, transparent: true }));
+      bl.position.set(bp.x, getTerrainHeight(bp.x, bp.z) + 46.5, bp.z); scene.add(bl); REGW.beacons.push(bl);
+      // fuel bladders and a couple of snowcats
+      [[-200, 60], [-185, 60]].forEach(function(o) { regPlace(warBake(stBuildFuelTank()), st, o[0], side + o[1]); });
+      [[20, 40], [32, 46]].forEach(function(o, i) {
+        var c = new THREE.Group();
+        c.add(samBox(2.6, 1.6, 4.6, orange, 0, 1.6, 0)); c.add(samBox(2.4, 1.0, 2.2, dark, 0, 2.6, 0.8));
+        [-1.3, 1.3].forEach(function(x) { c.add(samBox(0.8, 0.9, 5.2, dark, x, 0.5, 0)); });
+        regPlace(warBake(c), st, o[0], side + o[1], i * 0.7);
+      });
+    }
+    function regBuildPumpjack() {
+      var g = new THREE.Group(), steel = samMat(0x6b6f72, 0.5, 0.6), yellow = samMat(0xc9a227, 0.55, 0.3), dark = samMat(0x2a2a28, 0.7, 0.3);
+      g.add(samBox(3, 0.6, 10, SAM_M.concrete, 0, 0.3, 0));
+      [-0.9, 0.9].forEach(function(x) { var leg = samBox(0.25, 5.6, 0.25, steel, x, 3.2, 0); leg.rotation.z = -x * 0.08; g.add(leg); });
+      var beam = new THREE.Group(); beam.position.set(0, 6, 0); g.add(beam);
+      beam.add(samBox(0.5, 0.6, 9, yellow, 0, 0, 0.5));
+      var head = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.5, 16, 1, false, 0, Math.PI), yellow);
+      head.rotation.z = Math.PI / 2; head.rotation.y = Math.PI / 2; head.position.set(0, -0.3, 5.1); beam.add(head);
+      g.add(samBox(1.4, 1.6, 1.8, dark, 0, 1.4, -3.8));
+      var crank = new THREE.Group(); crank.position.set(0, 2.2, -3.8); g.add(crank);
+      crank.add(samBox(0.3, 2.6, 0.6, steel, 0.95, 0, 0)); crank.add(samBox(0.3, 2.6, 0.6, steel, -0.95, 0, 0));
+      g.add(samCyl(0.12, 0.12, 2.4, 6, steel, 0, 1.2, 5.6));
+      samShadow(g);
+      return { group: g, beam: beam, crank: crank, ph: Math.random() * 6 };
+    }
+    function regBuildDustSea(st) {
+      regStripRibbon(st, '#b59c74', 'rgba(250,245,230,.8)');
+      var side = st.W / 2, adobe = samMat(0xc28e5c, 0.9, 0), steel = samMat(0x707478, 0.5, 0.6);
+      [[-160, -40], [-150, -100], [-90, -150], [-30, -110], [40, -170], [110, -120]].forEach(function(o, i) {
+        var pj = regBuildPumpjack();
+        regPlace(pj.group, st, o[0], -side + o[1], i * 0.9);
+        REGW.pumps.push(pj);
+      });
+      // two derricks
+      [[200, -120], [250, -60]].forEach(function(o) {
+        var d = new THREE.Group(), H = 34;
+        [[-3, -3], [3, -3], [-3, 3], [3, 3]].forEach(function(l) { var leg = samCyl(0.18, 0.22, H, 4, steel, l[0] * 0.55, H / 2, l[1] * 0.55); leg.rotation.z = -l[0] * 0.04; leg.rotation.x = l[1] * 0.04; d.add(leg); });
+        for (var y = 4; y < H; y += 5) { var w = 3.4 * (1 - y / H * 0.6); d.add(samBox(w * 2, 0.15, 0.15, steel, 0, y, w)); d.add(samBox(w * 2, 0.15, 0.15, steel, 0, y, -w)); d.add(samBox(0.15, 0.15, w * 2, steel, w, y, 0)); d.add(samBox(0.15, 0.15, w * 2, steel, -w, y, 0)); }
+        d.add(samBox(8, 1, 8, SAM_M.concrete, 0, 0.5, 0));
+        regPlace(warBake(d), st, o[0], -side + o[1]);
+      });
+      [[-60, 110], [-40, 110], [-20, 110]].forEach(function(o) { regPlace(warBake(stBuildFuelTank()), st, o[0], side + o[1]); });
+      // a cluster of adobe buildings and a hangar for the field
+      [[60, 95, 14, 6, 10], [80, 120, 10, 5, 8], [40, 130, 12, 6, 9]].forEach(function(o) {
+        var b = new THREE.Group(); b.add(samBox(o[2], o[3], o[4], adobe, 0, o[3] / 2, 0)); b.add(samBox(o[2] + 0.6, 0.5, o[4] + 0.6, samMat(0x9b6b40, 0.9, 0), 0, o[3] + 0.2, 0));
+        regPlace(warBake(b), st, o[0], side + o[1]);
+      });
+      var hg = warHangarModel(24, 30);
+      hg.traverse(function(c) { if (c.isMesh && c.material === SAM_M.roof) c.material = samMat(0xb9a483, 0.7, 0.3); });
+      regPlace(warBake(hg), st, -130, side + 95, Math.PI / 2);
+    }
+    function regBuildKaela() {
+      var V = REG_VOLC, cy = getTerrainHeight(V.x, V.z);
+      // the lava lake: an emissive disc on the crater floor (bloom does the rest) and a light
+      var lava = new THREE.Mesh(new THREE.CircleGeometry(V.crater * 0.6, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 0.36, 0.08), fog: true }));
+      lava.rotation.x = -Math.PI / 2; lava.position.set(V.x, cy + 1.2, V.z); scene.add(lava);
+      REGW.lava = lava; REGW.craterY = cy;
+      var lavaTex = makeRadialGlowTexture('255,210,120', '255,90,20');
+      for (var i = 0; i < 40; i++) {
+        var s = new THREE.Sprite(new THREE.SpriteMaterial({ map: lavaTex, color: new THREE.Color(1.0, 0.45, 0.16), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+        s.visible = false; s.scale.set(9, 9, 1); scene.add(s);
+        REGW.bombs.push({ s: s, pos: new THREE.Vector3(), vel: new THREE.Vector3(), active: false, smokeT: 0 });
+      }
+    }
+    function regErupt() {
+      var V = REG_VOLC, top = new THREE.Vector3(V.x, REGW.craterY + 140, V.z), d = top.distanceTo(position);
+      triggerMissileBlast(top.clone());
+      for (var k = 0; k < 18; k++) samEmitSmoke(top, new THREE.Vector3((Math.random() - 0.5) * 30, 25 + Math.random() * 30, (Math.random() - 0.5) * 30), 70 + Math.random() * 50, 14, 0.75, 0.12);
+      REGW.bombs.forEach(function(b) {
+        b.active = true; b.pos.copy(top).add(new THREE.Vector3((Math.random() - 0.5) * 60, 0, (Math.random() - 0.5) * 60));
+        var a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 110;
+        b.vel.set(Math.cos(a) * sp * 0.6, 90 + Math.random() * 90, Math.sin(a) * sp * 0.6); b.s.visible = true; b.smokeT = 0;
+      });
+      if (d < 9000) {
+        if (typeof playMissileImpactSound === 'function') playMissileImpactSound();
+        if (d < 4000) { fxShake = Math.max(fxShake, 0.6 * (1 - d / 4000)); if (typeof gfxShockwave === 'function') gfxShockwave(top, 0.5); }
+        samToast('MOUNT KAELA IS ERUPTING', '#ff8a4a', 2.8);
+      }
+    }
+    var _regV = new THREE.Vector3();
+    function regUpdate(dt) {
+      REGW.t += dt;
+      // pumpjacks nod; the station's light blinks
+      REGW.pumps.forEach(function(p) { p.ph += dt * 1.6; p.beam.rotation.x = Math.sin(p.ph) * 0.32; p.crank.rotation.x = p.ph; });
+      REGW.beacons.forEach(function(b) { b.material.opacity = (REGW.t % 1.5) < 0.15 ? 1 : 0.15; });
+      if (!REGW.lava) return;
+      var V = REG_VOLC, dv = Math.hypot(position.x - V.x, position.z - V.z);
+      REGW.lava.material.color.setRGB(1.0, 0.33 + 0.05 * Math.sin(REGW.t * 2.1), 0.07);
+      // the plume, only drawn when you're near enough to see it
+      if (dv < 12000 && (REGW.plumeT -= dt) <= 0) {
+        REGW.plumeT = 0.12;
+        samEmitSmoke(_regV.set(V.x + (Math.random() - 0.5) * 80, REGW.craterY + 30, V.z + (Math.random() - 0.5) * 80),
+          new THREE.Vector3((Math.random() - 0.5) * 3 + 4, 14 + Math.random() * 6, (Math.random() - 0.5) * 3), 100 + Math.random() * 60, 18, 0.72, 0.3);
+        // lit from below by the lava lake
+        if (Math.random() < 0.5) samEmitSmoke(_regV.set(V.x + (Math.random() - 0.5) * 120, REGW.craterY + 8, V.z + (Math.random() - 0.5) * 120),
+          new THREE.Vector3(0, 8 + Math.random() * 4, 0), 40 + Math.random() * 20, 5, 0.45, 1, REG_LAVA_SMOKE);
+      }
+      if ((REGW.eruptT -= dt) <= 0) { REGW.eruptT = 70 + Math.random() * 60; if (dv < 14000) regErupt(); }
+      REGW.bombs.forEach(function(b) {
+        if (!b.active) return;
+        b.vel.y -= 9.8 * dt; b.pos.addScaledVector(b.vel, dt); b.s.position.copy(b.pos);
+        if ((b.smokeT -= dt) <= 0) { b.smokeT = 0.08; samEmitSmoke(b.pos, _regV.set(0, 1, 0), 9, 3, 0.55, 0.15); }
+        if (started && !crashing && !ejecting && b.pos.distanceTo(position) < 14) {
+          b.active = false; b.s.visible = false;
+          triggerMissileBlast(b.pos.clone()); gfxHurtKick = Math.max(gfxHurtKick, 0.8);
+          if (typeof kjWear === 'function') kjWear(0.12, 'lava');
+          samToast('HIT BY VOLCANIC ROCK', '#ff6a3a', 2);
+          if (Math.random() < 0.5) wreckDamage('flak'); else pvpDamage(45, null);
+          return;
+        }
+        var gh = Math.max(getTerrainHeight(b.pos.x, b.pos.z), WATER_LEVEL);
+        if (b.pos.y < gh) {
+          b.active = false; b.s.visible = false;
+          if (gh > WATER_LEVEL + 0.5) stIgniteFire(_regV.set(b.pos.x, gh + 1, b.pos.z).clone(), 6, 20);
+          else samEmitSmoke(_regV.set(b.pos.x, WATER_LEVEL + 1, b.pos.z), new THREE.Vector3(0, 6, 0), 14, 3, 0.6, 0.95);
+        }
+      });
+    }
+    // the chart's colours follow the regions too (0-255 sRGB)
+    function regMapColor(x, z, h, col) {
+      if (h < WATER_LEVEL + 0.3) return;
+      var dw = regDesertW(x, z), aw = regArcticW(x, z), V = REG_VOLC, vd = Math.hypot(x - V.x, z - V.z);
+      function mix(r, g, b, w) { col[0] += (r - col[0]) * w; col[1] += (g - col[1]) * w; col[2] += (b - col[2]) * w; }
+      if (dw > 0) { if (h > 34) mix(170, 96, 62, dw); else mix(204, 172, 126, dw); }
+      if (aw > 0) mix(h < WATER_LEVEL + 3.5 ? 186 : 228, h < WATER_LEVEL + 3.5 ? 210 : 234, h < WATER_LEVEL + 3.5 ? 226 : 240, aw);
+      if (vd < V.r * 1.3) { var vw = 1 - gfxSmoothstepJS(V.r * 1.05, V.r * 1.3, vd); if (vd < V.crater * 0.62) mix(255, 110, 30, vw); else mix(48, 44, 40, vw * (h < 70 ? 0.5 : 1)); }
+    }
+    function regStripAt(x, z) {
+      for (var i = 0; i < REG_STRIPS.length; i++) {
+        var st = REG_STRIPS[i], dx = x - st.x, dz = z - st.z, v = -dx * st.uz + dz * st.ux;
+        if (Math.abs(dx * st.ux + dz * st.uz) < st.L / 2 + 30 && v > -st.W / 2 - 20 && v < st.W / 2 + st.apron) return st;
+      }
+      return null;
+    }
+    (function regBuild() {
+      REG_STRIPS.forEach(function(st) { if (st.kind === 'arctic') regBuildNorthreach(st); else regBuildDustSea(st); });
+      regBuildKaela();
+      REG_STRIPS.forEach(function(st) { WAYPOINTS.push({ name: st.kind === 'arctic' ? 'NORTHREACH' : 'DUST SEA', x: st.x, z: st.z, color: st.kind === 'arctic' ? '#cfe6ff' : '#f0c88a', icon: 'field' }); });
+      WAYPOINTS.push({ name: 'MT. KAELA', x: REG_VOLC.x, z: REG_VOLC.z, color: '#ff8a4a', icon: 'volcano' });
+    })();
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
