@@ -10558,8 +10558,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     /* ---------- target picture ---------- */
     var CMD_TASKS = { sam: 'SAM SITE', convoy: 'CONVOY', aa: 'AA GUNS', marker: 'MARKER' };
-    function cmdAimPoints(task, from) {
+    function cmdAimPoints(task, from, c) {
       var pts = [];
+      if (c && c.sector) return warSectorPoints(c.sector, from);
+      if (task === 'marker' && CMD.marker && WAR.on && !(c && c.cap)) {
+        // a mark on (or near) an enemy sector means the whole sector: every key target still standing
+        var ws = warSectorAt(CMD.marker.x, CMD.marker.z, 700);
+        if (ws && ws.owner === 'red') { var sp = warSectorPoints(ws, from); if (sp.length) return sp; }
+      }
       if (task === 'sam') {
         if (samRadar && samRadar.alive) pts.push(samRadar.pos.clone());
         samLaunchers.forEach(function(L) { if (L.alive) pts.push(L.pos.clone()); });
@@ -10570,6 +10576,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
       } else if (task === 'convoy') {
         strikeTargets.forEach(function(t) { if (t.alive && t.kind === 'vehicle') pts.push(t.center.clone()); });
+        if (WAR.convoy) WAR.convoy.vehicles.forEach(function(t) { if (t.alive) pts.push(t.center.clone()); });
       } else if (task === 'aa') {
         AA.filter(function(g) { return g.alive; }).sort(function(a, b) { return a.pos.distanceTo(from) - b.pos.distanceTo(from); }).forEach(function(g) { pts.push(g.pos.clone()); });
       } else if (task === 'marker' && CMD.marker) {
@@ -10597,6 +10604,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       for (var i = 0; i < n; i++) {
         var a = awNew(kind, n > 1 ? call + '-' + (i + 1) : call, 'cmd');
         a.cmd = { task: task, base: base, orbit: Math.random() * 6.28, fireT: 2 + i * 2 };
+        if (task === 'marker' && WAR.on) { var cs = warSectorAt(CMD.marker.x, CMD.marker.z, 900); if (cs && cs.owner === 'blue' && kind === 'fighter') a.cmd.cap = true; }
         a.ammo = kind === 'fighter' ? 4 : kind === 'drone' ? 4 : 0;
         a.bombs = kind === 'bomber' ? 6 : 0;
         if (base === 'carrier') awPutOnCat(a, i % 2, i * 7);
@@ -10659,7 +10667,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         return;
       }
       // mission: transit to the target area, then attack
-      var pts = cmdAimPoints(c.task, a.pos);
+      var pts = cmdAimPoints(c.task, a.pos, c);
       if (!pts.length) { awRadio(a.name + ': target area clean, RTB', '#9fd0ff'); cmdGoHome(a, true); return; }
       c.time = (c.time || 0) + dt;
       if (c.time > 420) { cmdGoHome(a); return; }
@@ -10672,6 +10680,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (!c.onStation) { c.onStation = true; c.orbit = Math.atan2(a.pos.z - T.z, a.pos.x - T.x); if (!a.leader) awRadio(a.name + ': on station, ' + CMD_TASKS[c.task].toLowerCase() + ' in sight, engaging', '#ffd36a'); }
       c.orbit += dt * (a.speed / stand) * 0.9;
       awSteer(a, T.x + Math.cos(c.orbit) * stand, alt, T.z + Math.sin(c.orbit) * stand, dt, a.cruise * (a.kind === 'fighter' ? 0.8 : 1));
+      if (c.cap) { if (c.time > 300) cmdGoHome(a); return; }          // CAP: orbit and let the bandits come (raWingmen does the shooting)
       c.fireT -= dt;
       if (c.fireT <= 0 && a.ammo > 0 && d < stand + 900) {
         c.fireT = a.kind === 'drone' ? 5 : 3.5;
@@ -11177,11 +11186,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           AW.nextRecon = AW.t + 150 + Math.random() * 60;
           if (!busy.some(function(a) { return a.role === 'recon'; })) awLaunchRecon();
         }
-        if (AW.t > AW.nextStrike) {
+        if (AW.t > AW.nextStrike && !WAR.on) {
           AW.nextStrike = AW.t + 260 + Math.random() * 120;
           if (!busy.some(function(a) { return a.role === 'strike' || a.role === 'escort'; })) awLaunchStrike();
         }
-        if (AW.t > AW.nextBomber) {
+        if (AW.t > AW.nextBomber && !WAR.on) {
           AW.nextBomber = AW.t + 330 + Math.random() * 120;
           awLaunchBomber();
         }
@@ -20201,6 +20210,18 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     /* ---------- bringing the war to life ---------- */
     function warSector(name) { for (var i = 0; i < WAR.sectors.length; i++) if (WAR.sectors[i].name === name) return WAR.sectors[i]; return null; }
+    // the sector whose centre (or runway) is within r of a point
+    function warSectorAt(x, z, r) {
+      var best = null, bd = r;
+      WAR.sectors.forEach(function(s) { var d = Math.hypot(s.x - x, s.z - z) - (s.strip ? s.strip.L / 2 : 0); if (d < bd) { bd = d; best = s; } });
+      return best;
+    }
+    // aim points for an attack on a sector: its key targets still standing, nearest first
+    function warSectorPoints(s, from) {
+      var pts = s.keys.filter(function(k) { return k.alive; }).map(function(k) { return (k.center || k.pos).clone(); });
+      if (from) pts.sort(function(a, b) { return a.distanceTo(from) - b.distanceTo(from); });
+      return pts;
+    }
     function warSpawn() {
       if (WAR.built) return;
       WAR.built = true;
@@ -20248,6 +20269,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var s = o.war;
       if (!s || !WAR.on || WAR.loading) return;
       WAR.kills++; WAR.dirty = true;
+      if (s.isConvoy) {
+        var cl = warKeysLeft(s);
+        if (!quiet) { var cm = (o.label || 'VEHICLE') + ' DESTROYED — CONVOY ' + (s.keys.length - cl) + '/' + s.keys.length; stInfoFlash(cm); samToast(cm, '#7dff8a', 2.4); }
+        if (!cl) warConvoyDestroyed(s.convoy);
+        return;
+      }
       if (o.kind === 'jet' && s.stock !== undefined) s.stock = Math.max(0, s.stock - 2);
       if (s.owner !== 'red') return;
       s.known = true;
@@ -20464,6 +20491,24 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function warMapOver(ctx, toS, exp, inView, label, scale, rot) {
       if (!WAR.on) return;
       raMap(ctx, toS, exp, inView, label, rot || 0);
+      if (WAR.convoy) {
+        var cv = WAR.convoy, lv = cv.vehicles.filter(function(t) { return t.alive; })[0];
+        if (lv) {
+          var c0 = toS(lv.center.x, lv.center.z), c1 = toS(cv.to.x, cv.to.z);
+          ctx.strokeStyle = 'rgba(255,170,60,0.85)'; ctx.lineWidth = 1.4; ctx.setLineDash([3, 4]);
+          ctx.beginPath(); ctx.moveTo(c0.x, c0.y); ctx.lineTo(c1.x, c1.y); ctx.stroke(); ctx.setLineDash([]);
+          if (exp && inView(c0, 6)) label('CONVOY', c0.x, c0.y - 10, '#ffb04a', 8);
+        }
+      }
+      var mob = WAR.objective;
+      if (mob && mob.mission) {
+        var mp = toS(mob.x, mob.z), pu = 0.5 + 0.5 * Math.sin(performance.now() / 220);
+        if (inView(mp, 6)) {
+          ctx.strokeStyle = '#ffd25a'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(mp.x, mp.y - 9 - pu * 3); ctx.lineTo(mp.x + 9 + pu * 3, mp.y); ctx.lineTo(mp.x, mp.y + 9 + pu * 3); ctx.lineTo(mp.x - 9 - pu * 3, mp.y); ctx.closePath(); ctx.stroke();
+          if (exp) label('◎ ' + mob.name, mp.x, mp.y - 18, '#ffd25a', 9);
+        }
+      }
       var pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
       var detectR = SAM_DETECT_RANGE * (isStealthMode ? 0.33 : 1);
       WAR.sectors.forEach(function(s) {
@@ -20526,6 +20571,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       return { held: h, total: t };
     }
     function warPickObjective() {
+      var mo = msObjective();
+      if (mo) { WAR.objective = mo; return; }
       var best = null, bd = Infinity;
       WAR.sectors.forEach(function(s) {
         if (s.owner === 'blue' || !s.known) return;
@@ -20538,7 +20585,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       warHudEl.classList.toggle('hidden', !WAR.on);
       if (!WAR.on) return;
       var h = warHeld(), o = WAR.objective, html = '<span class="wf">⚑</span><b>' + h.held + '/' + h.total + '</b><span class="wl">SECTORS</span>';
-      if (WAR.won) html += '<span class="wo" style="color:#f3c454">ISLAND LIBERATED</span>';
+      var mt = msHudText();
+      if (!msBtn.parentNode && typeof kjBtns !== 'undefined' && kjBtns) kjBtns.insertBefore(msBtn, kjBtns.firstChild);
+      msBtn.classList.toggle('hidden', !WAR.on);
+      if (mt) {
+        var mo = WAR.objective;
+        html += '<span class="wo" style="color:#ffd25a">' + mt + (mo ? ' <i>' + mapFmtDist(Math.hypot(mo.x - position.x, mo.z - position.z)) + '</i>' : '') + '</span>';
+      } else if (WAR.won) html += '<span class="wo" style="color:#f3c454">ISLAND LIBERATED</span>';
       else if (RA.raid && RA.raid.target) html += '<span class="wo" style="color:#ff7a5a">⚠ RAID → ' + RA.raid.target.name + '</span>';
       else if (o) {
         var dx = o.x - position.x, dz = o.z - position.z;
@@ -20549,13 +20602,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     /* ---------- save / load ---------- */
     function warSave() {
-      if (!WAR.on) return;
-      var o = { v: 1, sig: warSig(), own: '', known: '', dead: {}, score: WAR.score, kills: WAR.kills, ak: WAR.airKills || 0, won: WAR.won ? 1 : 0, t: Math.round(WAR.playT), dmg: WAR.sectors.map(function(s) { return Math.round(s.dmg || 0); }) };
+      if (!WAR.on || WAR.applying) return;
+      var o = { v: 1, sig: warSig(), wv: {}, sur: {}, md: MS.done, mf: MS.failed, own: '', known: '', dead: {}, score: WAR.score, kills: WAR.kills, ak: WAR.airKills || 0, won: WAR.won ? 1 : 0, t: Math.round(WAR.playT), dmg: WAR.sectors.map(function(s) { return Math.round(s.dmg || 0); }) };
       WAR.sectors.forEach(function(s) {
         o.own += s.owner[0]; o.known += s.known ? '1' : '0';
         var d = [];
-        s.objs.forEach(function(ob, i) { if (!ob.alive && !ob.surrendered) d.push(i); });
+        var su = [];
+        s.objs.forEach(function(ob, i) { if (!ob.alive && !ob.surrendered) d.push(i); else if (ob.surrendered) su.push(i); });
         if (d.length) o.dead[s.id] = d;
+        if (su.length) o.sur[s.id] = su;
+        if (s.waves && s.waves.length) o.wv[s.id] = s.waves.join('');
       });
       try { localStorage.setItem(WAR_KEY, JSON.stringify(o)); } catch (e) {}
       WAR.dirty = false; WAR.saveT = 0;
@@ -20572,12 +20628,20 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var OWN = { b: 'blue', r: 'red', n: 'neutral' };
       WAR.score = o.score || 0; WAR.kills = o.kills || 0; WAR.airKills = o.ak || 0; WAR.won = !!o.won; WAR.playT = o.t || 0;
       if (o.dmg) WAR.sectors.forEach(function(s, i) { s.dmg = o.dmg[i] || 0; });
-      WAR.sectors.forEach(function(s, i) {
-        s.known = o.known[i] === '1' || s.owner0 !== 'red';
-        (o.dead[s.id] || []).forEach(function(k) { if (s.objs[k]) warKillQuiet(s.objs[k]); });
-        var ow = OWN[o.own[i]] || s.owner0;
-        if (ow === 'blue' && s.owner !== 'blue') warCapture(s, true);
-      });
+      MS.done = o.md || 0; MS.failed = o.mf || 0;
+      WAR.applying = true;
+      try {
+        WAR.sectors.forEach(function(s, i) {
+          s.known = o.known[i] === '1' || s.owner0 !== 'red';
+          // replay the reinforcements in order, so object indices line up with the save
+          String((o.wv && o.wv[s.id]) || '').split('').forEach(function(mode) { if (mode) warReinforce(s, mode); });
+          (o.dead[s.id] || []).forEach(function(k) { if (s.objs[k]) warKillQuiet(s.objs[k]); });
+          ((o.sur && o.sur[s.id]) || []).forEach(function(k) { if (s.objs[k] && s.objs[k].alive) warSurrender(s.objs[k]); });
+          var ow = OWN[o.own[i]] || s.owner0;
+          if (ow === 'blue' && s.owner !== 'blue') warCapture(s, true);
+          else if (ow !== s.owner) { s.owner = ow; warSetFlag(s); }
+        });
+      } finally { WAR.applying = false; }
       WAR.terrDirty = true;
     }
     // start (or resume) the campaign: build the garrisons, then take off from home
@@ -20585,6 +20649,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (fresh) { try { localStorage.removeItem(WAR_KEY); } catch (e) {} }
       var save = fresh ? null : warReadSave();
       WAR.on = true;
+      WAR.counterT = 480; MS.refreshT = 25;
       warSpawn();
       warApplySave(save);
       warPickObjective();
@@ -20612,6 +20677,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       WAR.playT += dt;
       warUpdateSams(dt);
       raUpdate(dt);
+      warUpdateConvoy(dt);
+      msUpdate(dt);
       WAR.lockBandit = RA.lock > WAR.lock;
       WAR.lock = Math.max(WAR.lock, RA.lock); WAR.search = WAR.search || RA.search;
       RA.emitters.forEach(function(e) { WAR.emitters.push(e); });
@@ -20620,6 +20687,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (_warSlowT >= 0.25) {
         var step = _warSlowT; _warSlowT = 0;
         warSpot(step);
+        warCounterUpdate(step);
         WAR.sectors.forEach(function(s) { if (s.dmg > 0) s.dmg = Math.max(0, s.dmg - step / 15); });
         warPickObjective();
         warHud();
@@ -20923,11 +20991,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         RA[kind] = b;
       });
     }
-    function raLaunchRaid(cap) {
+    function raLaunchRaid(cap, forced) {
       // the target: a sector you took back near the front, else home or the city
       var tgts = WAR.sectors.filter(function(s) { return s.owner === 'blue' && s.owner0 !== 'blue'; });
       tgts.sort(function(a, b) { return Math.hypot(a.x - cap.x, a.z - cap.z) - Math.hypot(b.x - cap.x, b.z - cap.z); });
-      var target = tgts.length && Math.random() < 0.7 ? tgts[0] : WAR.sectors[Math.random() < 0.5 ? 0 : 1];
+      var target = forced || (tgts.length && Math.random() < 0.7 ? tgts[0] : WAR.sectors[Math.random() < 0.5 ? 0 : 1]);
       var n = WAR.score > 4000 ? 2 : 1, bombers = [], escorts = [];
       for (var i = 0; i < n; i++) {
         var b = raAirborne(cap, 'bomber', 900);
@@ -21036,7 +21104,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       b.mission = 'rtb'; b.home = home; b.target = null;
     }
     function raFighter(b, dt) {
-      var limit = (b.mission === 'cap' ? 260 : 200) * (RA.tanker && RA.tanker.alive ? 2 : 1);
+      var limit = (b.mission === 'cap' ? 260 : b.mission === 'hunt' ? 420 : 200) * (RA.tanker && RA.tanker.alive ? 2 : 1);
       if (b.mission !== 'rtb' && b.mission !== 'escort' && b.life > limit) raRtb(b);
       if (b.mission === 'escort' && (!b.leader || !b.leader.alive || b.leader.mission === 'rtb') && !b.target) raRtb(b);
       // look for trouble every second or so
@@ -21044,6 +21112,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         b.scanT = 1 + Math.random() * 0.5;
         if (!b.target || !raTgtAlive(b.target)) {
           var t = b.mission === 'intercept' && raPlayerTargetable() ? 'player' : raPickTarget(b);
+          if (b.mission === 'hunt' && b.huntTarget && raTgtAlive(b.huntTarget) && !(t === 'player' && b.pos.distanceTo(position) < 1200)) t = b.huntTarget;
           if (t && b.mission === 'escort' && b.leader && raTgtPos(t).distanceTo(b.leader.pos) > 3500) t = null;
           if (t && t !== b.target) { b.target = t; b.engageT = 0; if (t === 'player' && b.pos.distanceTo(position) < 6000) samToast('BANDIT ENGAGING', '#ff8a6a', 1.6); }
         }
@@ -21052,7 +21121,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (b.target) {
         var T = b.target, tp = raTgtPos(T), d = b.pos.distanceTo(tp);
         b.engageT += dt;
-        if (d > 9000 || b.engageT > 120) { b.target = null; if (b.mission === 'intercept') raRtb(b); return; }
+        if (d > 9000 || b.engageT > (b.mission === 'hunt' ? 300 : 120)) { b.target = null; if (b.mission === 'intercept') raRtb(b); return; }
         var tv = raTgtVel(T, _raV2), lead = THREE.MathUtils.clamp(d / 380, 0, 1.6);
         var ax = tp.x + tv.x * lead, ay = tp.y + tv.y * lead, az = tp.z + tv.z * lead;
         if (b.breakT > 0) {
@@ -21069,7 +21138,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         // missile: a heater off the rail when the nose is on
         if (b.aam > 0 && b.missileCd <= 0 && d < 2300 && d > 450 && ang < 0.35 && !b.breakT) {
           b.aam--; b.missileCd = 10 + Math.random() * 6;
-          if (T === 'player') raFireAtPlayer(b); else awFire(b.pos.clone(), T, null, true, b);
+          if (T === 'player') raFireAtPlayer(b);
+          else {
+            var hm = awFire(b.pos.clone(), T, null, true, b);
+            // our bombers and wingmen get a chance to flare it off
+            if (Math.random() < 0.4) { hm.decoyPending = T; T.flareT = 1.0; }
+          }
         }
         // guns: short bursts inside 750 m with the pipper on
         if (d < 750 && ang < 0.12) {
@@ -21097,6 +21171,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var cx = b.capC.x + Math.cos(b.capA) * b.capR, cz = b.capC.z + Math.sin(b.capA) * b.capR;
         awSteer(b, cx, Math.max(getTerrainHeight(cx, cz), WATER_LEVEL) + 750, cz, dt, b.cruise);
         return;
+      }
+      if (b.mission === 'hunt') {
+        if (b.huntTarget && raTgtAlive(b.huntTarget)) { var hp = b.huntTarget.pos; awSteer(b, hp.x, Math.max(hp.y, 300), hp.z, dt, b.cruise * 1.25); return; }
+        if (b.huntPos && !b.huntTarget) {
+          // over the sector they were sent to hit, circling for targets
+          b.capA = (b.capA || Math.random() * 6.28) + dt * b.cruise / 900;
+          var hx = b.huntPos.x + Math.cos(b.capA) * 900, hz = b.huntPos.z + Math.sin(b.capA) * 900;
+          awSteer(b, hx, Math.max(getTerrainHeight(hx, hz), WATER_LEVEL) + 450, hz, dt, b.cruise);
+          return;
+        }
+        raRtb(b); return;
       }
       if (b.mission === 'intercept') {
         // vectored toward where you were last seen
@@ -21307,6 +21392,464 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
     }
 
+
+    /* ============================================================
+       CAMPAIGN — missions, briefings and the enemy's counterattacks
+       Col. Hart hands out tasking on the mission board (⚑ button or Tab): strike or SEAD a
+       sector, recon the unknown ones, fly CAP over a sector expecting fighters, escort a
+       Nighthawk to its target, pull a downed pilot out with the helicopter, stop a convoy,
+       or break up a strike on the carrier. Accepting one opens a codec briefing; the HUD
+       and the chart track it until it's done or failed. One mission at a time, three on offer.
+       The enemy doesn't sit still either: every so often a ground convoy rolls out of a red
+       sector toward one you took. If it gets there, the sector falls back to them and a fresh
+       garrison digs in. Bomb a captured sector to 100% and it's overrun on the spot.
+       ============================================================ */
+    var MS = { offers: [], active: null, seq: 1, done: 0, failed: 0, refreshT: 0, boardOpen: false, checkT: 0 };
+    var MS_ICON = { strike: '✶', sead: '▲', recon: '◎', cap: '⛨', escort: '✈', csar: '✚', interdict: '⛟', carrier: '⚓' };
+    var MS_TYPE = { strike: 'STRIKE', sead: 'SEAD', recon: 'RECON', cap: 'CAP', escort: 'ESCORT', csar: 'CSAR', interdict: 'INTERDICTION', carrier: 'CARRIER DEFENCE' };
+
+    /* ---------- ground convoys: counterattacks and resupply ---------- */
+    function warLaunchConvoy(from, to, kind) {
+      var conv = { from: from, to: to, kind: kind, lead: 0, speed: 9.5, vehicles: [], arrived: false };
+      var dx = to.x - from.x, dz = to.z - from.z, L = Math.hypot(dx, dz);
+      conv.dir = { x: dx / L, z: dz / L }; conv.len = Math.max(200, L - 160);
+      conv.sector = { name: 'CONVOY', isConvoy: true, owner: 'red', known: true, keys: [], objs: [], launchers: [], convoy: conv };
+      var list = [['APC', stBuildApc(), 5.5, 160, 60], ['TRUCK', stBuildTruck('cargo'), 5, 100, 40], ['FUEL TRUCK', stBuildTruck('tanker'), 5, 100, 50], ['TECHNICAL', stBuildTechnical(), 4, 90, 40]];
+      list.forEach(function(v, i) {
+        var t = stAddTarget({ kind: 'truck', label: v[0], group: v[1].group, wheels: v[1].wheels, hitR: v[2], maxHp: v[3], war: conv.sector, bounty: v[4], fuel: v[0] === 'FUEL TRUCK' });
+        t.slot = i; conv.vehicles.push(t); conv.sector.keys.push(t); conv.sector.objs.push(t);
+      });
+      ARS_TGT = null;
+      WAR.convoy = conv;
+      warMoveConvoy(conv, 0);
+      if (kind === 'counter') {
+        awRadio('OVERLORD: Enemy armour rolling out of ' + from.name + ' toward ' + to.name + '. Stop that convoy or we lose the sector!', '#ff9a7a');
+        warBanner('COUNTERATTACK', 'Convoy → ' + to.name, '#ff6a4a', 4);
+      } else awRadio('OVERLORD: Supply convoy heading for ' + to.name + '. Hit it before it gets there.', '#ffd27a');
+      msOfferInterdict();
+      return conv;
+    }
+    var _cvV = new THREE.Vector3();
+    function warMoveConvoy(conv, dt) {
+      conv.lead += conv.speed * dt;
+      var alive = 0;
+      conv.vehicles.forEach(function(t) {
+        if (!t.alive) { t.center.copy(t.group.position).add(_cvV.set(0, 1.8, 0)); return; }
+        alive++;
+        var s = Math.max(0, conv.lead - t.slot * 24);
+        var x = conv.from.x + conv.dir.x * (160 + s), z = conv.from.z + conv.dir.z * (160 + s);
+        var wob = Math.sin(s * 0.013 + t.slot) * 6;
+        x += -conv.dir.z * wob; z += conv.dir.x * wob;
+        var y = Math.max(getTerrainHeight(x, z), WATER_LEVEL) + 0.15;
+        t.group.position.set(x, y, z);
+        t.group.rotation.set(0, Math.atan2(conv.dir.x, conv.dir.z), 0);
+        t.center.set(x, y + 1.8, z);
+        if (t.wheels) { var spin = conv.speed * dt / 0.6; t.wheels.forEach(function(w) { w.rotation.x += spin; }); }
+        if (Math.random() < dt * 3) samEmitSmoke(_cvV.set(x, y + 0.6, z), _cvV.clone().set(0, 0.6, 0), 5, 2.2, 0.18, 0.75);
+      });
+      return alive;
+    }
+    function warUpdateConvoy(dt) {
+      var conv = WAR.convoy;
+      if (!conv) return;
+      var alive = warMoveConvoy(conv, dt);
+      if (!alive) return;
+      if (conv.lead >= conv.len) {
+        WAR.convoy = null;
+        conv.vehicles.forEach(function(t) { if (t.alive) { t.alive = false; t.surrendered = true; t.group.visible = false; } });
+        if (conv.kind === 'counter' && conv.to.owner === 'blue') warRetake(conv.to, conv.to.name + ' has been retaken by enemy armour!');
+        else if (conv.to.owner === 'red') { warReinforce(conv.to, 's'); awRadio('OVERLORD: The convoy made it — ' + conv.to.name + ' has been reinforced.', '#ff9a7a'); }
+        msCheck(true);
+      }
+    }
+    function warConvoyDestroyed(conv) {
+      if (WAR.convoy === conv) WAR.convoy = null;
+      WAR.score += 400; WAR.dirty = true;
+      warBanner('CONVOY DESTROYED', conv.to.name + ' is safe', '#7dff8a', 3.5);
+      awRadio('OVERLORD: Convoy destroyed. Good hunting.', '#9fd0ff');
+      msCheck(true);
+    }
+    // a fresh garrison: two flak guns and the vehicles that brought them. 's' = supply (adds to the
+    // garrison), 'r' = retaken (replaces it). Replayed in order when a campaign is loaded.
+    function warReinforce(s, mode) {
+      s.waves = s.waves || [];
+      s.waves.push(mode);
+      var k = s.waves.length, a0 = k * 1.3 + 0.4, start = s.objs.length, fresh = [];
+      var r1 = s.strip ? 140 : 75;
+      fresh.push(warAA(s, Math.cos(a0) * r1, Math.sin(a0) * r1));
+      fresh.push(warAA(s, Math.cos(a0 + 2.6) * r1, Math.sin(a0 + 2.6) * r1));
+      fresh.push(warStruct(s, 'truck', 'APC', stBuildApc().group, Math.cos(a0 + 1.3) * 40, Math.sin(a0 + 1.3) * 40, { hitR: 5.5, hp: 160, cy: 1.8, yaw: a0, bounty: 60 }));
+      fresh.push(warStruct(s, 'truck', 'TRUCK', stBuildTruck('cargo').group, Math.cos(a0 + 1.6) * 52, Math.sin(a0 + 1.6) * 52, { hitR: 5, hp: 100, cy: 1.8, yaw: a0 + 0.4 }));
+      // warAA / warStruct push onto s.keys; which keys count depends on the wave type
+      if (mode === 'r') s.keys = s.objs.slice(start);
+      ARS_TGT = null;
+      WAR.dirty = true; WAR.terrDirty = true;
+      return fresh;
+    }
+    function warRetake(s, msg) {
+      s.owner = 'red'; s.known = true; s.dmg = Math.min(s.dmg || 0, 40);
+      warReinforce(s, 'r');
+      warSetFlag(s);
+      WAR.terrDirty = true; WAR.dirty = true;
+      warBanner('SECTOR LOST', s.name, '#ff4a3a', 4);
+      awRadio('OVERLORD: ' + msg, '#ff9a7a');
+      warSave();
+    }
+    function warCounterUpdate(dt) {
+      WAR.sectors.forEach(function(s) {
+        // bombed flat: overrun on the spot
+        if (s.owner === 'blue' && s.owner0 !== 'blue' && s.dmg >= 100) warRetake(s, s.name + ' was bombed flat and overrun. Take it back!');
+      });
+      if (WAR.convoy || (WAR.counterT -= dt) > 0) return;
+      WAR.counterT = 360 + Math.random() * 180;
+      var best = null, bestSrc = null, bd = 7000;
+      WAR.sectors.forEach(function(s) {
+        if (s.owner !== 'blue' || s.owner0 === 'blue') return;
+        WAR.sectors.forEach(function(r) {
+          if (r.owner !== 'red' || r === s) return;
+          var d = Math.hypot(r.x - s.x, r.z - s.z);
+          if (d < bd) { bd = d; best = s; bestSrc = r; }
+        });
+      });
+      if (best) warLaunchConvoy(bestSrc, best, 'counter');
+    }
+
+    /* ---------- mission generation ---------- */
+    function msNear(list, x, z) { return list.slice().sort(function(a, b) { return Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z); }); }
+    function msNew(type, where, title, desc, reward, limit, extra) {
+      var m = { id: MS.seq++, type: type, where: where, title: title, desc: desc, reward: reward, score: Math.round(reward * 1.5), limit: limit, state: 'offer', t: 0 };
+      Object.assign(m, extra || {});
+      return m;
+    }
+    function msCandidates() {
+      var c = [], red = WAR.sectors.filter(function(s) { return s.owner === 'red'; });
+      var known = msNear(red.filter(function(s) { return s.known && (s.type !== 'capital' || red.length <= 2); }), position.x, position.z);
+      var unknown = msNear(red.filter(function(s) { return !s.known; }), position.x, position.z);
+      var blue = WAR.sectors.filter(function(s) { return s.owner === 'blue' && s.type !== 'field'; });
+      if (known[0]) {
+        var s0 = known[0];
+        if ((s0.type === 'sam' || s0.type === 'fortress' || s0.type === 'capital') && s0.radar && s0.radar.alive)
+          c.push(msNew('sead', s0, 'SEAD — ' + s0.name, 'Destroy the search radar and every SAM launcher at ' + s0.name + '.', 450, 600));
+        c.push(msNew('strike', s0, 'LIBERATE ' + s0.name, 'Knock out every key target at ' + s0.name + ' (' + WAR_TYPE[s0.type].label.toLowerCase() + ') so the garrison surrenders.', 600, 900));
+      }
+      if (unknown.length) {
+        var tg = unknown.slice(0, 2);
+        c.push(msNew('recon', tg[0], 'RECON — ' + tg.map(function(s) { return '?'; }).join(' & '), 'Find ' + tg.length + ' enemy position' + (tg.length > 1 ? 's' : '') + ' we have no eyes on. Fly within 3 km of each grid (10 km in the AWACS).', 300, 480, { targets: tg }));
+      }
+      if (known[1] || known[0]) {
+        var se = known[1] || known[0];
+        c.push(msNew('escort', se, 'ESCORT — NIGHTHAWK 7', 'A Nighthawk is going after ' + se.name + '. Keep the fighters off it until the bombs are away.', 550, 480));
+      }
+      if (blue.length) {
+        var sc = blue[Math.floor(Math.random() * blue.length)];
+        c.push(msNew('cap', sc, 'CAP OVER ' + sc.name, 'Intel expects fighters over ' + sc.name + '. Be there and shoot them down.', 400, 360));
+      }
+      if (known[0]) {
+        var sv = known[Math.floor(Math.random() * Math.min(3, known.length))], hx = WAR.sectors[0].x - sv.x, hz = WAR.sectors[0].z - sv.z, hl = Math.hypot(hx, hz) || 1;
+        var px = sv.x + hx / hl * 1400 + (Math.random() - 0.5) * 600, pz = sv.z + hz / hl * 1400 + (Math.random() - 0.5) * 600;
+        if (pz < oceanCoastZ(px) - 200 && getTerrainHeight(px, pz) > WATER_LEVEL + 2)
+          c.push(msNew('csar', { x: px, z: pz, name: 'PILOT' }, 'CSAR — SABER 2 IS DOWN', 'Saber 2 punched out near ' + sv.name + '. Take a helicopter, find the smoke and bring the pilot home.', 500, 600, { near: sv }));
+      }
+      if (CARRIER_READY && window.__carrierOutlineWorld && WAR.sectors.some(function(s) { return s.type === 'capital' && s.owner === 'red'; }))
+        c.push(msNew('carrier', { x: CARRIER.x, z: CARRIER.z, name: 'THE CARRIER' }, 'DEFEND THE CARRIER', 'Bombers are being readied for a strike on the carrier. Break the raid up before it gets there.', 550, 420));
+      return c;
+    }
+    function msRefresh(force) {
+      if (!force && MS.offers.length >= 3) return;
+      var c = msCandidates(), have = {};
+      MS.offers = MS.offers.filter(function(o) { return o.state === 'offer' && msValid(o); });
+      MS.offers.forEach(function(o) { have[o.type] = 1; });
+      if (MS.active) have[MS.active.type] = 1;
+      // a spread of types, freshest first
+      for (var i = c.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = c[i]; c[i] = c[j]; c[j] = t; }
+      c.sort(function(a, b) { return (a.type === 'interdict' ? -1 : 0) - (b.type === 'interdict' ? -1 : 0); });
+      c.forEach(function(o) { if (MS.offers.length < 3 && !have[o.type] && !(o.type === 'sead' && have.strike && o.where === (MS.offers.filter(function(x) { return x.type === 'strike'; })[0] || {}).where)) { MS.offers.push(o); have[o.type] = 1; } });
+      msBoardRender();
+    }
+    function msValid(o) {
+      if (o.type === 'strike' || o.type === 'sead' || o.type === 'escort') return o.where.owner === 'red';
+      if (o.type === 'recon') return o.targets.some(function(s) { return !s.known; });
+      if (o.type === 'interdict') return !!WAR.convoy;
+      return true;
+    }
+    function msOfferInterdict() {
+      var cv = WAR.convoy;
+      if (!cv || (MS.active && MS.active.type === 'interdict')) return;
+      MS.offers = MS.offers.filter(function(o) { return o.type !== 'interdict'; });
+      MS.offers.unshift(msNew('interdict', cv.to, 'INTERDICT — CONVOY TO ' + cv.to.name, 'Enemy vehicles are driving from ' + cv.from.name + ' to ' + cv.to.name + '. Destroy them before they arrive.', 450, 9999, { convoy: cv }));
+      if (MS.offers.length > 3) MS.offers.length = 3;
+      msBoardRender();
+      msPing();
+    }
+
+    /* ---------- briefings over the codec ---------- */
+    function msBriefLines(m) {
+      var cs = kjCallsign(), w = m.where.name, R = '◆' + m.reward;
+      var L = {
+        strike: function() { return [['H', cs + ', Hart. I want ' + w + ' back. It\'s a ' + WAR_TYPE[m.where.type].label.toLowerCase() + ' — take out every key target and the garrison will fold.'], ['Y', 'Copy. What are they holding there?'], ['H', 'Open your chart: the bar under the marker is what\'s left standing. Expect flak, and fighters if Kastor is awake. ' + R + ' on completion.']]; },
+        sead: function() { return [['H', cs + ', Hart. Their radar at ' + w + ' is covering the whole sector. Kill the search radar and the launchers.'], ['Y', 'Low and fast, then.'], ['H', 'Stay under thirty metres and they can\'t see you. Flares ready. ' + R + '.']]; },
+        recon: function() { return [['H', 'We\'re blind out past the hills, ' + cs + '. Two grids I need eyes on.'], ['Y', 'Just a look?'], ['H', 'Get within three kilometres of each and come home. The AWACS can do it from ten. ' + R + '.']]; },
+        cap: function() { return [['H', 'Signals intelligence says fighters are coming for ' + w + '. I want you overhead when they arrive.'], ['Y', 'How many?'], ['H', 'A pair, maybe more. Shoot them down before they do any damage. ' + R + '.']]; },
+        escort: function() { return [['H', 'Nighthawk 7 is rolling for ' + w + '. Their fighters will try to stop it. Don\'t let them.'], ['Y', 'I\'ll stay on its wing.'], ['H', 'It\'s slow and it\'s alone. Bombs on target, that\'s the job. ' + R + '.']]; },
+        csar: function() { return [['H', 'Saber 2 is down near ' + m.near.name + '. The pilot\'s alive and popping smoke.'], ['Y', 'I\'ll take the helo.'], ['H', 'Find the orange smoke, hover low, hold it while we winch, then land back at base. There may be flak nearby. ' + R + '.']]; },
+        interdict: function() { return [['H', 'That convoy is heading for ' + w + '. If it gets there we\'ll have to take the sector all over again.'], ['Y', 'Moving targets. Fine.'], ['H', 'Hellfires and Mavericks lock on to vehicles. Every truck. ' + R + '.']]; },
+        carrier: function() { return [['H', 'Kastor is sending bombers at the carrier. She can\'t defend herself against a stick of iron bombs.'], ['Y', 'On my way out to sea.'], ['H', 'Kill the bombers before they reach her. Escort if they bring one. ' + R + '.']]; }
+      };
+      return L[m.type]();
+    }
+    var msBriefSeq = 0;
+    function msBrief(m, after) {
+      var list = KJ_TALK.hart || (KJ_TALK.hart = []);
+      for (var i = list.length - 1; i >= 0; i--) if (String(list[i].id).indexOf('war_brief') === 0) list.splice(i, 1);
+      var e = { id: 'war_brief_' + (++msBriefSeq), pri: 0, when: function() { return false; }, p: msBriefLines(m), after: after };
+      list.push(e);
+      kjc.idx = Math.max(0, KJ_CONTACTS.findIndex(function(c) { return c.id === 'hart'; }));
+      kjCodecOpen();
+      if (kj.codecOpen) kjCodecCall(e.id); else after();
+    }
+
+    /* ---------- running a mission ---------- */
+    function msAccept(id) {
+      if (MS.active) return;
+      var m = MS.offers.filter(function(o) { return o.id === id; })[0];
+      if (!m || !msValid(m)) { msRefresh(true); return; }
+      MS.offers = MS.offers.filter(function(o) { return o !== m; });
+      msBoardClose();
+      msBrief(m, function() { msStart(m); });
+    }
+    function msStart(m) {
+      m.state = 'active'; m.t = 0; MS.active = m;
+      var w = m.where;
+      if (m.type === 'cap') m.waveAt = 25;
+      if (m.type === 'escort') {
+        var a = awNew('bomber', 'Nighthawk 7', 'cmd');
+        a.cmd = { task: 'marker', sector: w, base: 'field', orbit: 0, fireT: 2 };
+        a.bombs = 6; a.ammo = 0;
+        var st = cmdRunwayStart('field', 0);
+        a.pos.copy(st.p); a.heading = st.h; a.state = 'cmdhold'; a.t = 0; a.speed = 0; a.pitch = 0; a.roll = 0;
+        m.bomber = a; m.huntAt = 45;
+        awRadio('Nighthawk 7: rolling. Target ' + w.name + '. Glad of the company.', '#d9c7ff');
+      }
+      if (m.type === 'csar') warCsarStart(new THREE.Vector3(w.x, Math.max(getTerrainHeight(w.x, w.z), WATER_LEVEL) + 0.9, w.z));
+      if (m.type === 'carrier') {
+        var cap = WAR.sectors.filter(function(s) { return s.type === 'capital' && s.owner === 'red'; })[0];
+        if (cap) { raLaunchRaid(cap, { name: 'THE CARRIER', x: CARRIER.x, z: CARRIER.z, isCarrier: true }); m.raid = RA.raid; }
+      }
+      warBanner('MISSION', m.title, '#ffd25a', 3);
+      msBoardRender();
+    }
+    function msFinish(m, ok, why) {
+      if (MS.active !== m) return;
+      MS.active = null; m.state = ok ? 'done' : 'failed';
+      if (ok) {
+        MS.done++; coins += m.reward; lastCoinSaveAt = -999; maybeSaveCoins(elapsedSeconds);
+        WAR.score += m.score;
+        if (typeof playCoinChime === 'function') playCoinChime(3);
+        warBanner('MISSION COMPLETE', m.title + '  ·  +◆' + m.reward, '#7dff8a', 4.5);
+        awRadio('HART: ' + (why || 'Good work, ' + kjCallsign() + '.'), '#9dffb8');
+      } else {
+        MS.failed++;
+        warBanner('MISSION FAILED', why || m.title, '#ff6a4a', 4);
+        awRadio('HART: ' + (why || 'That one got away from us.') + ' Regroup.', '#9dffb8');
+      }
+      WAR.dirty = true;
+      setTimeout(function() { msRefresh(true); msPing(); }, 6000);
+    }
+    function msAbandon() { if (MS.active) msFinish(MS.active, false, 'Mission abandoned'); }
+    function msCheck(now) {
+      var m = MS.active;
+      if (!m) return;
+      var w = m.where;
+      if (m.t > m.limit) { msFinish(m, false, 'Out of time'); return; }
+      if (m.type === 'strike') { if (w.owner === 'blue') msFinish(m, true, w.name + ' is ours.'); }
+      else if (m.type === 'sead') {
+        if (w.owner === 'blue' || ((!w.radar || !w.radar.alive) && !w.launchers.some(function(L) { return L.alive; }) && (w !== WAR.iron || (!samRadar.alive && !samLaunchers.some(function(L) { return L.alive; })))))
+          msFinish(m, true, 'Their radar is down. Nice flying.');
+      } else if (m.type === 'recon') { if (m.targets.every(function(s) { return s.known; })) msFinish(m, true, 'Imagery received. We know what we\'re up against.'); }
+      else if (m.type === 'cap') {
+        if (m.wave && !m.wave.some(function(b) { return b.alive && b.state !== 'down'; })) msFinish(m, true, 'Sky over ' + w.name + ' is clear.');
+        else if (m.wave && m.overT > 90) { w.dmg = Math.min(100, (w.dmg || 0) + 25); msFinish(m, false, 'They hit ' + w.name + '.'); }
+      } else if (m.type === 'escort') {
+        var a = m.bomber;
+        if (a.bombs === 0) msFinish(m, true, 'Nighthawk 7 reports bombs on target.');
+        else if (!a.alive || a.state === 'down' || a.gone) msFinish(m, false, 'We lost Nighthawk 7.');
+      } else if (m.type === 'interdict') {
+        if (!WAR.convoy || WAR.convoy !== m.convoy) {
+          var any = m.convoy.vehicles.some(function(t) { return t.surrendered; });
+          msFinish(m, !any, any ? 'The convoy got through.' : 'Convoy destroyed. ' + w.name + ' holds.');
+        }
+      } else if (m.type === 'carrier') {
+        var R = m.raid;
+        if (!R || !R.bombers.some(function(b) { return b.alive && b.state !== 'down'; })) {
+          var hit = R && R.bombers.some(function(b) { return b.hitDone; });
+          msFinish(m, !hit, hit ? 'The carrier took hits.' : 'Raid destroyed. The carrier is safe.');
+        } else if (R.bombers.some(function(b) { return b.hitDone; })) msFinish(m, false, 'The carrier took hits.');
+      }
+    }
+    function msUpdate(dt) {
+      var m = MS.active;
+      if ((MS.refreshT -= dt) <= 0) {
+        var first = !MS.offers.length;
+        MS.refreshT = 240; msRefresh(true);
+        if (first && MS.offers.length) { msPing(); awRadio('HART: Tasking is up on the board, ' + kjCallsign() + '. Tab or ⚑ when you\'re ready.', '#9dffb8'); }
+      }
+      if (!m) return;
+      m.t += dt;
+      var w = m.where;
+      if (m.type === 'cap') {
+        if (m.waveAt > 0 && (m.waveAt -= dt) <= 0) {
+          // the attackers come from the nearest field (or straight out of Kastor, already airborne)
+          var base = raNearestBase(w.x, w.z) || WAR.sectors.filter(function(s) { return s.type === 'capital' && s.owner === 'red'; })[0];
+          if (base) {
+            var n = WAR.score > 5000 ? 3 : 2;
+            m.wave = [];
+            for (var i = 0; i < n; i++) {
+              var b = raAirborne(base, 'fighter', 900);
+              b.mission = 'hunt'; b.huntPos = { x: w.x, z: w.z }; b.huntTarget = null;
+              b.pos.add(new THREE.Vector3(i * 120, 0, i * 90));
+              m.wave.push(b);
+            }
+            awRadio('OVERLORD: Bandits inbound to ' + w.name + ', ' + n + ' contacts out of ' + base.name + '.', '#ff9a7a');
+          }
+        }
+        if (m.wave && m.wave.some(function(b) { return b.alive && b.state !== 'down' && Math.hypot(b.pos.x - w.x, b.pos.z - w.z) < 1500; })) m.overT = (m.overT || 0) + dt;
+      }
+      if (m.type === 'escort' && m.huntAt > 0 && (m.huntAt -= dt) <= 0 && m.bomber.alive) {
+        var hb = raNearestBase(m.bomber.pos.x, m.bomber.pos.z);
+        if (hb) {
+          raPair(hb, 'hunt', { huntTarget: m.bomber }).forEach(function(b) { b.huntTarget = m.bomber; });
+          awRadio('OVERLORD: Two bandits launching from ' + hb.name + ' — they\'re going for the Nighthawk!', '#ff9a7a');
+        } else {
+          var cp = WAR.sectors.filter(function(s) { return s.type === 'capital' && s.owner === 'red'; })[0];
+          if (cp) for (var k = 0; k < 2; k++) { var hx = raAirborne(cp, 'fighter', 900); hx.mission = 'hunt'; hx.huntTarget = m.bomber; }
+        }
+      }
+      if ((MS.checkT -= dt) <= 0) { MS.checkT = 0.5; msCheck(); }
+    }
+    // the mission target as an objective (for the HUD, the chart and the rim pointer)
+    function msObjective() {
+      var m = MS.active;
+      if (!m) return null;
+      if (m.type === 'escort' && m.bomber && m.bomber.alive) return { x: m.bomber.pos.x, z: m.bomber.pos.z, name: 'NIGHTHAWK 7', mission: true };
+      if (m.type === 'interdict' && m.convoy) {
+        var v = m.convoy.vehicles.filter(function(t) { return t.alive; })[0];
+        if (v) return { x: v.center.x, z: v.center.z, name: 'CONVOY', mission: true };
+      }
+      if (m.type === 'recon') { var u = m.targets.filter(function(s) { return !s.known; })[0]; if (u) return { x: u.x, z: u.z, name: 'RECON GRID', mission: true }; }
+      if (m.type === 'carrier' && m.raid) { var bb = m.raid.bombers.filter(function(b) { return b.alive && b.state !== 'down'; })[0]; if (bb) return { x: bb.pos.x, z: bb.pos.z, name: 'BOMBERS', mission: true }; }
+      if (m.type === 'csar') return null;     // the CSAR panel and marker take over
+      return { x: m.where.x, z: m.where.z, name: m.where.name, mission: true };
+    }
+    function msHudText() {
+      var m = MS.active;
+      if (!m) return null;
+      var w = m.where, p = '';
+      if (m.type === 'strike') p = (w.keys.length - warKeysLeft(w)) + '/' + w.keys.length;
+      else if (m.type === 'sead') p = (w.radar && w.radar.alive ? 'RADAR UP' : 'RADAR DOWN');
+      else if (m.type === 'recon') p = m.targets.filter(function(s) { return s.known; }).length + '/' + m.targets.length;
+      else if (m.type === 'cap') p = m.wave ? m.wave.filter(function(b) { return b.alive && b.state !== 'down'; }).length + ' LEFT' : 'WAIT ' + Math.ceil(m.waveAt) + 's';
+      else if (m.type === 'escort') p = m.bomber.bombs === 6 ? 'INBOUND' : 'BOMBING';
+      else if (m.type === 'interdict') p = m.convoy.vehicles.filter(function(t) { return t.alive; }).length + ' LEFT';
+      else if (m.type === 'carrier') p = m.raid ? m.raid.bombers.filter(function(b) { return b.alive && b.state !== 'down'; }).length + ' BOMBER' : '';
+      var left = m.limit < 9000 ? ' ' + Math.max(0, Math.floor((m.limit - m.t) / 60)) + ':' + String(Math.max(0, Math.floor((m.limit - m.t) % 60))).padStart(2, '0') : '';
+      return MS_ICON[m.type] + ' ' + MS_TYPE[m.type] + ' · ' + p + left;
+    }
+
+    /* ---------- CSAR with the campaign's own downed pilot ---------- */
+    function warCsarStart(pos) {
+      csar.pilotPos.copy(pos);
+      ejectPilot.visible = true; ejectPilot.position.copy(pos);
+      csar.returnType = selectedPlaneType === 'helicopter' ? null : selectedPlaneType;
+      if (selectedPlaneType !== 'helicopter') csarSwitchAircraft('helicopter');
+      heading = Math.atan2(-(pos.x - position.x), -(pos.z - position.z));
+      plane.rotation.y = heading;
+      samOnPlayerReset();
+      csar.active = true; csar.state = 'enroute'; csar.progress = 0; csar.t = 0; csar.war = true;
+      csarPanelEl.classList.remove('hidden');
+      csarMarkerEl.classList.remove('hidden');
+      samToast('CSAR: FIND THE ORANGE SMOKE', '#ffb347', 3);
+    }
+    function msOnCsarEnd(ok) {
+      var m = MS.active;
+      if (!m || m.type !== 'csar') return;
+      msFinish(m, ok, ok ? 'Saber 2 is home. Drinks are on him.' : 'We lost Saber 2.');
+    }
+
+    /* ---------- the mission board ---------- */
+    var msBoardEl = document.createElement('div');
+    msBoardEl.id = 'warBoard'; msBoardEl.className = 'hidden';
+    document.body.appendChild(msBoardEl);
+    var msBtn = document.createElement('button');
+    msBtn.title = 'Mission board (Tab)'; msBtn.setAttribute('aria-label', 'Mission board'); msBtn.textContent = '⚑'; msBtn.className = 'hidden';
+    msBtn.addEventListener('click', function(e) { e.stopPropagation(); msBoardOpen(); });
+    (function() {
+      var css = document.createElement('style');
+      css.textContent =
+        '#warBoard{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;padding:14px;background:rgba(3,6,10,.6);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);font-family:-apple-system,system-ui,sans-serif;color:#e9eef2}' +
+        '#warBoard.hidden{display:none}' +
+        '#warBoard .wb{width:min(760px,100%);max-height:100%;overflow:auto;background:rgba(10,13,18,.95);border:1px solid rgba(255,210,90,.25);border-radius:4px;padding:16px 18px}' +
+        '#warBoard .wbh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}' +
+        '#warBoard .wbh h3{margin:0;font-size:10.5px;letter-spacing:.3em;text-transform:uppercase;color:#ffd25a}' +
+        '#warBoard .wbh span{font:700 10px ui-monospace,Menlo,monospace;color:#8d99a3;letter-spacing:.08em}' +
+        '#warBoard .wbx{appearance:none;cursor:pointer;border:0;background:rgba(255,255,255,.08);color:#e9eef2;width:30px;height:30px;border-radius:50%;font-size:13px}' +
+        '#warBoard .wbl{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}' +
+        '#warBoard .wc{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid rgba(255,255,255,.08);border-left:3px solid #ffd25a;border-radius:2px;background:rgba(255,255,255,.03)}' +
+        '#warBoard .wc.act{border-left-color:#7dff8a;background:rgba(60,140,80,.12)}' +
+        '#warBoard .wc i{font-style:normal;font:800 10px ui-monospace,Menlo,monospace;letter-spacing:.14em;color:#ffb08a}' +
+        '#warBoard .wc b{font-size:14px;font-weight:800;letter-spacing:.04em}' +
+        '#warBoard .wc p{margin:0;font-size:12px;line-height:1.45;color:#aeb9c1;flex:1}' +
+        '#warBoard .wc em{font-style:normal;font:700 11px ui-monospace,Menlo,monospace;color:#8d99a3}' +
+        '#warBoard .wc em .g{color:#f3c454}' +
+        '#warBoard .wc button{appearance:none;cursor:pointer;margin-top:4px;padding:9px;border-radius:2px;border:1px solid rgba(255,210,90,.5);background:rgba(255,190,60,.16);color:#fff;font:800 11px -apple-system,system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase}' +
+        '#warBoard .wc button:disabled{opacity:.35;cursor:default}' +
+        '#warBoard .wc button.ab{border-color:rgba(255,120,90,.5);background:rgba(255,90,60,.14)}' +
+        '#warBoard .wf{margin-top:12px;font:700 10px ui-monospace,Menlo,monospace;color:#7f8b94;letter-spacing:.08em}' +
+        '@media (max-width:700px){#warBoard .wbl{grid-template-columns:1fr}}' +
+        '@media (max-height:520px) and (orientation:landscape){#warBoard .wbl{grid-template-columns:repeat(3,1fr)}#warBoard .wc p{font-size:10.5px}#warBoard .wb{padding:10px 12px}}';
+      document.head.appendChild(css);
+    })();
+    function msDist(w) { return mapFmtDist(Math.hypot(w.x - position.x, w.z - position.z)); }
+    function msBoardRender() {
+      if (!MS.boardOpen) return;
+      var cards = [];
+      if (MS.active) {
+        var m = MS.active;
+        cards.push('<div class="wc act"><i>' + MS_ICON[m.type] + ' ' + MS_TYPE[m.type] + ' · ACTIVE</i><b>' + m.title + '</b><p>' + m.desc + '</p><em>' + (msHudText() || '') + ' · ' + msDist(m.where) + ' · <span class="g">◆' + m.reward + '</span></em><button class="ab" data-ab="1">Abandon</button></div>');
+      }
+      MS.offers.forEach(function(o) {
+        cards.push('<div class="wc"><i>' + MS_ICON[o.type] + ' ' + MS_TYPE[o.type] + '</i><b>' + o.title + '</b><p>' + o.desc + '</p><em>' + msDist(o.where) + ' · <span class="g">◆' + o.reward + '</span>' + (o.limit < 9000 ? ' · ' + Math.round(o.limit / 60) + ' min' : '') + '</em><button data-id="' + o.id + '"' + (MS.active ? ' disabled' : '') + '>Accept</button></div>');
+      });
+      if (!cards.length) cards.push('<div class="wc"><b>No tasking right now</b><p>Check back in a few minutes.</p></div>');
+      var h = warHeld();
+      msBoardEl.innerHTML = '<div class="wb"><div class="wbh"><h3>Col. Hart · Tasking</h3><span>' + h.held + '/' + h.total + ' SECTORS · ' + MS.done + ' DONE · ' + MS.failed + ' FAILED</span><button class="wbx" aria-label="Close">✕</button></div>' +
+        '<div class="wbl">' + cards.join('') + '</div><div class="wf">Tab / ⚑ opens this board · one mission at a time · the game is paused while it\'s open</div></div>';
+    }
+    msBoardEl.addEventListener('click', function(e) {
+      var t = e.target;
+      if (t === msBoardEl || t.classList.contains('wbx')) { msBoardClose(); return; }
+      if (t.dataset && t.dataset.id) msAccept(+t.dataset.id);
+      else if (t.dataset && t.dataset.ab) { msAbandon(); msBoardRender(); }
+    });
+    function msBoardOpen() {
+      if (!WAR.on || !started || kj.codecOpen || kj.photoOn) return;
+      msRefresh();
+      MS.boardOpen = true; kj.paused = true;
+      Object.keys(keys).forEach(function(k) { keys[k] = false; });
+      msBoardRender();
+      msBoardEl.classList.remove('hidden');
+      msBtn.classList.remove('ring');
+    }
+    function msBoardClose() {
+      MS.boardOpen = false; kj.paused = kj.codecOpen || kj.photoOn;
+      msBoardEl.classList.add('hidden');
+    }
+    function msPing() { if (WAR.on && !MS.active) { msBtn.classList.add('ring'); } }
+    window.addEventListener('keydown', function(e) {
+      if (e.code !== 'Tab' || !WAR.on || !started) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (MS.boardOpen) msBoardClose(); else msBoardOpen();
+    }, { capture: true });
+
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
        After an ejection, once the pilot is on the ground you can fly a
@@ -21372,6 +21915,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       samToast('CSAR: FIND THE ORANGE SMOKE', '#ffb347', 3);
     }
     function csarEnd(msg, color, reward) {
+      if (csar.war) { csar.war = false; msOnCsarEnd(!!reward); }
       csar.active = false; csar.state = 'idle';
       csarPanelEl.classList.add('hidden'); csarMarkerEl.classList.add('hidden');
       csarCable.visible = false; csarStrobe.sprite.visible = false;
