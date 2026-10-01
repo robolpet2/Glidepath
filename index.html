@@ -374,7 +374,7 @@
   #hud .stats b{ color:var(--off); }
   #hud .stats .best b{ color:var(--red); }
 
-  /* ---------- ring rush: coins + streak ---------- */
+  /* ---------- coins + likes row ---------- */
   #hud .ringStats{
     display:flex; justify-content:space-between; align-items:baseline;
     font-family:ui-monospace,Consolas,monospace; font-size:11.5px; color:#c7cdd3;
@@ -382,48 +382,8 @@
   }
   #hud .ringStats .coins{ color:var(--gold); display:flex; align-items:center; gap:4px; }
   #hud .ringStats .coins b{ color:var(--gold); font-size:13px; text-shadow:0 0 6px rgba(232,180,74,.5); }
-  #hud .ringStats .streak{ color:var(--cyan); }
-  #hud .ringStats .streak b{ color:var(--cyan); font-size:13px; text-shadow:0 0 6px rgba(56,212,240,.5); }
   #hud .ringStats.hidden{ display:none; }
 
-  #ringPopup{
-    position:fixed; z-index:14; pointer-events:none;
-    left:50%; top:38%;
-    transform:translate(-50%,-50%) scale(.7);
-    font:800 clamp(20px,5vw,34px)/1 ui-monospace,"SF Mono",Consolas,monospace;
-    letter-spacing:.04em; color:var(--gold);
-    text-shadow:0 0 18px rgba(232,180,74,.65), 0 2px 0 rgba(0,0,0,.4);
-    opacity:0; white-space:nowrap; text-align:center;
-  }
-  #ringPopup span{
-    display:block; font:700 11px/1 -apple-system,sans-serif; letter-spacing:.22em;
-    text-transform:uppercase; color:var(--cyan); margin-top:4px;
-    text-shadow:0 0 10px rgba(56,212,240,.55);
-  }
-  #ringPopup.show{ animation:ringPopupPop .78s cubic-bezier(.2,1.4,.4,1) forwards; }
-  @keyframes ringPopupPop{
-    0%{ opacity:0; transform:translate(-50%,-50%) scale(.6); }
-    18%{ opacity:1; transform:translate(-50%,-50%) scale(1.12); }
-    32%{ transform:translate(-50%,-50%) scale(1); }
-    78%{ opacity:1; transform:translate(-50%,-58%) scale(1); }
-    100%{ opacity:0; transform:translate(-50%,-72%) scale(.94); }
-  }
-
-  #streakBanner{
-    position:fixed; z-index:13; pointer-events:none;
-    left:50%; top:calc(14px + env(safe-area-inset-top));
-    transform:translateX(-50%);
-    background:
-      var(--hatch),
-      linear-gradient(180deg, rgba(232,180,74,.22), rgba(10,12,16,.82));
-    border:1px solid rgba(232,180,74,.4);
-    border-radius:20px; padding:5px 16px;
-    font:800 12px/1 ui-monospace,Consolas,monospace; letter-spacing:.1em;
-    color:var(--gold); text-transform:uppercase;
-    box-shadow:0 0 20px rgba(232,180,74,.3), 0 4px 14px rgba(0,0,0,.4);
-    opacity:0; transition:opacity .25s ease, transform .25s ease;
-  }
-  #streakBanner.show{ opacity:1; }
 
   /* ---------- minimap ---------- */
   #miniMapWrap{
@@ -686,7 +646,6 @@
   #gpFps.hidden{ display:none; }
   /* HUD off / minimap off */
   body.gp-nohud #hud, body.gp-nohud #miniMapWrap, body.gp-nohud #kjTop, body.gp-nohud #rwrPanel, body.gp-nohud #controlHint, body.gp-nohud #arsPanel,
-  body.gp-nohud #streakBanner, body.gp-nohud #ringPopup{ visibility:hidden !important; }
   body.gp-nomap #miniMapWrap{ visibility:hidden !important; }
 
   @media (pointer: coarse) { #gpMenu .gpm-item kbd{ display:none; } }
@@ -1417,7 +1376,7 @@
           <input id="mpRoom" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Room (blank = public)">
         </div>
       </div>
-      <p class="ss-note">You start on the runway at a standstill: throttle up to roll, ease back to lift off. Gold rings appear once you're airborne; chain them for a multiplier.</p>
+      <p class="ss-note">You start on the runway at a standstill: throttle up to roll, ease back to lift off. Destroy targets, fly rescues and run cargo to earn coins for new paint.</p>
     </aside>
 
     <div class="ss-tip" id="ssTip"></div>
@@ -1507,7 +1466,6 @@
     </div>
     <div class="ringStats">
       <span class="coins">◆ <b id="coinVal">0</b></span>
-      <span class="streak">x<b id="streakVal">0</b></span>
     </div>
     <div class="gauge hidden" id="hullGauge">
       <div class="row1"><span class="label">HULL</span><span class="value"><span id="hullVal">100</span><span class="unit">%</span></span></div>
@@ -1516,8 +1474,6 @@
     <div id="mpHudRow" class="mpHudRow offline"><span class="dot"></span><span id="mpHudText">OFFLINE</span></div>
   </div>
 
-  <div id="streakBanner"></div>
-  <div id="ringPopup"></div>
 
   <div id="crashFlash"></div>
   <div id="crashMsg" class="hidden">TERRAIN CONTACT<span>respawning…</span></div>
@@ -6365,7 +6321,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var SS_TIPS = [
         'Lock on with the nose, wait for the steady tone, then fire.',
         'The hangar sets what each aircraft carries: Hellfires, Paveways, cluster bombs.',
-        'Fly through the gold rings in a chain to multiply your coins.',
+        'Every target you destroy pays coins. Spend them on paint schemes.',
         'The flak guns lead you. Jink, or fly low and let the ground hide you.',
         'Press I in flight for the codec. Someone is always listening.',
         'Eject, and a rescue helicopter can come for you.',
@@ -7117,145 +7073,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     /* ============================================================
-       RING RUSH — floating gold rings scattered along the flight path.
-       Fly through one to bank coins; chain them quickly (within
-       RING_CHAIN_WINDOW of each other) to build a streak multiplier.
-       Miss the window and the streak resets to zero on the next catch.
-       A pool of RING_POOL_COUNT rings is recycled forever around the
-       player the same way clouds are — never "runs out", never needs
-       per-chunk bookkeeping, works identically over water, city, or
-       open terrain since it just samples getTerrainHeight for clearance.
+       COINS — earned from strikes, rescues and cargo runs, spent on paint
+       schemes in the start menu. Banked to storage every few seconds.
        ============================================================ */
-    var RING_POOL_COUNT = 26;
-    var RING_SPAWN_MIN_DIST = 320;   // how far ahead of the player, at minimum, a fresh ring lands
-    var RING_SPAWN_MAX_DIST = 900;
-    var RING_RECYCLE_DIST_SQ = 1500 * 1500; // rings this far behind the player get reused
-    var RING_RADIUS_TUBE = 9;        // torus outer ring radius (the hole a plane flies through)
-    var RING_TUBE_THICKNESS = 0.85;
-    var RING_MIN_CLEARANCE = 55;     // min height above terrain/water a ring can spawn at
-    var RING_MAX_CLEARANCE = 240;
-    var RING_CHAIN_WINDOW = 4.2;     // seconds allowed between catches to keep the streak alive
-    var RING_BASE_COINS = 10;
-    var rings = [];
     var coins = 0, bestCoins = 0;
-    var ringStreak = 0, bestStreak = 0;
-    var lastRingCatchAt = -999;
     var lastCoinSaveAt = -999;
-    var ringsEnabled = true; // off while grounded/crashing/ejecting so nothing fires mid-respawn
 
-    function ringMultiplierFor(streak) {
-      // +1 coin multiplier per 3 consecutive catches, capped so payouts stay sane at long runs
-      return 1 + Math.min(6, Math.floor(streak / 3));
-    }
-
-    function makeRingMesh() {
-      var g = new THREE.Group();
-      var torusGeo = new THREE.TorusGeometry(RING_RADIUS_TUBE, RING_TUBE_THICKNESS, 10, 28);
-      var mat = new THREE.MeshStandardMaterial({
-        color: 0xe8b44a, emissive: 0xe8b44a, emissiveIntensity: 0.55,
-        roughness: 0.35, metalness: 0.55, flatShading: true
-      });
-      var torus = new THREE.Mesh(torusGeo, mat);
-      g.add(torus);
-      // thin inner halo disc — a soft glow plane facing the direction rings are normally
-      // approached from, purely cosmetic, gives the ring a "portal" look at a distance
-      var haloTex = makeRadialGlowTexture('255,214,140', '232,180,74');
-      var haloMat = new THREE.SpriteMaterial({ map: haloTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.5 });
-      var halo = new THREE.Sprite(haloMat);
-      halo.scale.set(RING_RADIUS_TUBE * 2.6, RING_RADIUS_TUBE * 2.6, 1);
-      g.add(halo);
-      g.userData.torus = torus;
-      g.userData.halo = halo;
-      scene.add(g);
-      return g;
-    }
-
-    function placeRing(ring, px, pz, pheading) {
-      // scatter rings in a loose cone ahead of the current heading rather than a straight
-      // line, so the path feels like a trail to chase rather than a single-file corridor
-      var dist = RING_SPAWN_MIN_DIST + Math.random() * (RING_SPAWN_MAX_DIST - RING_SPAWN_MIN_DIST);
-      var spread = (Math.random() - 0.5) * 1.1; // radians either side of current heading
-      var ang = pheading + spread;
-      var x = px + Math.sin(ang) * dist;
-      var z = pz + Math.cos(ang) * dist;
-      var groundH = Math.max(getTerrainHeight(x, z), WATER_LEVEL);
-      var clearance = RING_MIN_CLEARANCE + Math.random() * (RING_MAX_CLEARANCE - RING_MIN_CLEARANCE);
-      var y = groundH + clearance;
-      ring.position.set(x, y, z);
-      // orient the torus so its hole faces roughly back toward where the player is coming
-      // from, tilted with a little random bank/pitch so consecutive rings don't feel robotic
-      ring.rotation.set(
-        THREE.MathUtils.degToRad((Math.random() - 0.5) * 30),
-        ang + Math.PI / 2 + (Math.random() - 0.5) * 0.5,
-        THREE.MathUtils.degToRad((Math.random() - 0.5) * 20)
-      );
-      ring.userData.consumed = false;
-      ring.userData.pulsePhase = Math.random() * Math.PI * 2;
-      ring.visible = true;
-      ring.userData.torus.material.emissiveIntensity = 0.55;
-      ring.userData.torus.scale.setScalar(1);
-      ring.userData.halo.material.opacity = 0.5;
-    }
-
-    function initRings() {
-      for (var i = 0; i < RING_POOL_COUNT; i++) {
-        var ring = makeRingMesh();
-        // scatter the initial pool out along the runway heading so the first few appear
-        // shortly after takeoff instead of the player waiting a lap for the pool to arrive
-        placeRing(ring, RUNWAY_CENTER_X, RUNWAY_CENTER_Z, Math.PI);
-        ring.position.z -= i * 40; // stagger initial spacing out along the departure corridor
-        rings.push(ring);
-      }
-    }
-
-    function recycleRings(px, pz, pheading) {
-      for (var i = 0; i < rings.length; i++) {
-        var r = rings[i];
-        var dx = r.position.x - px, dz = r.position.z - pz;
-        if (dx * dx + dz * dz > RING_RECYCLE_DIST_SQ) {
-          placeRing(r, px, pz, pheading);
-        }
-      }
-    }
-
-    function updateRingVisuals(dt, elapsed) {
-      for (var i = 0; i < rings.length; i++) {
-        var r = rings[i];
-        if (r.userData.consumed) continue;
-        r.userData.torus.rotation.z += dt * 0.6;
-        var pulse = Math.sin(elapsed * 2.4 + r.userData.pulsePhase) * 0.5 + 0.5;
-        r.userData.torus.material.emissiveIntensity = 0.4 + pulse * 0.35;
-        r.userData.halo.material.opacity = 0.35 + pulse * 0.22;
-      }
-    }
-
-    var ringPopupEl = document.getElementById('ringPopup');
-    var ringPopupTimeout = null;
-    function showRingPopup(coinsGained, multiplier, streakNow) {
-      if (!ringPopupEl) return;
-      ringPopupEl.innerHTML = '+' + coinsGained + '<span>' +
-        (multiplier > 1 ? ('x' + multiplier + ' STREAK ' + streakNow) : ('STREAK ' + streakNow)) +
-        '</span>';
-      ringPopupEl.classList.remove('show');
-      void ringPopupEl.offsetWidth; // restart the CSS animation
-      ringPopupEl.classList.add('show');
-      if (ringPopupTimeout) clearTimeout(ringPopupTimeout);
-      ringPopupTimeout = setTimeout(function() { ringPopupEl.classList.remove('show'); }, 820);
-    }
-
-    var streakBannerEl = document.getElementById('streakBanner');
-    var streakBannerTimeout = null;
-    function flashStreakBanner(text) {
-      if (!streakBannerEl) return;
-      streakBannerEl.textContent = text;
-      streakBannerEl.classList.add('show');
-      if (streakBannerTimeout) clearTimeout(streakBannerTimeout);
-      streakBannerTimeout = setTimeout(function() { streakBannerEl.classList.remove('show'); }, 1800);
-    }
-
-    // short ascending chime — pitch rises with the current multiplier so bigger streaks
-    // audibly sound "bigger" without needing separate sample assets
-    function playRingChime(multiplier) {
+    function playCoinChime(multiplier) {
       if (!audioCtx || !soundEnabled) return;
       var now = audioCtx.currentTime;
       var baseFreq = 660 + Math.min(multiplier, 7) * 90;
@@ -7273,68 +7097,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
     }
 
-    // the next ring spawns 320-900 m ahead, so a fixed window only let the fast jets chain at all:
-    // give every aircraft time to cover the far spawn distance at its top speed
-    function ringChainWindow() {
-      var p = PLANE_TYPES[selectedPlaneType], v = p ? p.maxSpeedKmh / 3.6 : 194;
-      return THREE.MathUtils.clamp(RING_SPAWN_MAX_DIST / Math.max(v, 30) + 1, RING_CHAIN_WINDOW, 12);
-    }
-    function catchRing(ring, nowSeconds) {
-      ring.userData.consumed = true;
-      ring.visible = false;
-
-      var withinChain = (nowSeconds - lastRingCatchAt) <= ringChainWindow();
-      ringStreak = withinChain ? ringStreak + 1 : 1;
-      lastRingCatchAt = nowSeconds;
-
-      var multiplier = ringMultiplierFor(ringStreak);
-      var coinsGained = RING_BASE_COINS * multiplier;
-      coins += coinsGained;
-
-      if (ringStreak > bestStreak) {
-        bestStreak = ringStreak;
-        if (bestStreak > 0 && bestStreak % 5 === 0) flashStreakBanner(bestStreak + ' RING STREAK — NEW BEST');
-      }
-
-      playRingChime(multiplier);
-      showRingPopup(coinsGained, multiplier, ringStreak);
-      maybeSaveRingProgress(nowSeconds);
-
-      // respawn this ring further down the flight path immediately so the pool never thins out
-      placeRing(ring, position.x, position.z, heading);
-    }
-
-    function updateRingCollisions(dt, nowSeconds) {
-      if (!ringsEnabled) return;
-      // streak expires quietly (no popup) once the chain window lapses with no new catch
-      if (ringStreak > 0 && (nowSeconds - lastRingCatchAt) > ringChainWindow()) {
-        ringStreak = 0;
-      }
-      var catchRadiusSq = (RING_RADIUS_TUBE - 1.5) * (RING_RADIUS_TUBE - 1.5);
-      for (var i = 0; i < rings.length; i++) {
-        var r = rings[i];
-        if (r.userData.consumed) continue;
-        var dx = position.x - r.position.x;
-        var dy = position.y - r.position.y;
-        var dz = position.z - r.position.z;
-        var distSq = dx * dx + dy * dy + dz * dz;
-        // broad-phase reject anything far away before the (still cheap) planar check
-        if (distSq > 900) continue;
-        // project the plane's offset from ring center onto the ring's own plane, using the
-        // torus's local axes, so "through the hole" is judged relative to how the ring is
-        // actually oriented in space rather than assuming it always faces the same way
-        var normal = new THREE.Vector3(0, 1, 0).applyQuaternion(r.quaternion);
-        var offset = new THREE.Vector3(dx, dy, dz);
-        var alongNormal = offset.dot(normal);
-        if (Math.abs(alongNormal) > RING_TUBE_THICKNESS * 3) continue; // too far off the ring's plane
-        var inPlane = offset.clone().addScaledVector(normal, -alongNormal);
-        if (inPlane.lengthSq() <= catchRadiusSq) {
-          catchRing(r, nowSeconds);
-        }
-      }
-    }
-
-    function loadRingProgress() {
+    function loadCoins() {
       if (!window.storage) return;
       window.storage.get('glidepath-coins-total').then(function(res) {
         if (res && res.value) {
@@ -7342,14 +7105,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (isFinite(v)) { coins = v; bestCoins = v; }
         }
       }).catch(function() {});
-      window.storage.get('glidepath-best-streak').then(function(res) {
-        if (res && res.value) {
-          var v = parseInt(res.value, 10);
-          if (isFinite(v)) bestStreak = v;
-        }
-      }).catch(function() {});
     }
-    function maybeSaveRingProgress(nowSeconds) {
+    function maybeSaveCoins(nowSeconds) {
       if (!window.storage) return;
       if (nowSeconds - lastCoinSaveAt < 6) return;
       lastCoinSaveAt = nowSeconds;
@@ -7357,7 +7114,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         bestCoins = coins;
         window.storage.set('glidepath-coins-total', String(Math.round(coins))).catch(function() {});
       }
-      window.storage.set('glidepath-best-streak', String(bestStreak)).catch(function() {});
     }
 
     /* ============================================================
@@ -12211,7 +11967,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       nhReset(true);
       camPos.copy(position).add(camOffset);
       camera.position.copy(camPos);
-      ringStreak = 0; // banked coins carry over across respawns/plane switches; the streak doesn't
       if (typeof pvpOnReset === 'function' && typeof pvp !== 'undefined') pvpOnReset();
       if (ARS) arsRearm(true);
     }
@@ -13081,8 +12836,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       csarOnCrash();
       pvpOnCrash();
       cruiseActive = false;
-      ringsEnabled = false;
-      ringStreak = 0; // banked coins stay banked — only the in-progress streak is lost
       setDroneCam(false);
       var crashAgl = kjAgl();
       wreckBreakUp(intoWater, !viaEject && !ejecting);
@@ -14012,7 +13765,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var distValEl = document.getElementById('distVal');
     var bestValEl = document.getElementById('bestVal');
     var coinValEl = document.getElementById('coinVal');
-    var streakValEl = document.getElementById('streakVal');
     var speedMarkerEl = document.getElementById('speedMarker');
     var altMarkerEl = document.getElementById('altMarker');
     var altGaugeEl = document.getElementById('altGauge');
@@ -14095,7 +13847,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       bestValEl.textContent = Math.max(bestDistanceKm, distanceMeters / 1000).toFixed(2);
 
       coinValEl.textContent = Math.round(coins);
-      streakValEl.textContent = ringStreak;
 
       if (droneCamActive) updateDroneCamHud(clearance, kmh);
     }
@@ -15129,17 +14880,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         updateAudio(speedRatio, dt);
         updateNpcPlanes(dt);
 
-        ringsEnabled = !wasGrounded;
-        recycleRings(position.x, position.z, heading);
-        updateRingVisuals(dt, elapsedSeconds);
-        updateRingCollisions(dt, elapsedSeconds);
-
         hudAccum += dt;
         if (hudAccum > 0.1) {
           hudAccum = 0;
           updateHUD(clearance);
           maybeSaveBest(distanceMeters / 1000, elapsedSeconds);
-          maybeSaveRingProgress(elapsedSeconds);
+          maybeSaveCoins(elapsedSeconds);
           var fbW = arsCur();
           fireBtn.classList.toggle('cooling', !fbW || arsAmmo(fbW) <= 0 || (ARS.cd[fbW] || 0) > 0);
         }
@@ -18515,7 +18261,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         t.hp = 0; t.dmgState = 0;
         var bounty = pay ? arsBounty(t) : 0;
         arsMarker(t, bounty ? 'DESTROYED  +◆' + bounty : 'DESTROYED', '#ff5a3c');
-        if (bounty) { coins += bounty; lastCoinSaveAt = -999; maybeSaveRingProgress(elapsedSeconds); }
+        if (bounty) { coins += bounty; lastCoinSaveAt = -999; maybeSaveCoins(elapsedSeconds); }
         if (t.kind && strikeTargets.indexOf(t) >= 0) stKill(t);
         else if (t === samRadar) samKill(samRadar, true);
         else if (samLaunchers.indexOf(t) >= 0) samKill(t, false);
@@ -22902,8 +22648,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       updateChunks(0, 0);
       lastCCX = Math.floor(0 / CHUNK_SIZE); lastCCZ = Math.floor(0 / CHUNK_SIZE);
       loadBest();
-      initRings();
-      loadRingProgress();
+      loadCoins();
       renderLiveryRow();
       loadLiveryProgress();
 
@@ -23136,7 +22881,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         renderLiveryRow();
         applySelectedPlaneType();
         planePreview.refreshModel();
-        playRingChime(3); // reuse the ring chime as a satisfying "purchase" sting
+        playCoinChime(3); // a satisfying "purchase" sting
       } else {
         // can't afford it yet — a quick shake instead of silently doing nothing
         btnEl.classList.remove('shake');
@@ -23582,7 +23327,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         gpApplyGraphics(); gpApplyAudio(); gpApplyView(); gpSave(); gpSyncAll();
       } else if (a === 'quit') {
         kjSave();
-        maybeSaveRingProgress(elapsedSeconds + 1e6);
+        maybeSaveCoins(elapsedSeconds + 1e6);
         if (window.storage) window.storage.set('glidepath-best-distance-km', bestDistanceKm.toFixed(2)).catch(function() {});
         location.reload();
       }
