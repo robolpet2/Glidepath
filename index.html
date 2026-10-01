@@ -10669,35 +10669,81 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     /* ============================================================
-       SONIC BOOM — vapor-cone flash the instant the plane breaks Mach 1
+       SONIC BOOM — the whole transonic sequence, not just a flash
+       · approaching the barrier, a Prandtl-Glauert vapour cone condenses around the jet: a
+         flickering white shroud that grows as you close on Mach 1 and is at its thickest right at it
+       · punching through: the cone is shed as an expanding shock ring and a condensation burst,
+         the screen ripples with the shockwave, the airframe jolts, SUPERSONIC is called and a
+         real N-wave double crack ("ba-boom") rolls away with echoes off the ground
+       · the speed gauge shows your Mach number once you're transonic; slow down below the
+         barrier and you can do it again
        ============================================================ */
     var sonicRingMat = new THREE.MeshBasicMaterial({ map: ringTexture, transparent: true, opacity: 0, depthWrite: false, fog: false, side: THREE.DoubleSide });
-    var sonicRingMesh = new THREE.Mesh(new THREE.CircleGeometry(1, 32), sonicRingMat);
+    var sonicRingMesh = new THREE.Mesh(new THREE.CircleGeometry(1, 48), sonicRingMat);
     scene.add(sonicRingMesh);
-    var sonicRingLife = 999, sonicRingMaxLife = 0.5;
-
-    // a soft white condensation puff that blooms once around the fuselage, Prandtl-Glauert style
+    var sonicRingLife = 999, sonicRingMaxLife = 0.85;
     var sonicPuff = makeExplosionSprite(fireGlowTexture, false);
     sonicPuff.sprite.material.color.setHex(0xffffff);
     sonicPuff.sprite.material.opacity = 0;
+    // the vapour cone: an open cone around the fuselage, apex forward, streaked and flickering
+    var sonicConeU = { uAmt: { value: 0 }, uTime: { value: 0 } };
+    var sonicConeGeo = new THREE.CylinderGeometry(0.55, 3.9, 6.2, 40, 1, true);
+    sonicConeGeo.rotateX(-Math.PI / 2);
+    var sonicCone = new THREE.Mesh(sonicConeGeo, new THREE.ShaderMaterial({
+      uniforms: sonicConeU, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      vertexShader: [
+        'varying float vT; varying float vA; varying vec3 vN; varying vec3 vV;',
+        'void main() {',
+        '  vT = clamp(position.z / 6.2 + 0.5, 0.0, 1.0);',            // 0 at the apex (nose side), 1 at the open rim
+        '  vA = atan(position.y, position.x);',
+        '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
+        '  vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);',
+        '  gl_Position = projectionMatrix * mv;',
+        '}'
+      ].join('\n'),
+      fragmentShader: [
+        'uniform float uAmt; uniform float uTime;',
+        'varying float vT; varying float vA; varying vec3 vN; varying vec3 vV;',
+        'void main() {',
+        '  float edge = 1.0 - abs(dot(vN, vV));',                       // the shroud reads at its silhouette
+        '  float streak = 0.55 + 0.45 * sin(vA * 17.0 + vT * 9.0 - uTime * 26.0) * sin(vA * 7.0 - uTime * 11.0);',
+        '  float flick = 0.8 + 0.2 * sin(uTime * 61.0 + vA * 3.0);',
+        '  float a = uAmt * smoothstep(0.0, 0.35, vT) * (1.0 - smoothstep(0.6, 1.0, vT)) * (0.35 + 0.65 * edge) * streak * flick;',
+        '  gl_FragColor = vec4(vec3(0.96, 0.98, 1.0), a * 0.8);',
+        '  #include <tonemapping_fragment>',
+        '  #include <encodings_fragment>',
+        '}'
+      ].join('\n')
+    }));
+    sonicCone.position.set(0, 0.25, 1.4);
+    sonicCone.renderOrder = 6;
+    sonicCone.visible = false;
+    jetBody.add(sonicCone);
+    var sonicConeAmt = 0;
+    var machTagEl = (function() {
+      var lab = document.querySelector('#speedGauge .label');
+      if (!lab) return null;
+      var t = document.createElement('span'); t.id = 'machTag';
+      t.style.cssText = 'margin-left:6px;color:#9fd8ff;font-weight:800;opacity:0;transition:opacity .2s ease';
+      lab.appendChild(t); return t;
+    })();
 
-    var hasBrokenSonic = false; // resets on respawn so the boom can trigger again each run/flight
+    var hasBrokenSonic = false; // re-arms once you drop back below the barrier
     function triggerSonicBoom(pos, forwardDir) {
-      // ring is oriented to face the camera-ish / perpendicular to travel — it expands like a
-      // cross-section of the shock cone punching outward from the plane
       sonicRingMesh.position.copy(pos);
       sonicRingMesh.lookAt(pos.clone().add(forwardDir));
       sonicRingMesh.scale.setScalar(0.001);
       sonicRingMat.opacity = 1.0;
       sonicRingLife = 0;
-
       sonicPuff.sprite.position.copy(pos);
-      sonicPuff.life = 0;
-      sonicPuff.maxLife = 0.5;
-      sonicPuff.growTo = 4.5;
-      sonicPuff.sprite.scale.set(1.2, 1.2, 1);
-      sonicPuff.sprite.material.opacity = 0.8;
-
+      sonicPuff.life = 0; sonicPuff.maxLife = 0.9; sonicPuff.growTo = 11;
+      sonicPuff.sprite.scale.set(3, 3, 1);
+      sonicPuff.sprite.material.opacity = 0.9;
+      sonicConeAmt = 1.4;                                                // the cone flares as it's shed
+      if (typeof gfxShockwave === 'function') gfxShockwave(pos.clone().addScaledVector(forwardDir, -6), 1.5);
+      fxShake = Math.max(fxShake, 0.9);
+      rollRate += (Math.random() - 0.5) * 0.5; pitchRate += (Math.random() - 0.5) * 0.25;
+      if (typeof samToast === 'function') samToast('SUPERSONIC', '#bfe6ff', 1.6);
       playSonicBoom();
     }
 
@@ -10705,27 +10751,34 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (sonicRingLife < sonicRingMaxLife) {
         sonicRingLife += dt;
         var st = Math.min(1, sonicRingLife / sonicRingMaxLife);
-        // keep the ring centered on/just behind the plane as it expands, so it reads as a wave
-        // the aircraft is punching through and leaving behind, not a fixed point in space
-        sonicRingMesh.position.copy(planePos).addScaledVector(forwardDir, -st * 14);
-        sonicRingMesh.scale.setScalar(0.001 + st * 30);
-        sonicRingMat.opacity = 0.85 * (1 - st) * (1 - st);
-      } else if (sonicRingMat.opacity !== 0) {
-        sonicRingMat.opacity = 0;
-      }
-
+        // the shed shock ring falls behind and spreads wide
+        sonicRingMesh.position.copy(planePos).addScaledVector(forwardDir, -st * 40);
+        sonicRingMesh.scale.setScalar(0.5 + Math.pow(st, 0.6) * 70);
+        sonicRingMat.opacity = 0.9 * (1 - st) * (1 - st);
+      } else if (sonicRingMat.opacity !== 0) sonicRingMat.opacity = 0;
       if (sonicPuff.life < sonicPuff.maxLife) {
         sonicPuff.life += dt;
         var pt = Math.min(1, sonicPuff.life / sonicPuff.maxLife);
-        sonicPuff.sprite.position.copy(planePos);
-        sonicPuff.sprite.material.opacity = 0.8 * (1 - pt) * (1 - pt);
-        var ps = 1.2 + pt * sonicPuff.growTo;
+        sonicPuff.sprite.position.copy(planePos).addScaledVector(forwardDir, -pt * 12);
+        sonicPuff.sprite.material.opacity = 0.9 * (1 - pt) * (1 - pt);
+        var ps = 3 + pt * sonicPuff.growTo;
         sonicPuff.sprite.scale.set(ps, ps, 1);
-      } else if (sonicPuff.sprite.material.opacity !== 0) {
-        sonicPuff.sprite.material.opacity = 0;
+      } else if (sonicPuff.sprite.material.opacity !== 0) sonicPuff.sprite.material.opacity = 0;
+      // transonic band: the vapour cone builds from 88 % of the barrier and peaks right at it
+      var jet = !isHelicopterMode && !isCarMode && !isDroneMode && !isSeaplaneMode && !isStealthMode;
+      var m = speed / SONIC_SPEED;
+      var want = jet && started && !wasGrounded && !crashing ? Math.max(0, 1 - Math.abs(m - 0.995) / 0.11) : 0;
+      if (want > 0) want = Math.pow(want, 1.4) * (0.75 + 0.25 * Math.random());
+      sonicConeAmt += (want - sonicConeAmt) * Math.min(1, dt * (sonicConeAmt > want ? 2.2 : 6));
+      sonicConeU.uAmt.value = sonicConeAmt;
+      sonicConeU.uTime.value += dt;
+      sonicCone.visible = sonicConeAmt > 0.01;
+      if (machTagEl) {
+        var showM = jet && started && m > 0.8;
+        machTagEl.style.opacity = showM ? 1 : 0;
+        if (showM) machTagEl.textContent = 'M' + m.toFixed(2);
       }
     }
-
 
     var explosionActive = false;
     function triggerExplosion(pos) {
@@ -11478,57 +11531,35 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     function playSonicBoom() {
       if (!audioCtx || !soundEnabled) return;
-      var now = audioCtx.currentTime;
-
-      // the boom itself: a sharp double-crack — pressure wave hits, then the trailing slap —
-      // built from filtered noise with a near-instant attack and a fast exponential decay
-      var crackBuffer = audioCtx.createBuffer(1, Math.round(audioCtx.sampleRate * 0.55), audioCtx.sampleRate);
-      var crackData = crackBuffer.getChannelData(0);
-      for (var ci = 0; ci < crackData.length; ci++) crackData[ci] = Math.random() * 2 - 1;
-      var crack = audioCtx.createBufferSource();
-      crack.buffer = crackBuffer;
-      var crackFilter = audioCtx.createBiquadFilter();
-      crackFilter.type = 'bandpass';
-      crackFilter.frequency.setValueAtTime(3200, now);
-      crackFilter.frequency.exponentialRampToValueAtTime(140, now + 0.4);
-      crackFilter.Q.value = 0.9;
-      var crackGain = audioCtx.createGain();
-      crackGain.gain.setValueAtTime(0.0001, now);
-      crackGain.gain.exponentialRampToValueAtTime(1.0, now + 0.006); // near-instant crack
-      crackGain.gain.exponentialRampToValueAtTime(0.15, now + 0.05);
-      crackGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
-      crack.connect(crackFilter).connect(crackGain).connect(audioCtx.destination);
-      crack.start(now);
-
-      // deep low-frequency thump underneath the crack — the felt "punch" of the shockwave
-      var thump = audioCtx.createOscillator();
-      thump.type = 'sine';
-      thump.frequency.setValueAtTime(85, now);
-      thump.frequency.exponentialRampToValueAtTime(24, now + 0.5);
-      var thumpGain = audioCtx.createGain();
-      thumpGain.gain.setValueAtTime(0.0001, now);
-      thumpGain.gain.exponentialRampToValueAtTime(0.8, now + 0.01);
-      thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
-      thump.connect(thumpGain).connect(audioCtx.destination);
-      thump.start(now);
-      thump.stop(now + 0.65);
-
-      // long trailing rumble that rolls off slowly — the boom "echoing" away behind the plane
-      var rumbleBuffer = audioCtx.createBuffer(1, Math.round(audioCtx.sampleRate * 1.4), audioCtx.sampleRate);
-      var rumbleData = rumbleBuffer.getChannelData(0);
-      for (var ri = 0; ri < rumbleData.length; ri++) rumbleData[ri] = Math.random() * 2 - 1;
-      var rumble = audioCtx.createBufferSource();
-      rumble.buffer = rumbleBuffer;
-      var rumbleFilter = audioCtx.createBiquadFilter();
-      rumbleFilter.type = 'lowpass';
-      rumbleFilter.frequency.setValueAtTime(500, now + 0.05);
-      rumbleFilter.frequency.exponentialRampToValueAtTime(60, now + 1.3);
-      var rumbleGain = audioCtx.createGain();
-      rumbleGain.gain.setValueAtTime(0.0001, now + 0.05);
-      rumbleGain.gain.exponentialRampToValueAtTime(0.35, now + 0.1);
-      rumbleGain.gain.exponentialRampToValueAtTime(0.0001, now + 1.4);
-      rumble.connect(rumbleFilter).connect(rumbleGain).connect(audioCtx.destination);
-      rumble.start(now + 0.05);
+      var now = audioCtx.currentTime, sr = audioCtx.sampleRate;
+      var out = audioCtx.createGain(); out.gain.value = 0.9; out.connect(audioCtx.destination);
+      // the N-wave: an instant pressure jump, a linear fall through ambient to underpressure, an
+      // instant recovery; the bow shock and tail shock arrive ~0.12 s apart: "ba-BOOM"
+      var len = Math.round(sr * 0.5), buf = audioCtx.createBuffer(1, len, sr), dat = buf.getChannelData(0);
+      function nwave(t0, dur, amp) {
+        var i0 = Math.round(t0 * sr), n = Math.round(dur * sr);
+        for (var i = 0; i < n && i0 + i < len; i++) dat[i0 + i] += amp * (1 - 2 * i / n);
+      }
+      nwave(0.0, 0.09, 0.95); nwave(0.12, 0.11, 0.8);
+      for (var k = 0; k < len; k++) dat[k] += (Math.random() * 2 - 1) * 0.08 * Math.exp(-k / (sr * 0.08));
+      var src = audioCtx.createBufferSource(); src.buffer = buf;
+      var tone = audioCtx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = 2600;
+      src.connect(tone).connect(out); src.start(now);
+      // the felt punch underneath
+      var thump = audioCtx.createOscillator(), tg = audioCtx.createGain();
+      thump.type = 'sine'; thump.frequency.setValueAtTime(62, now); thump.frequency.exponentialRampToValueAtTime(22, now + 0.7);
+      tg.gain.setValueAtTime(0.0001, now); tg.gain.exponentialRampToValueAtTime(0.9, now + 0.012); tg.gain.exponentialRampToValueAtTime(0.0001, now + 0.8);
+      thump.connect(tg).connect(out); thump.start(now); thump.stop(now + 0.85);
+      // rolling rumble, then two softer echoes coming back off the hills
+      var rl = Math.round(sr * 2.2), rb = audioCtx.createBuffer(1, rl, sr), rd = rb.getChannelData(0), last = 0;
+      for (var r = 0; r < rl; r++) { last = last * 0.97 + (Math.random() * 2 - 1) * 0.03; rd[r] = last * 6; }
+      [[0.08, 0.5, 420], [0.75, 0.22, 260], [1.35, 0.12, 180]].forEach(function(e) {
+        var s2 = audioCtx.createBufferSource(); s2.buffer = rb;
+        var f = audioCtx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(e[2], now + e[0]); f.frequency.exponentialRampToValueAtTime(50, now + e[0] + 1.6);
+        var g = audioCtx.createGain(); g.gain.setValueAtTime(0.0001, now + e[0]); g.gain.exponentialRampToValueAtTime(e[1], now + e[0] + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, now + e[0] + 1.9);
+        s2.connect(f).connect(g).connect(out); s2.start(now + e[0]); s2.stop(now + e[0] + 2.1);
+        if (e[0] > 0.5) { var ec = audioCtx.createBufferSource(); ec.buffer = buf; var eg = audioCtx.createGain(); eg.gain.value = e[1] * 0.5; var ef = audioCtx.createBiquadFilter(); ef.type = 'lowpass'; ef.frequency.value = 700; ec.connect(ef).connect(eg).connect(out); ec.start(now + e[0]); }
+      });
     }
 
     function playSplashBoom() {
