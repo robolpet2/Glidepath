@@ -1403,6 +1403,7 @@
             <div><b>M / X</b>Fire</div>
             <div><b>T</b>Next target</div>
             <div><b>J / K</b>Gun · AIM-9</div>
+            <div><b>`</b>Night vision</div>
             <div><b>G</b>Flares (hold)</div>
             <div><b>H</b>Auto flares</div>
             <div><b>V</b>Drone sensor</div>
@@ -1601,7 +1602,8 @@
               <div class="gpm-lbl"><b>Weather</b><small>Changes blend in over a few seconds</small></div>
               <div class="gpm-ctl">
                 <div id="weatherPresets" class="gpm-seg">
-                  <button data-weather="clear" class="active">Clear</button>
+                  <button data-weather="fronts" class="active">Fronts</button>
+                  <button data-weather="clear">Clear</button>
                   <button data-weather="fog">Fog</button>
                   <button data-weather="rain">Rain</button>
                   <button data-weather="storm">Storm</button>
@@ -7980,6 +7982,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var WEATHER_LERP_SPEED = 0.5; // fraction of the way to target per second
 
     function setWeather(name) {
+      if (typeof wxfEnable === 'function') wxfEnable(name === 'fronts');
       weatherTarget = WEATHER_PRESETS[name] || WEATHER_PRESETS.clear;
       stormActive = !!weatherTarget.lightning;
       weatherPresetBtns.forEach(function(btn) {
@@ -8257,6 +8260,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var _wxStormFog = new THREE.Color(0x353b43), _wxStormTop = new THREE.Color(0x1b2027);
     function updateWeather(dt) {
       updateSeason(dt);
+      wxfUpdate(dt);
       var f = Math.min(1, WEATHER_LERP_SPEED * dt);
       currentFogDensity += (weatherTarget.density - currentFogDensity) * f;
       currentRainIntensity += (weatherTarget.rain - currentRainIntensity) * f;
@@ -15089,6 +15093,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         for (var gx = gx0; gx <= position.x + range; gx += gridStep) { var a1 = toS(gx, position.z - range * 1.2), a2 = toS(gx, position.z + range * 1.2); ctx.beginPath(); ctx.moveTo(a1.x, a1.y); ctx.lineTo(a2.x, a2.y); ctx.stroke(); }
         for (var gz = gz0; gz <= position.z + range; gz += gridStep) { var b1 = toS(position.x - range * 1.2, gz), b2 = toS(position.x + range * 1.2, gz); ctx.beginPath(); ctx.moveTo(b1.x, b1.y); ctx.lineTo(b2.x, b2.y); ctx.stroke(); }
       }
+      wxfMap(ctx, toS, scale);
       // river centreline (thin — the relief already shows the water)
       ctx.strokeStyle = 'rgba(110,180,230,0.55)'; ctx.lineWidth = Math.max(1, scale * RIVER_HALF_WIDTH * 0.6); ctx.lineCap = 'round';
       ctx.beginPath();
@@ -15139,6 +15144,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       nukeMinimap(ctx, toS, scale);
       cmdMinimap(ctx, toS, exp);
       navyMap(ctx, toS, exp, inView, label, rot);
+      aarMap(ctx, toS, exp, inView, label, rot);
       warMapOver(ctx, toS, exp, inView, label, scale, rot);
       var hel = window.__airwingHelo;
       if (hel) { var hq = toS(hel.pos.x, hel.pos.z); ctx.fillStyle = '#7dff8a'; ctx.beginPath(); ctx.arc(hq.x, hq.y, 3, 0, Math.PI * 2); ctx.fill(); }
@@ -15943,6 +15949,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       warUpdate(dt);
       regUpdate(dt);
       navyUpdate(dt);
+      aarUpdate(dt);
       updateStrike(dt);
       updateStrikePostCamera(dt);
       updateCSAR(dt);
@@ -16011,6 +16018,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     gfxSkyU.uAtmTint    = ATM.uniforms.uAtmTint;
     gfxSkyU.uStars      = { value: 0 };
     gfxSkyU.uFlash      = { value: new THREE.Vector4(0, 1, 0, 0) };
+    gfxSkyU.uStormDir   = { value: new THREE.Vector4(0, 0, 1, 0) };   // where the nearest weather front is, and how close
 
     var GFX_SKY_VERT = [
       'varying vec3 vWorldPosition;',
@@ -16027,7 +16035,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       'uniform vec3 topColor; uniform vec3 bottomColor; uniform vec3 sunDir;',
       'uniform vec3 fogColor; uniform vec3 sunColor; uniform vec3 groundColor;',
       'uniform float uTime; uniform float cloudCover; uniform float dayLight;',
-      'uniform vec4 uAtmLayer; uniform vec4 uAtmSun; uniform vec3 uAtmTint; uniform float uStars; uniform vec4 uFlash;',
+      'uniform vec4 uAtmLayer; uniform vec4 uAtmSun; uniform vec3 uAtmTint; uniform float uStars; uniform vec4 uFlash; uniform vec4 uStormDir;',
       'varying vec3 vWorldPosition;',
       '#include <logdepthbuf_pars_fragment>',
       'float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
@@ -16059,6 +16067,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // low sun: the horizon on the sun side glows warm
       '  float lowSun = 1.0 - smoothstep(0.0, 0.35, L.y);',
       '  col += sunColor * pow(cs, 3.0) * horizon * lowSun * 0.35 * clamp(L.y * 6.0 + 1.0, 0.0, 1.0);',
+      // a weather front on the horizon: the sky goes slate-dark in its direction as it comes closer
+      '  if (uStormDir.w > 0.0) {',
+      '    float sdir = max(dot(normalize(vec3(dir.x, 0.0, dir.z) + 1e-5), uStormDir.xyz), 0.0);',
+      '    float sband = pow(sdir, 2.5) * (1.0 - smoothstep(0.02, 0.5, hp)) * uStormDir.w;',
+      '    col = mix(col, vec3(0.13, 0.15, 0.18) * (0.35 + dayLight * 0.75), sband * 0.8);',
+      '  }',
       '#ifdef ENV_MODE',
       '  col = mix(col, groundColor * 0.55 + fogColor * 0.2, (1.0 - smoothstep(-0.12, 0.0, h)));',
       '#else',
@@ -17415,7 +17429,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         'uniform float bloomStrength; uniform float raysStrength; uniform float flareStrength; uniform float grain;',
         'uniform float time; uniform vec2 res; uniform vec2 sunUV;',
         'uniform float golden; uniform float night; uniform float sunVeil; uniform vec3 sunTint;',
-        'uniform vec4 shock; uniform vec2 hazeUV; uniform float haze; uniform float hazeR; uniform float speedBlur; uniform float hurt;',
+        'uniform vec4 shock; uniform vec2 hazeUV; uniform float haze; uniform float hazeR; uniform float speedBlur; uniform float hurt; uniform float nvg;',
         'varying vec2 vUv;',
         'float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }',
         'void main() {',
@@ -17476,6 +17490,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         '    col = mix(col, vec3(lumH) * vec3(1.08, 0.82, 0.8), hurt * 0.5);',
         '    col += vec3(0.42, 0.02, 0.0) * hurt * smoothstep(0.22, 0.85, length(d * asp));',
         '  }',
+        // night vision: an image intensifier — enormous gain on the dark, green phosphor, tube noise,
+        // a faint scan and the round edge of the tube
+        '  if (nvg > 0.001) {',
+        '    float nl = dot(col, vec3(0.2126, 0.7152, 0.0722));',
+        '    nl = 1.0 - exp(-nl * 9.0);',
+        '    nl += (h12(vUv * res * 0.5 + fract(time * 23.1) * 97.0) - 0.5) * 0.16;',
+        '    nl *= 0.94 + 0.06 * sin(vUv.y * res.y * 1.4);',
+        '    vec3 ng = vec3(0.2, 1.0, 0.36) * nl + vec3(0.0, 0.03, 0.0);',
+        '    float tube = 1.0 - smoothstep(0.44, 0.53, length(d * asp) * 0.82);',
+        '    col = mix(col, ng * tube, nvg);',
+        '  }',
         // fine animated film grain (replaces the old full-screen CPU grain canvas)
         '  col += (h12(vUv * res + fract(time * 13.7) * 311.0) - 0.5) * grain;',
         '  gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);',
@@ -17486,7 +17511,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         time: { value: 0 }, res: { value: new THREE.Vector2(sz.x, sz.y) }, sunUV: { value: P.sunUV },
         golden: { value: 0 }, night: { value: 0 }, sunVeil: { value: 0 }, sunTint: { value: new THREE.Color(1, 0.9, 0.75) },
         shock: { value: new THREE.Vector4() }, hazeUV: { value: new THREE.Vector2() }, haze: { value: 0 }, hazeR: { value: 0.1 },
-        speedBlur: { value: 0 }, hurt: { value: 0 }
+        speedBlur: { value: 0 }, hurt: { value: 0 }, nvg: { value: 0 }
       });
       return P;
     }
@@ -17559,7 +17584,24 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var wear = typeof kjWearGet === 'function' && started ? kjWearGet() : 1;
       var low = THREE.MathUtils.clamp((0.35 - wear) / 0.35, 0, 1) * (0.55 + 0.45 * Math.sin(now * 5.5));
       cu.hurt.value = started && !crashing ? Math.min(1, Math.max(low * 0.7, gfxHurtKick)) : 0;
+      NVG.v += ((NVG.on && started ? 1 : 0) - NVG.v) * Math.min(1, dt * 7);
+      if (!NVG.hinted && started && cu.night.value > 0.7) { NVG.hinted = true; setTimeout(function() { samToast('TIP: ` OR NV FOR NIGHT VISION', '#9dffb8', 3.5); }, 4000); }
+      cu.nvg.value = NVG.v;
     }
+    /* ---- NIGHT VISION: ` (backquote) or the NV button. Best at night; in daylight it washes out
+       the way a real tube does. ---- */
+    var NVG = { on: false, v: 0, hinted: false };
+    function nvgToggle() {
+      if (!started) return;
+      NVG.on = !NVG.on;
+      samBeep(NVG.on ? 6200 : 2600, 0.12, 0.03);
+      samToast(NVG.on ? 'NIGHT VISION ON' : 'NIGHT VISION OFF', '#7dff8a', 1.2);
+      var b = document.getElementById('nvgBtn'); if (b) b.classList.toggle('on', NVG.on);
+    }
+    window.addEventListener('keydown', function(e) {
+      if (e.code !== 'Backquote' || !started || e.repeat) return;
+      e.preventDefault(); nvgToggle();
+    }, { capture: true });
     var gfxLastT = performance.now(), gfxFrameAcc = 0, gfxFrameN = 0, gfxGoodWindows = 0;
     // Adaptive quality: every ~40 frames look at the average frame time and step resolution,
     // mirror-reflection resolution and shadow-map size down (or back up) to hold ~60 fps
@@ -22829,6 +22871,280 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     navySpawn();
 
+
+    /* ============================================================
+       AIR-TO-AIR REFUELLING — TEXACO 1
+       A tanker flies a racetrack high over home and the city at 2,400 m and 400 km/h,
+       trailing a hose and a drogue basket from its tail. Fly up behind it, match its speed and
+       ease your probe toward the basket: inside 40 m with the closure gentle the tanker's crew talk
+       you in (the jet is drawn steadily onto the basket), the drogue latches with CONTACT, the jet holds station on the hose and fuel flows (a full tank in
+       about twenty seconds). Throttle hard, dive or roll to break away. Not for helicopters or
+       cars. The guidance panel and a marker on the basket help you in; the chart shows the
+       tanker, and it calls you when you're low on fuel.
+       ============================================================ */
+    var AAR = { t: 0, s: 0, contact: false, near: false, mesh: null, hose: null, basket: null, pos: new THREE.Vector3(), heading: 0, speed: 110,
+                basketPos: new THREE.Vector3(), called: false, holdT: 0, msg: '' };
+    var AAR_TRACK = { x: 1500, z: 400, half: 2400, r: 1000, y: 2400 };    // a racetrack over home and the city, above the flak's reach
+    var AAR_LEN = 4 * AAR_TRACK.half + 2 * Math.PI * AAR_TRACK.r;
+    function aarTrackPos(s, out) {
+      var T = AAR_TRACK, L = 2 * T.half, C = Math.PI * T.r;
+      s = ((s % AAR_LEN) + AAR_LEN) % AAR_LEN;
+      if (s < L) out.set(T.x - T.half + s, T.y, T.z - T.r);
+      else if ((s -= L) < C) { var a = -Math.PI / 2 + s / T.r; out.set(T.x + T.half + Math.cos(a) * T.r, T.y, T.z + Math.sin(a) * T.r); }
+      else if ((s -= C) < L) out.set(T.x + T.half - s, T.y, T.z + T.r);
+      else { s -= L; var b = Math.PI / 2 + s / T.r; out.set(T.x - T.half + Math.cos(b) * T.r, T.y, T.z + Math.sin(b) * T.r); }
+      return out;
+    }
+    (function aarBuild() {
+      var skin = new THREE.MeshStandardMaterial({ color: new THREE.Color(0xc9ced3).convertSRGBToLinear(), roughness: 0.45, metalness: 0.35, flatShading: true });
+      var root = awCloneBody(awacsBody, new Map([[AWX.skin, skin]]), 1.8);
+      var body = root.children[0], drop = [];
+      body.traverse(function(o) { if (o.isMesh && o.material && o.material.isMeshBasicMaterial) drop.push(o); else if (o.parent === body && o.position.y > 1.9) drop.push(o); });
+      drop.forEach(function(o) { o.parent.remove(o); });
+      AAR.mesh = root;
+      // hose + drogue basket, in world space (they swing behind the tanker)
+      var hoseMat = new THREE.MeshStandardMaterial({ color: 0x1e2226, roughness: 0.6, metalness: 0.4 });
+      AAR.hose = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1, 6, 1, true), hoseMat);
+      scene.add(AAR.hose);
+      var bk = new THREE.Group();
+      var cone = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.25, 1.1, 16, 1, true), new THREE.MeshStandardMaterial({ color: 0xd8dde2, roughness: 0.5, metalness: 0.4, side: THREE.DoubleSide }));
+      cone.rotation.x = Math.PI / 2; bk.add(cone);
+      var rim = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.07, 6, 20), new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.5, emissive: new THREE.Color(0x401500) }));
+      rim.position.z = 0.55; bk.add(rim);
+      scene.add(bk);
+      AAR.basket = bk;
+      var el = document.createElement('div');
+      el.id = 'aarPanel'; el.className = 'hidden';
+      document.body.appendChild(el);
+      AAR.el = el;
+      var mk = document.createElement('div');
+      mk.id = 'aarMark'; mk.className = 'hidden';
+      document.body.appendChild(mk);
+      AAR.mark = mk;
+      var css = document.createElement('style');
+      css.textContent =
+        '#aarPanel{position:fixed;left:50%;top:calc(196px + env(safe-area-inset-top));transform:translateX(-50%);z-index:11;pointer-events:none;padding:8px 14px;border-radius:4px;background:rgba(6,14,20,.66);border:1px solid rgba(120,220,255,.35);font:700 11px/1.5 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#bfeaff;text-align:center;white-space:nowrap}' +
+        '#aarPanel.hidden,#aarMark.hidden{display:none}#aarPanel b{display:block;font-size:13px;letter-spacing:.2em;color:#fff}#aarPanel.ok{border-color:#7dff8a;color:#c8ffd0}#aarPanel.ok b{color:#7dff8a}' +
+        '#aarPanel i{display:block;height:4px;margin-top:5px;background:rgba(255,255,255,.12);border-radius:2px;overflow:hidden}#aarPanel i em{display:block;height:100%;background:#7dff8a}' +
+        '#aarMark{position:fixed;left:0;top:0;z-index:9;pointer-events:none;width:34px;height:34px;margin:-17px 0 0 -17px;border:2px solid #7fd8ff;border-radius:50%;box-shadow:0 0 10px rgba(120,220,255,.6)}#aarMark.ok{border-color:#7dff8a}';
+      document.head.appendChild(css);
+    })();
+    var _aaV = new THREE.Vector3(), _aaV2 = new THREE.Vector3(), _aaP = new THREE.Vector3();
+    function aarProbe(out) {
+      // the probe sits ahead of and a little above the nose
+      var up = _aaV2.set(0, 1, 0).applyQuaternion(plane.quaternion);
+      return out.copy(position).addScaledVector(forwardVec, 6.5).addScaledVector(up, 1.1);
+    }
+    function aarCapable() { return started && !crashing && !ejecting && !isCarMode && !isHelicopterMode && !wasGrounded; }
+    function aarUpdate(dt) {
+      AAR.t += dt; AAR.s += AAR.speed * dt;
+      aarTrackPos(AAR.s, AAR.pos); aarTrackPos(AAR.s + 6, _aaV);
+      AAR.heading = Math.atan2(-(_aaV.x - AAR.pos.x), -(_aaV.z - AAR.pos.z));
+      // bank into the turns
+      var turning = Math.abs(AAR.heading - (AAR.prevH === undefined ? AAR.heading : AAR.prevH));
+      AAR.prevH = AAR.heading;
+      var m = AAR.mesh;
+      m.position.copy(AAR.pos); m.rotation.set(0, AAR.heading, turning > 1e-4 && turning < 1 ? -0.42 : 0);
+      // hose and basket trail behind, sagging and swaying a little
+      var fwd = _aaV.set(-Math.sin(AAR.heading), 0, -Math.cos(AAR.heading));
+      var tail = _aaV2.copy(AAR.pos).addScaledVector(fwd, -13).add(_aaP.set(0, -1.6, 0));
+      AAR.basketPos.copy(tail).addScaledVector(fwd, -24).add(_aaP.set(Math.sin(AAR.t * 0.9) * 0.6, -7.5 + Math.sin(AAR.t * 1.3) * 0.35, 0));
+      var hose = AAR.hose, mid = _aaP.copy(tail).add(AAR.basketPos).multiplyScalar(0.5);
+      hose.position.copy(mid);
+      var hd = _aaV.copy(AAR.basketPos).sub(tail), hl = hd.length();
+      hose.scale.set(1, hl, 1);
+      hose.quaternion.setFromUnitVectors(_aaV2.set(0, 1, 0), hd.normalize());
+      AAR.basket.position.copy(AAR.basketPos);
+      AAR.basket.rotation.set(0, AAR.heading, 0);
+      // refuelling
+      var probe = aarProbe(new THREE.Vector3()), d = probe.distanceTo(AAR.basketPos);
+      var near = aarCapable() && d < 400 && AAR.pos.distanceTo(position) < 450;
+      AAR.near = near;
+      var closure = speed - AAR.speed;
+      if (AAR.contact) {
+        var brk = !aarCapable() || keys.boost || keys.down || keys.rollLeft || keys.rollRight || throttle > AAR.speed * 1.25;
+        if (brk) { AAR.contact = false; samToast('DISCONNECT', '#ffcc33', 1.4); }
+        else {
+          // hold station on the hose: the jet rides the basket
+          var want = _aaV.copy(AAR.basketPos).sub(_aaV2.copy(probe).sub(position));
+          position.lerp(want, Math.min(1, dt * 6));
+          heading += Math.atan2(Math.sin(AAR.heading - heading), Math.cos(AAR.heading - heading)) * Math.min(1, dt * 3);
+          speed = AAR.speed; throttle = AAR.speed; verticalVel = 0; pitchAngle *= 0.9; rollAngle *= 0.9;
+          velocityVec.set(-Math.sin(heading) * speed, 0, -Math.cos(heading) * speed);
+          plane.position.copy(position);
+          if (fuel < FUEL_MAX) { fuel = Math.min(FUEL_MAX, fuel + FUEL_MAX * 0.05 * dt); outOfFuel = false; }
+          else if (!AAR.full) { AAR.full = true; samToast('TANKS FULL — CLEARED TO DISCONNECT', '#7dff8a', 2.5); awRadio('TEXACO 1: You\'re full. Clear right, have a good one.', '#9fe8ff'); }
+          if (Math.random() < dt * 2) samEmitSmoke(AAR.basketPos, _aaV.set(0, 0, 0), 0.8, 0.6, 0.12, 0.95);
+        }
+      } else if (near && d < 40 && Math.abs(closure) < 15 && fuel < FUEL_MAX - 0.5) {
+        // the capture assist: close and roughly matched, the jet is drawn steadily onto the basket
+        var tgt = _aaV.copy(AAR.basketPos).sub(_aaV2.copy(probe).sub(position));
+        position.lerp(tgt, Math.min(1, dt * (d < 12 ? 1.6 : 0.8)));
+        heading += Math.atan2(Math.sin(AAR.heading - heading), Math.cos(AAR.heading - heading)) * Math.min(1, dt * 1.2);
+        speed += (AAR.speed - speed) * Math.min(1, dt * 0.8); throttle = speed;
+        plane.position.copy(position);
+        AAR.assist = true;
+        if (d < 4.5) {
+          AAR.contact = true; AAR.full = false;
+          samToast('CONTACT — FUEL FLOWING', '#7dff8a', 2);
+          samBeep(1250, 0.08, 0.05);
+        }
+      }
+      // guidance panel + basket marker
+      if (near || AAR.contact) {
+        var rel = _aaV.copy(AAR.basketPos).sub(probe);
+        var right = _aaV2.set(Math.cos(heading), 0, -Math.sin(heading));
+        var lr = rel.dot(right), ud = rel.y, fa = rel.dot(_aaP.set(-Math.sin(heading), 0, -Math.cos(heading)));
+        var cue = AAR.contact ? 'CONTACT · FUEL ' + Math.round(fuel / FUEL_MAX * 100) + '%' : d < 40 && Math.abs(closure) < 15 ? 'HOLD STEADY — CAPTURING · ' + d.toFixed(0) + ' m' :
+          (Math.abs(ud) > 1.2 ? (ud > 0 ? 'UP ' : 'DOWN ') + Math.abs(ud).toFixed(0) + ' m · ' : '') +
+          (Math.abs(lr) > 1.2 ? (lr > 0 ? 'RIGHT ' : 'LEFT ') + Math.abs(lr).toFixed(0) + ' m · ' : '') +
+          'FWD ' + Math.max(0, fa).toFixed(0) + ' m · ' + (closure >= 0 ? '+' : '') + closure.toFixed(1) + ' m/s';
+        var html = '<b>' + (AAR.contact ? 'TEXACO 1 · REFUELLING' : 'TEXACO 1 · JOIN THE BASKET') + '</b>' + cue + (AAR.contact ? '<i><em style="width:' + (fuel / FUEL_MAX * 100).toFixed(0) + '%"></em></i>' : '');
+        if (html !== AAR.msg) { AAR.el.innerHTML = html; AAR.msg = html; }
+        AAR.el.className = AAR.contact ? 'ok' : '';
+        camera.updateMatrixWorld();
+        _aaP.copy(AAR.basketPos).project(camera);
+        if (_aaP.z < 1) {
+          AAR.mark.className = AAR.contact ? 'ok' : '';
+          AAR.mark.style.transform = 'translate(' + ((_aaP.x * 0.5 + 0.5) * window.innerWidth).toFixed(0) + 'px,' + ((-_aaP.y * 0.5 + 0.5) * window.innerHeight).toFixed(0) + 'px)';
+        } else AAR.mark.className = 'hidden';
+      } else { AAR.el.className = 'hidden'; AAR.mark.className = 'hidden'; }
+      // a call when you're running low
+      if (aarCapable() && fuel < FUEL_MAX * 0.25 && !AAR.called) {
+        AAR.called = true;
+        var dk = Math.hypot(AAR.pos.x - position.x, AAR.pos.z - position.z);
+        awRadio('TEXACO 1: Tanker on station at 2,400 m, ' + mapFmtDist(dk) + ' out. Come and get some gas.', '#9fe8ff');
+      }
+      if (fuel > FUEL_MAX * 0.6) AAR.called = false;
+    }
+    function aarMap(ctx, toS, exp, inView, label, rot) {
+      var p = toS(AAR.pos.x, AAR.pos.z);
+      if (!inView(p, 4)) return;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(-AAR.heading + rot);
+      ctx.fillStyle = '#7fd8ff'; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(6, 4); ctx.lineTo(0, 2); ctx.lineTo(-6, 4); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      if (exp) label('TANKER', p.x, p.y - 12, '#7fd8ff', 8);
+    }
+
+
+    /* ============================================================
+       WEATHER FRONTS — weather that moves
+       With FRONTS selected (the default), the sky is clear except where a front is: three cells
+       of rain or thunderstorm, each a few kilometres across, drift across the island with the
+       wind. From outside you see them coming — a dark anvil of cloud and a grey curtain of rain
+       hanging under it — and the chart shows them like a weather radar. Fly into one and the
+       rain, the wind, the turbulence and (in the storms) the lightning build as you get to its
+       heart, then ease off as you come out the other side. Fronts that drift far away dissolve
+       and new ones build upwind.
+       ============================================================ */
+    var WXF = { on: false, cells: [], dir: Math.random() * Math.PI * 2, spd: 11, t: 0, mix: null, I: 0, kind: null };
+    var WXF_MIX = { density: 0, layer: 0, layerH: 30, banks: 0.8, rain: 0, dim: 0, wind: 0, lightning: false };
+    (function wxfBuild() {
+      // rain curtain texture: soft vertical streaks fading out at the top and the bottom
+      var cv = document.createElement('canvas'); cv.width = 128; cv.height = 256;
+      var c = cv.getContext('2d');
+      for (var i = 0; i < 220; i++) {
+        var x = Math.random() * 128, w = 0.6 + Math.random() * 1.6;
+        c.fillStyle = 'rgba(190,200,210,' + (0.05 + Math.random() * 0.12) + ')';
+        c.fillRect(x, 0, w, 256);
+      }
+      var g = c.createLinearGradient(0, 0, 0, 256);
+      g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.15, 'rgba(0,0,0,0)'); g.addColorStop(0.85, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,1)');
+      c.globalCompositeOperation = 'destination-out'; c.fillStyle = g; c.fillRect(0, 0, 128, 256);
+      var tex = new THREE.CanvasTexture(cv); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(10, 1);
+      WXF.tex = tex;
+      for (var k = 0; k < 3; k++) {
+        var grp = new THREE.Group();
+        var curtain = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 48, 1, true),
+          new THREE.MeshBasicMaterial({ map: tex, color: 0x5d666f, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide, fog: true }));
+        grp.add(curtain);
+        // the cloud deck: big soft sprites (the smoke texture) in slate grey, no hard edges
+        var caps = [];
+        for (var j = 0; j < 16; j++) {
+          var cap = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeGlowTexture, color: new THREE.Color(0.2, 0.23, 0.27), transparent: true, opacity: 0.9, depthWrite: false, fog: true }));
+          grp.add(cap); caps.push({ m: cap, a: j / 16 * Math.PI * 2 + Math.random() * 0.4, r: j < 4 ? Math.random() * 0.25 : 0.3 + Math.random() * 0.6, s: 0.5 + Math.random() * 0.45, h: Math.random() });
+        }
+        grp.visible = false;
+        scene.add(grp);
+        WXF.cells.push({ grp: grp, curtain: curtain, caps: caps, x: 0, z: 0, r: 2500, kind: 'rain', age: 0 });
+      }
+    })();
+    function wxfSeed(cell, near) {
+      // a new front builds upwind of you, so it drifts across your path
+      var a = WXF.dir + Math.PI + (Math.random() - 0.5) * 1.6, d = near ? 3000 + Math.random() * 7000 : 9000 + Math.random() * 6000;
+      cell.x = position.x + Math.sin(a) * d; cell.z = position.z + Math.cos(a) * d;
+      cell.r = 1900 + Math.random() * 1400;
+      cell.kind = Math.random() < 0.45 ? 'storm' : 'rain';
+      cell.age = 0;
+      cell.base = cell.kind === 'storm' ? 1250 : 1450;
+      cell.curtain.scale.set(cell.r * 0.72, cell.base, cell.r * 0.72);
+      cell.curtain.position.y = cell.base / 2;
+      cell.curtain.material.opacity = cell.kind === 'storm' ? 0.62 : 0.45;
+      cell.caps.forEach(function(c) {
+        var cr = cell.r * c.s * 1.3, tall = cell.kind === 'storm' ? 0.9 : 0.55;
+        c.m.scale.set(cr, cr * tall, 1);
+        c.m.position.set(Math.sin(c.a) * cell.r * c.r, cell.base + cr * tall * (0.15 + c.h * 0.35), Math.cos(c.a) * cell.r * c.r);
+        var g = cell.kind === 'storm' ? 0.16 + c.h * 0.08 : 0.3 + c.h * 0.1;
+        c.m.material.color.setRGB(g, g * 1.08, g * 1.2);
+      });
+      cell.grp.visible = true;
+    }
+    function wxfEnable(on) {
+      WXF.on = on;
+      if (on) WXF.cells.forEach(function(c, i) { wxfSeed(c, i === 0); });
+      else { WXF.cells.forEach(function(c) { c.grp.visible = false; }); if (typeof gfxSkyU !== 'undefined') gfxSkyU.uStormDir.value.w = 0; }
+    }
+    function wxfUpdate(dt) {
+      if (!WXF.on) return;
+      WXF.t += dt;
+      WXF.dir += Math.sin(WXF.t * 0.01) * 0.0004;
+      var vx = Math.sin(WXF.dir) * WXF.spd, vz = Math.cos(WXF.dir) * WXF.spd;
+      var best = 0, kind = null;
+      WXF.cells.forEach(function(c) {
+        c.age += dt;
+        c.x += vx * dt; c.z += vz * dt;
+        var gx = c.x, gz = c.z;
+        c.grp.position.set(gx, Math.max(getTerrainHeight(gx, gz), WATER_LEVEL) - 40, gz);
+        c.curtain.material.map.offset.y = (WXF.t * 0.35) % 1;
+        var d = Math.hypot(position.x - c.x, position.z - c.z);
+        if (d > 19000) wxfSeed(c, false);
+        var I = 1 - gfxSmoothstepJS(c.r * 0.55, c.r * 1.12, d);
+        if (I > best) { best = I; kind = c.kind; }
+      });
+      // the weather you're in: clear blending toward the cell's rain or storm
+      var A = WEATHER_PRESETS.clear, B = WEATHER_PRESETS[kind || 'rain'], M = WXF_MIX;
+      ['density', 'layer', 'layerH', 'banks', 'rain', 'dim', 'wind'].forEach(function(k) { M[k] = A[k] + (B[k] - A[k]) * best; });
+      M.lightning = kind === 'storm' && best > 0.55;
+      weatherTarget = M;
+      stormActive = M.lightning;
+      WXF.I = best; WXF.kind = kind;
+      // the nearest front you're not already inside shows on the horizon
+      var near = null, nd = Infinity;
+      WXF.cells.forEach(function(c) { var d = Math.hypot(c.x - position.x, c.z - position.z); if (d > c.r * 0.6 && d - c.r < nd) { nd = d - c.r; near = c; } });
+      var SD = gfxSkyU.uStormDir.value;
+      if (near) {
+        var dd = Math.hypot(near.x - position.x, near.z - position.z);
+        SD.set((near.x - position.x) / dd, 0, (near.z - position.z) / dd, (1 - gfxSmoothstepJS(0, 9000, nd)) * (near.kind === 'storm' ? 1 : 0.6) * (1 - best));
+      } else SD.w = 0;
+      if (best > 0.3 && !WXF.warned) { WXF.warned = true; samToast(kind === 'storm' ? 'ENTERING THUNDERSTORM' : 'ENTERING RAIN', kind === 'storm' ? '#ffcc33' : '#bfe3ff', 2.2); }
+      if (best < 0.1) WXF.warned = false;
+    }
+    // the chart, like a weather radar: green rain, amber/red storm cores
+    function wxfMap(ctx, toS, scale) {
+      if (!WXF.on) return;
+      WXF.cells.forEach(function(c) {
+        if (!c.grp.visible) return;
+        var p = toS(c.x, c.z), R = c.r * scale;
+        var g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
+        if (c.kind === 'storm') { g.addColorStop(0, 'rgba(255,60,40,0.42)'); g.addColorStop(0.35, 'rgba(255,190,40,0.32)'); g.addColorStop(0.7, 'rgba(70,200,90,0.22)'); g.addColorStop(1, 'rgba(70,200,90,0)'); }
+        else { g.addColorStop(0, 'rgba(70,210,110,0.34)'); g.addColorStop(0.7, 'rgba(70,200,110,0.18)'); g.addColorStop(1, 'rgba(70,200,110,0)'); }
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI * 2); ctx.fill();
+      });
+    }
+    wxfEnable(true);
+
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
        After an ejection, once the pilot is on the ground you can fly a
@@ -23983,6 +24299,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       '#kjBtns{position:fixed;z-index:11;top:calc(14px + env(safe-area-inset-top));right:calc(198px + env(safe-area-inset-right));display:flex;gap:8px}',
       '#kjBtns button{width:38px;height:38px;border-radius:50%;background:rgba(15,17,20,.62);border:1px solid rgba(255,255,255,.12);color:#e8e6df;font-size:16px;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}',
       '#kjBtns button.ring{background:rgba(40,160,80,.6);border-color:#7dff9a;animation:kjBlink 1s steps(2) infinite}',
+      '#kjBtns #nvgBtn.on{background:rgba(40,160,80,.55);border-color:#7dff9a;color:#d9ffe0}',
       '#kjCtx{position:fixed;z-index:12;left:50%;transform:translateX(-50%);bottom:calc(64px + env(safe-area-inset-bottom));display:flex;gap:10px}',
       '#kjCtx button{font:800 12px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;color:#fff;background:rgba(120,80,30,.78);border:2px solid #e0b070;border-radius:12px;padding:10px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent}',
       '#kjCtx button.drop{background:rgba(30,90,50,.8);border-color:#7dff9a}',
@@ -24040,6 +24357,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var kjOrderEl = kjEl('div', { id: 'kjOrder', class: 'kjPill hidden' }, kjTop);
     var kjPopsEl = kjEl('div', { id: 'kjPops' });
     var kjBtns = kjEl('div', { id: 'kjBtns', class: 'hidden' });
+    var kjNvgBtn = kjEl('button', { id: 'nvgBtn', title: 'Night vision (`)', 'aria-label': 'Night vision' }, kjBtns, '<span style="font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.04em">NV</span>');
+    kjNvgBtn.addEventListener('click', function(e) { e.stopPropagation(); nvgToggle(); });
     var kjCodecBtn = kjEl('button', { title: 'Codec (I)', 'aria-label': 'Codec radio' }, kjBtns, '📻');
     var kjPhotoBtn = kjEl('button', { title: 'Photo mode (O)', 'aria-label': 'Photo mode' }, kjBtns, '📷');
     var kjCtx = kjEl('div', { id: 'kjCtx' });
