@@ -1922,12 +1922,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
       },
       awacs: {
-        name: 'Sentinel AWACS', tagline: 'flying command post — launch flights, task strikes, call the silo',
+        name: 'Sentinel AWACS', tagline: 'flying command post — launch flights, task strikes, call the silo; long-endurance tanks',
         maxSpeedKmh: 540, engineAccel: 16, boostAccel: 18,
         // a heavy four-engined jet: long take-off roll, gentle and stable in the air
         stallSpeedKmh: 42, takeoffSpeedKmh: 125,
         colors: { body: 0xbcc2c8, trim: 0x6d757c, wing: 0xbcc2c8 },
         isAwacs: true,
+        fuelCapacity: 3.5,       // long-endurance tanks: ~14 min flat out, far longer cruising
         handling: {
           maxPitchDeg: 22, maxRollDeg: 30, pitchLerp: 1.7, rollLerp: 1.8, turnRate: 0.5,
           bankLiftLoss: 0.4, inducedDragCoef: 7, climbSpeedCost: 0.5, diveSpeedGain: 0.3,
@@ -12173,7 +12174,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var barrelRolling = false, barrelRollProgress = 0, barrelRollDir = 1, barrelRollStartAngle = 0;
     var BARREL_ROLL_DURATION = 0.85; // seconds for one full 360° spin
     function triggerBarrelRoll(dir) {
-      if (barrelRolling || crashing || isHelicopterMode || isCarMode) return;
+      if (barrelRolling || crashing || isHelicopterMode || isCarMode || isDroneMode || isStealthMode || isSeaplaneMode || isAwacsMode) return;
       if (wasGrounded || speed < STALL_SPEED * 1.15) return; // needs real airspeed, wheels up
       barrelRolling = true;
       barrelRollProgress = 0;
@@ -15150,7 +15151,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           }
         }
         pitchAngle = THREE.MathUtils.clamp(pitchAngle, -MAX_PITCH * 1.35, MAX_PITCH * 1.35);
-        rollAngle = THREE.MathUtils.clamp(rollAngle, -MAX_ROLL * 1.15, MAX_ROLL * 1.15);
+        // (not during a barrel roll: the clamp used to cut the spin off at the bank limit, so rolls never happened)
+        if (!barrelRolling) rollAngle = THREE.MathUtils.clamp(rollAngle, -MAX_ROLL * 1.15, MAX_ROLL * 1.15);
         // turn rate scales with both bank angle and airspeed (like a real coordinated turn —
         // no bank or no airspeed means barely any heading change, steep bank at speed carves hard);
         // during a barrel roll this still applies, so a snap-roll at speed carves a little turn too,
@@ -15166,7 +15168,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         // rather than perfectly combined (real load factor is a vector sum) because this reads
         // more predictably to a player than the full vector math and still rewards/punishes the
         // same maneuvers realistically: hard banked turns and violent pull-ups both cost you.
-        var bankG = 1 / Math.max(0.12, Math.cos(rollAngle));
+        // a barrel roll is a quick aileron roll, not a sustained bank: don't read inverted as 8 G
+        var bankG = barrelRolling ? 1.3 : 1 / Math.max(0.12, Math.cos(rollAngle));
         var pitchG = Math.abs(pitchRate) * speed / GRAVITY;
         var currentG = isCarMode ? 1 : Math.min(bankG + pitchG, 14);
         gForceSmoothed += (currentG - gForceSmoothed) * Math.min(1, dt * 6);
@@ -15204,6 +15207,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         // ramping up toward full-throttle consumption, with boost guzzling extra on top.
         var throttleFrac = isHelicopterMode ? heliTorque : THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1);
         var burnRate = (isHelicopterMode && heliSpool < 0.01 ? 0 : FUEL_BURN_IDLE) + (FUEL_BURN_FULL - FUEL_BURN_IDLE) * throttleFrac + (keys.boost && !isHelicopterMode ? FUEL_BURN_BOOST : 0);
+        // bigger tanks (the AWACS) make the same percentage last longer
+        burnRate /= (PLANE_TYPES[selectedPlaneType] && PLANE_TYPES[selectedPlaneType].fuelCapacity) || 1;
         if (fuel > 0) {
           fuel = Math.max(0, fuel - burnRate * dt);
           if (fuel <= 0) outOfFuel = true;
@@ -24845,6 +24850,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         hgStatRow('Acceleration', Math.round(P.engineAccel + P.boostAccel * 0.5) + '', Math.sqrt((P.engineAccel + P.boostAccel * 0.5) / 160)) +
         hgStatRow('Agility', h.turnRate ? h.turnRate.toFixed(2) : '—', (h.turnRate || 0) / 2.1) +
         hgStatRow('Take-off', P.isCar ? '—' : lowTo ? P.takeoffSpeedKmh + ' km/h' : 'vertical', P.isCar ? 0 : lowTo ? 1 - P.takeoffSpeedKmh / 300 : 1) +
+        hgStatRow('Endurance', P.isCar ? '—' : Math.round(100 / FUEL_BURN_FULL / 60 * (P.fuelCapacity || 1)) + ' min', Math.min(1, (P.fuelCapacity || 1) / 3.5)) +
         hgStatRow('G limit', h.gTolerance && h.gTolerance < 50 ? h.gTolerance + ' G' : '—', h.gTolerance && h.gTolerance < 50 ? h.gTolerance / 9 : 0.05);
       var fr = arsFrameFor(type), list = fr && ARS_PRESETS[fr], cur = arsPresetFor(type);
       document.getElementById('hgPresets').innerHTML = list ? list.map(function(p) {
