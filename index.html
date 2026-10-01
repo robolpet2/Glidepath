@@ -754,16 +754,16 @@
   #pvpOverlay{ position:fixed; inset:0; width:100%; height:100%; z-index:6; pointer-events:none; }
   #gunBtn, #aamBtn{
     position:fixed; z-index:12; width:64px; height:64px; border-radius:50%;
-    bottom:calc(196px + env(safe-area-inset-bottom));
+    bottom:calc(158px + env(safe-area-inset-bottom));
     display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1.15;
     font:800 10px/1.1 ui-monospace,Menlo,monospace; letter-spacing:.08em; color:#fff;
     -webkit-user-select:none; user-select:none; transition:transform .08s ease;
   }
   #gunBtn span, #aamBtn span{ font-size:13px; margin-top:2px; font-variant-numeric:tabular-nums; }
-  #gunBtn{ right:calc(22px + env(safe-area-inset-right)); background:rgba(255,120,20,.2); border:2px solid rgba(255,150,60,.9); }
+  #gunBtn{ right:calc(198px + env(safe-area-inset-right)); background:rgba(255,120,20,.2); border:2px solid rgba(255,150,60,.9); }
   #gunBtn span{ color:#ffd2a6; }
   #gunBtn:active, #gunBtn.firing{ transform:scale(.92); background:rgba(255,120,20,.5); }
-  #aamBtn{ right:calc(96px + env(safe-area-inset-right)); background:rgba(255,255,255,.08); border:2px solid rgba(255,255,255,.6); }
+  #aamBtn{ right:calc(272px + env(safe-area-inset-right)); background:rgba(255,255,255,.08); border:2px solid rgba(255,255,255,.6); }
   #aamBtn span{ color:#e8eef4; }
   #aamBtn.locked{ border-color:#ff3b30; background:rgba(255,40,30,.35); box-shadow:0 0 16px rgba(255,40,30,.6); animation:aamPulse .5s ease-in-out infinite alternate; }
   @keyframes aamPulse{ to{ box-shadow:0 0 26px rgba(255,40,30,.9); } }
@@ -1402,6 +1402,7 @@
             <div><b>1 – 5</b>Pick weapon</div>
             <div><b>M / X</b>Fire</div>
             <div><b>T</b>Next target</div>
+            <div><b>J / K</b>Gun · AIM-9</div>
             <div><b>G</b>Flares (hold)</div>
             <div><b>H</b>Auto flares</div>
             <div><b>V</b>Drone sensor</div>
@@ -10093,7 +10094,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           m.active = false; m.group.visible = false;
           triggerMissileBlast(m.pos.clone());
           if (m.pos.distanceTo(position) < 1500 && typeof playMissileImpactSound === 'function') playMissileImpactSound();
-          if (!m.hostile) samOnGroundBlast(m.pos.clone(), 14);
+          if (!m.hostile) { if (m.tObj && m.tObj.isBandit) raHit(m.tObj, 220, 'aw'); else samOnGroundBlast(m.pos.clone(), 14); }
           else if (!m.decoy && m.tObj && m.tObj.alive && m.life <= 18) awShotDown(m.tObj);
         }
       });
@@ -14992,7 +14993,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
       nukeMinimap(ctx, toS, scale);
       cmdMinimap(ctx, toS, exp);
-      warMapOver(ctx, toS, exp, inView, label, scale);
+      warMapOver(ctx, toS, exp, inView, label, scale, rot);
       var hel = window.__airwingHelo;
       if (hel) { var hq = toS(hel.pos.x, hel.pos.z); ctx.fillStyle = '#7dff8a'; ctx.beginPath(); ctx.arc(hq.x, hq.y, 3, 0, Math.PI * 2); ctx.fill(); }
       // airfield: runway as a true oriented strip
@@ -17906,7 +17907,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var eb = samBearingTo(em.x, em.z), er = R * (em.lethal ? 0.55 : 0.85);
         rwrCtx.font = 'bold 13px monospace'; rwrCtx.textAlign = 'center'; rwrCtx.textBaseline = 'middle';
         rwrCtx.fillStyle = em.lethal ? '#ff3b30' : '#ffcc33';
-        rwrCtx.fillText('6', cx + Math.sin(eb) * er, cy - Math.cos(eb) * er);
+        rwrCtx.fillText(em.sym || '6', cx + Math.sin(eb) * er, cy - Math.cos(eb) * er);
       });
       if (samRadar && samRadar.alive && samBaseEmitting) {
         var b = samBearingTo(samRadar.pos.x, samRadar.pos.z);
@@ -18422,9 +18423,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       else if (eligible && samLock > 0.02 && tracking) state = 'lock';
       else if (eligible && samRadar.alive && dist < detectR * 1.35 && !masked) state = 'search';
       samBaseEmitting = state !== null && samRadar.alive && dist < detectR * 1.35;
-      var lockShown = samLock;
+      var lockShown = samLock, lockName = 'SAM LOCK ';
       if (WAR.on && state !== 'launch') {
-        if (WAR.lock > 0.02 && (state !== 'lock' || WAR.lock > samLock)) { state = 'lock'; lockShown = Math.max(samLock, WAR.lock); }
+        if (WAR.lock > 0.02 && (state !== 'lock' || WAR.lock > samLock)) { state = 'lock'; lockShown = Math.max(samLock, WAR.lock); if (WAR.lockBandit) lockName = 'BANDIT LOCK '; }
         else if (!state && WAR.search) state = 'search';
       }
 
@@ -18443,7 +18444,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (state) {
         rwrPanelEl.classList.remove('hidden');
         rwrPanelEl.className = 'rwr-' + state;
-        rwrTextEl.textContent = state === 'launch' ? 'MISSILE LAUNCH' : (state === 'lock' ? 'SAM LOCK ' + Math.round(lockShown * 100) + '%' : 'SAM SEARCH');
+        rwrTextEl.textContent = state === 'launch' ? 'MISSILE LAUNCH' : (state === 'lock' ? lockName + Math.round(lockShown * 100) + '%' : 'SAM SEARCH');
         samDrawRwr(state, samClock);
       } else {
         rwrPanelEl.className = 'hidden';
@@ -19672,6 +19673,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             ARS.hullHits += 0.25;
             if (Math.random() < 0.3) samToast('TAKING HITS', '#ff8a5a', 0.8);
             gfxHurtKick = Math.max(gfxHurtKick, 0.3);
+            if (t.dmg) pvpDamage(t.dmg, null);
             if (ARS.hullHits >= 6 && Math.random() < 0.15) { ARS.hullHits = 0; wreckDamage('gunfire'); }
           }
         }
@@ -19686,7 +19688,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var dir = aim.clone().sub(muzzle).normalize();
         dir.x += (Math.random() - 0.5) * spread * 2; dir.y += (Math.random() - 0.5) * spread * 2; dir.z += (Math.random() - 0.5) * spread * 2;
         dir.normalize();
-        t.pos.copy(muzzle); t.vel.copy(dir).multiplyScalar(900); t.life = 0; t.max = d / 900 + 0.4; t.active = true; t.s.visible = true;
+        t.pos.copy(muzzle); t.vel.copy(dir).multiplyScalar(900); t.life = 0; t.max = d / 900 + 0.4; t.active = true; t.s.visible = true; t.dmg = 0;
         g.flashes[g.barrel].material.opacity = Math.max(g.flashes[g.barrel].material.opacity, 0.7);
         g.barrel ^= 1;
         return;
@@ -20246,6 +20248,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var s = o.war;
       if (!s || !WAR.on || WAR.loading) return;
       WAR.kills++; WAR.dirty = true;
+      if (o.kind === 'jet' && s.stock !== undefined) s.stock = Math.max(0, s.stock - 2);
       if (s.owner !== 'red') return;
       s.known = true;
       var left = warKeysLeft(s), n = s.keys.length;
@@ -20458,8 +20461,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       ctx.restore();
     }
     // sector markers on top: owner colour, type glyph, name and how much of the garrison is left
-    function warMapOver(ctx, toS, exp, inView, label, scale) {
+    function warMapOver(ctx, toS, exp, inView, label, scale, rot) {
       if (!WAR.on) return;
+      raMap(ctx, toS, exp, inView, label, rot || 0);
       var pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
       var detectR = SAM_DETECT_RANGE * (isStealthMode ? 0.33 : 1);
       WAR.sectors.forEach(function(s) {
@@ -20485,6 +20489,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (exp) {
           if (s.type !== 'capital' && s.type !== 'outpost') label(WAR_TYPE[s.type].glyph, p.x, p.y + 0.5, '#0b0f14', 8);
           label(s.name, p.x, p.y - r - 8, col, 9);
+          if (s.owner === 'blue' && s.dmg > 1) {
+            var bw2 = 26;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(p.x - bw2 / 2, p.y + r + 4, bw2, 3);
+            ctx.fillStyle = '#ffae3a'; ctx.fillRect(p.x - bw2 / 2, p.y + r + 4, bw2 * s.dmg / 100, 3);
+          }
           if (s.owner === 'red' && s.keys.length) {
             var f = warKeysLeft(s) / s.keys.length, bw = 26;
             ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(p.x - bw / 2, p.y + r + 4, bw, 3);
@@ -20530,6 +20539,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (!WAR.on) return;
       var h = warHeld(), o = WAR.objective, html = '<span class="wf">⚑</span><b>' + h.held + '/' + h.total + '</b><span class="wl">SECTORS</span>';
       if (WAR.won) html += '<span class="wo" style="color:#f3c454">ISLAND LIBERATED</span>';
+      else if (RA.raid && RA.raid.target) html += '<span class="wo" style="color:#ff7a5a">⚠ RAID → ' + RA.raid.target.name + '</span>';
       else if (o) {
         var dx = o.x - position.x, dz = o.z - position.z;
         html += '<span class="wo">' + o.name + ' <i>' + mapFmtDist(Math.hypot(dx, dz)) + ' ' + warCompass(dx, dz) + '</i></span>';
@@ -20540,7 +20550,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     /* ---------- save / load ---------- */
     function warSave() {
       if (!WAR.on) return;
-      var o = { v: 1, sig: warSig(), own: '', known: '', dead: {}, score: WAR.score, kills: WAR.kills, won: WAR.won ? 1 : 0, t: Math.round(WAR.playT) };
+      var o = { v: 1, sig: warSig(), own: '', known: '', dead: {}, score: WAR.score, kills: WAR.kills, ak: WAR.airKills || 0, won: WAR.won ? 1 : 0, t: Math.round(WAR.playT), dmg: WAR.sectors.map(function(s) { return Math.round(s.dmg || 0); }) };
       WAR.sectors.forEach(function(s) {
         o.own += s.owner[0]; o.known += s.known ? '1' : '0';
         var d = [];
@@ -20560,7 +20570,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function warApplySave(o) {
       if (!o) return;
       var OWN = { b: 'blue', r: 'red', n: 'neutral' };
-      WAR.score = o.score || 0; WAR.kills = o.kills || 0; WAR.won = !!o.won; WAR.playT = o.t || 0;
+      WAR.score = o.score || 0; WAR.kills = o.kills || 0; WAR.airKills = o.ak || 0; WAR.won = !!o.won; WAR.playT = o.t || 0;
+      if (o.dmg) WAR.sectors.forEach(function(s, i) { s.dmg = o.dmg[i] || 0; });
       WAR.sectors.forEach(function(s, i) {
         s.known = o.known[i] === '1' || s.owner0 !== 'red';
         (o.dead[s.id] || []).forEach(function(k) { if (s.objs[k]) warKillQuiet(s.objs[k]); });
@@ -20600,11 +20611,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (!WAR.on) return;
       WAR.playT += dt;
       warUpdateSams(dt);
+      raUpdate(dt);
+      WAR.lockBandit = RA.lock > WAR.lock;
+      WAR.lock = Math.max(WAR.lock, RA.lock); WAR.search = WAR.search || RA.search;
+      RA.emitters.forEach(function(e) { WAR.emitters.push(e); });
       warWaveFlags(dt);
       _warSlowT += dt;
       if (_warSlowT >= 0.25) {
         var step = _warSlowT; _warSlowT = 0;
         warSpot(step);
+        WAR.sectors.forEach(function(s) { if (s.dmg > 0) s.dmg = Math.max(0, s.dmg - step / 15); });
         warPickObjective();
         warHud();
         // airborne awacs relays add their radio lines here even when the carrier group isn't up
@@ -20752,6 +20768,544 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       window.__warOpen = open;
       refresh();
     })();
+
+
+    /* ============================================================
+       CAMPAIGN — the enemy air force
+       Kastor and the forward airbases fly fighters: a combat air patrol over the capital and
+       another over the front, and a scramble whenever you come close to one of their fields.
+       They take off down the runway, climb out, and hunt you (or your wingmen) with IR missiles
+       and guns. Every few minutes a bomber raid leaves Kastor with an escort and heads for one
+       of your sectors; shoot the bombers down before they reach it, or the sector takes damage.
+       An enemy AWACS widens what their fighters can see, and a tanker keeps their patrols on
+       station: both orbit behind the lines and are worth a lot. Your gun (J) and AIM-9s (K)
+       work on all of them, and your own air wing joins in when bandits come near.
+       Kills pay out; parked fighters you destroy on the ground are fighters that never launch.
+       ============================================================ */
+    var RA = { list: [], seq: 1, t: 0, capT: 25, raidT: 210, awacsT: 60, tankerT: 120, scramble: {}, lock: 0, search: false,
+               emitters: [], bombs: [], raid: null };
+    var RA_KIND = {
+      fighter: { label: 'FIGHTER', cruise: 150, turn: 0.52, bank: 1.15, hp: 100, bounty: 250, score: 300 },
+      bomber:  { label: 'BOMBER', cruise: 105, turn: 0.16, bank: 0.5, hp: 280, bounty: 400, score: 500 },
+      awacs:   { label: 'ENEMY AWACS', cruise: 95, turn: 0.12, bank: 0.4, hp: 300, bounty: 800, score: 1000 },
+      tanker:  { label: 'TANKER', cruise: 95, turn: 0.12, bank: 0.4, hp: 240, bounty: 500, score: 600 }
+    };
+    function raMat(hex, r, m, ds) { var mm = new THREE.MeshStandardMaterial({ color: new THREE.Color(hex).convertSRGBToLinear(), roughness: r, metalness: m, flatShading: true }); if (ds) mm.side = THREE.DoubleSide; return mm; }
+    var RAM = {
+      camo: raMat(0x5d6652, 0.55, 0.3), camoDark: raMat(0x7a1d18, 0.5, 0.3), camoWing: raMat(0x4f5847, 0.55, 0.3, true),
+      heavy: raMat(0x4a4f45, 0.6, 0.3), heavyDark: raMat(0x2c2f2a, 0.6, 0.3), dome: raMat(0x8e2a22, 0.5, 0.2),
+      tanker: raMat(0x8f969c, 0.5, 0.35)
+    };
+    function raBuildMesh(kind) {
+      if (kind === 'fighter') return awCloneBody(jetBody, new Map([[matWhite, RAM.camo], [matRed, RAM.camoDark], [matWingWhite, RAM.camoWing]]));
+      var skin = kind === 'tanker' ? RAM.tanker : RAM.heavy;
+      var root = awCloneBody(awacsBody, new Map([[AWX.skin, skin], [AWX.dark, RAM.heavyDark], [AWX.dome, RAM.dome]]), 1.7);
+      var body = root.children[0], drop = [];
+      body.traverse(function(o) {
+        if (o.isMesh && o.material && o.material.isMeshBasicMaterial) drop.push(o);          // beacons + radar rings
+        else if (kind !== 'awacs' && o.parent === body && o.position.y > 1.9) drop.push(o);   // no rotodome on a bomber or tanker
+      });
+      drop.forEach(function(o) { o.parent.remove(o); });
+      return root;
+    }
+    function raNew(kind, home) {
+      var K = RA_KIND[kind];
+      var b = {
+        kind: kind, isBandit: true, id: 'ra' + (RA.seq++), type: kind, name: K.label, mesh: raBuildMesh(kind),
+        pos: new THREE.Vector3(), vel: new THREE.Vector3(), heading: 0, pitch: 0, roll: 0, speed: 0,
+        cruise: K.cruise * (0.95 + Math.random() * 0.1), turnRate: K.turn, maxBank: K.bank, hp: K.hp, maxHp: K.hp, alive: true,
+        state: 'spawn', mission: null, home: home, t: 0, life: 0, aam: kind === 'fighter' ? 2 : 0, flares: 3, missileCd: 6, gunT: 0, burst: 0,
+        target: null, engageT: 0, fallV: 0, smokeT: 0, seen: false, leader: null, slot: 0, bombs: kind === 'bomber' ? 6 : 0, threat: null
+      };
+      b.rPos = b.pos; b.model = b.mesh;
+      RA.list.push(b);
+      return b;
+    }
+    function raRemove(b) { b.alive = false; b.gone = true; scene.remove(b.mesh); }
+    function raEnemies() {
+      if (!WAR.on) return [];
+      return RA.list.filter(function(b) { return b.alive && b.state !== 'roll' && b.state !== 'down'; });
+    }
+    function raAirbases() {
+      return WAR.sectors.filter(function(s) { return s.strip && s.owner === 'red'; });
+    }
+    function raStock(s) {
+      if (s.stock === undefined) {
+        var jets = s.objs.filter(function(o) { return o.kind === 'jet'; }), dead = jets.filter(function(o) { return !o.alive; }).length;
+        s.stock = (s.type === 'capital' ? 10 : 5) - dead * 2;
+      }
+      return s.stock;
+    }
+
+    /* ---------- launching ---------- */
+    // from the runway: a takeoff roll, then a climb-out straight ahead
+    function raLaunch(base, kind, i) {
+      var st = base.strip, b = raNew(kind, base);
+      b.heading = Math.atan2(-st.ux, -st.uz);
+      var back = st.L / 2 - 40;
+      b.pos.set(st.x - st.ux * back, st.y + PLANE_GROUND_OFFSET, st.z - st.uz * back);
+      b.state = 'roll'; b.t = -(i || 0) * 5; b.speed = 0;       // the wingman rolls five seconds behind
+      awPose(b);
+      return b;
+    }
+    // already in the air over a base (raids, AWACS, tankers form up out of sight)
+    function raAirborne(base, kind, alt) {
+      var b = raNew(kind, base);
+      b.pos.set(base.x + (Math.random() - 0.5) * 400, Math.max(getTerrainHeight(base.x, base.z), WATER_LEVEL) + alt, base.z + (Math.random() - 0.5) * 400);
+      b.heading = Math.random() * 6.28; b.speed = b.cruise; b.state = 'mission';
+      awPose(b);
+      return b;
+    }
+    function raPair(base, mission, extra) {
+      if (raStock(base) < 2) return [];
+      base.stock -= 2;
+      var out = [raLaunch(base, 'fighter', 0), raLaunch(base, 'fighter', 1)];
+      out.forEach(function(b) { b.mission = mission; Object.assign(b, extra || {}); });
+      out[1].leader = out[0];
+      return out;
+    }
+    function raNearestBase(x, z) {
+      var best = null, bd = Infinity;
+      raAirbases().forEach(function(s) { if (raStock(s) < 2) return; var d = Math.hypot(s.x - x, s.z - z); if (d < bd) { bd = d; best = s; } });
+      return best;
+    }
+    function raCount(fn) { var n = 0; RA.list.forEach(function(b) { if (b.alive && fn(b)) n++; }); return n; }
+
+    /* ---------- strategic layer: patrols, scrambles, raids, support aircraft ---------- */
+    function raStrategy(dt) {
+      var bases = raAirbases(), cap = WAR.sectors.filter(function(s) { return s.type === 'capital' && s.owner === 'red'; })[0];
+      bases.forEach(function(s) { if (RA.t % 90 < dt && raStock(s) < (s.type === 'capital' ? 10 : 5) && s.objs.some(function(o) { return o.kind === 'hangar' && o.alive; })) s.stock++; });
+      var fighters = raCount(function(b) { return b.kind === 'fighter'; });
+      // combat air patrols: one over the capital, one over the front
+      if ((RA.capT -= dt) <= 0) {
+        RA.capT = 45;
+        var front = null, fd = Infinity, home = WAR.sectors[0];
+        WAR.sectors.forEach(function(s) { if (s.owner === 'red' && s.type !== 'capital') { var d = Math.hypot(s.x - home.x, s.z - home.z); if (d < fd) { fd = d; front = s; } } });
+        [cap, front].forEach(function(over, k) {
+          if (!over || fighters > 6) return;
+          var tag = k ? 'front' : 'capital';
+          if (raCount(function(b) { return b.mission === 'cap' && b.capTag === tag; }) >= 2) return;
+          var base = raNearestBase(over.x, over.z);
+          if (!base) return;
+          var p = raPair(base, 'cap', { capTag: tag, capC: { x: over.x, z: over.z }, capR: 1300 + Math.random() * 500 });
+          fighters += p.length;
+        });
+      }
+      // scramble when you come near one of their fields
+      if (started && !crashing && !isCarMode && !wasGrounded) {
+        bases.forEach(function(s) {
+          var cd = RA.scramble[s.id] || 0;
+          if (cd > 0) { RA.scramble[s.id] = cd - dt; return; }
+          if (Math.hypot(position.x - s.x, position.z - s.z) > 5500 || fighters > 7) return;
+          var p = raPair(s, 'intercept', { target: 'player' });
+          if (!p.length) return;
+          fighters += 2;
+          RA.scramble[s.id] = 150;
+          awRadio('OVERLORD: Bandits scrambling from ' + s.name + '! Two fighters, coming for you.', '#ff9a7a');
+        });
+      }
+      // bomber raids out of Kastor, with an escort
+      if (cap && (RA.raidT -= dt) <= 0) {
+        RA.raidT = 300 + Math.random() * 120;
+        if (!RA.raid || !RA.raid.bombers.some(function(b) { return b.alive; })) raLaunchRaid(cap);
+      }
+      // the high-value aircraft orbiting behind the lines
+      ['awacs', 'tanker'].forEach(function(kind) {
+        if (!cap || RA[kind] && RA[kind].alive) return;
+        var key = kind + 'T';
+        if ((RA[key] -= dt) > 0) return;
+        RA[key] = 600;
+        var home0 = WAR.sectors[0], ax = home0.x - cap.x, az = home0.z - cap.z, al = Math.hypot(ax, az) || 1;
+        var b = raAirborne(cap, kind, kind === 'awacs' ? 1700 : 1350);
+        var off = kind === 'awacs' ? 0.2 : -0.12, side = kind === 'awacs' ? 0 : 1800;
+        b.mission = 'orbit'; b.orbitC = { x: cap.x + ax * off - az / al * side, z: cap.z + az * off + ax / al * side }; b.orbitR = kind === 'awacs' ? 2600 : 2000;
+        b.alt = b.pos.y; b.orbitA = 0;
+        RA[kind] = b;
+      });
+    }
+    function raLaunchRaid(cap) {
+      // the target: a sector you took back near the front, else home or the city
+      var tgts = WAR.sectors.filter(function(s) { return s.owner === 'blue' && s.owner0 !== 'blue'; });
+      tgts.sort(function(a, b) { return Math.hypot(a.x - cap.x, a.z - cap.z) - Math.hypot(b.x - cap.x, b.z - cap.z); });
+      var target = tgts.length && Math.random() < 0.7 ? tgts[0] : WAR.sectors[Math.random() < 0.5 ? 0 : 1];
+      var n = WAR.score > 4000 ? 2 : 1, bombers = [], escorts = [];
+      for (var i = 0; i < n; i++) {
+        var b = raAirborne(cap, 'bomber', 900);
+        b.mission = 'raid'; b.raidTarget = target; b.alt = b.pos.y; bombers.push(b);
+        if (i) { b.leader = bombers[0]; b.slot = i; b.pos.copy(bombers[0].pos).add(new THREE.Vector3(60, 0, 80)); }
+      }
+      if (raStock(cap) >= 2) {
+        cap.stock -= 2;
+        for (var k = 0; k < 2; k++) {
+          var e = raAirborne(cap, 'fighter', 980);
+          e.mission = 'escort'; e.leader = bombers[0]; e.slot = k + 1;
+          e.pos.copy(bombers[0].pos).add(new THREE.Vector3(k ? 160 : -160, 60, 120));
+          escorts.push(e);
+        }
+      }
+      RA.raid = { target: target, bombers: bombers, escorts: escorts, warned: false };
+      awRadio('OVERLORD: Enemy bombers airborne out of Kastor, heading for ' + target.name + '. Intercept them!', '#ff9a7a');
+      warBanner('RAID INBOUND', (n > 1 ? n + ' BOMBERS' : 'BOMBER') + (escorts.length ? ' + ESCORT' : '') + ' → ' + target.name, '#ff6a4a', 4);
+    }
+
+    /* ---------- flying ---------- */
+    var _raV = new THREE.Vector3(), _raV2 = new THREE.Vector3(), _raV3 = new THREE.Vector3(), _raPrev = new THREE.Vector3();
+    function raDetects(b, p, isPlayer) {
+      var d = b.pos.distanceTo(p);
+      var r = 4300;
+      if (isPlayer) {
+        if (isStealthMode) r *= 0.45;
+        if (isAwacsMode) r *= 1.3;                 // a big radar return
+        var agl = position.y - Math.max(getEffectiveGroundHeight(position.x, position.z), WATER_LEVEL);
+        if (agl < 60) r *= 0.35;                   // down in the weeds
+        if (RA.awacs && RA.awacs.alive && RA.awacs.pos.distanceTo(p) < 14000) r *= 1.5;
+      }
+      return d < r;
+    }
+    function raPlayerTargetable() { return started && !crashing && !ejecting && !isCarMode && !wasGrounded && !kj.boxed; }
+    function raPickTarget(b) {
+      var best = null, bd = Infinity;
+      if (raPlayerTargetable() && raDetects(b, position, true)) { best = 'player'; bd = b.pos.distanceTo(position); }
+      AW.list.forEach(function(a) {
+        if (!a.alive || a.state === 'down' || a.state === 'catwait' || a.state === 'cat' || a.state === 'parked') return;
+        if (a.pos.y - getTerrainHeight(a.pos.x, a.pos.z) < 40) return;
+        var d = b.pos.distanceTo(a.pos);
+        if (d < 3500 && d < bd * 0.8) { best = a; bd = d; }
+      });
+      return best;
+    }
+    function raTgtPos(t) { return t === 'player' ? position : t.pos; }
+    function raTgtVel(t, out) { return t === 'player' ? out.copy(samPlayerVel) : awFwd(t, out).multiplyScalar(t.speed || 0); }
+    function raTgtAlive(t) { return t === 'player' ? raPlayerTargetable() : (t && t.alive && t.state !== 'down'); }
+
+    function raFly(b, dt) {
+      b.t += dt; b.life += dt;
+      if (b.missileCd > 0) b.missileCd -= dt;
+      var st = b.home && b.home.strip;
+      if (b.state === 'roll') {
+        if (b.t < 0) { b.mesh.visible = b.t > -0.01; return; }
+        b.mesh.visible = true;
+        b.speed = Math.min(95, b.speed + 11 * dt);
+        b.pos.addScaledVector(awFwd(b, _raV), b.speed * dt);
+        if (st) b.pos.y = st.y + PLANE_GROUND_OFFSET;
+        if (b.speed > 72) { b.state = 'climb'; b.t = 0; }
+        if (Math.random() < dt * 20) samEmitSmoke(_raV.copy(b.pos).addScaledVector(awFwd(b, _raV2), -7), _raV3.set(0, 0.4, 0), 3, 1.2, 0.25, 0.8);
+        return;
+      }
+      if (b.state === 'climb') {
+        var f = awFwd(b, _raV);
+        awSteer(b, b.pos.x + f.x * 2000, (st ? st.y : b.pos.y) + 420, b.pos.z + f.z * 2000, dt, b.cruise);
+        if (b.t > 14 || (st && b.pos.y > st.y + 300)) b.state = 'mission';
+        return;
+      }
+      if (b.state === 'down') {
+        b.fallV += 9.8 * dt;
+        var fd = awFwd(b, _raV); fd.y = 0;
+        b.pos.addScaledVector(fd, b.speed * 0.75 * dt); b.pos.y -= b.fallV * dt;
+        b.roll += dt * 2.2; b.pitch = Math.max(-1.2, b.pitch - dt * 0.5);
+        if ((b.smokeT -= dt) <= 0) { b.smokeT = 0.05; samEmitSmoke(b.pos, _raV.set(0, 1, 0), 7, 3.5, 0.7, 0.12); }
+        var gh = Math.max(getTerrainHeight(b.pos.x, b.pos.z), WATER_LEVEL);
+        if (b.pos.y <= gh + 1) {
+          b.pos.y = gh + 1; triggerMissileBlast(b.pos.clone());
+          if (b.pos.distanceTo(position) < 2500) playMissileImpactSound();
+          stIgniteFire(b.pos.clone(), b.kind === 'fighter' ? 6 : 10, 50);
+          raRemove(b);
+        }
+        return;
+      }
+      // mission logic
+      var K = b.kind;
+      if (K === 'fighter') raFighter(b, dt);
+      else if (K === 'bomber') raBomber(b, dt);
+      else raOrbit(b, dt);
+      // a player missile on its way: flares and a hard break
+      if (b.threat && b.threat.active && b.threat.target === b) {
+        var md = b.threat.pos.distanceTo(b.pos);
+        if (md < 950 && !b.threat.reacted) {
+          b.threat.reacted = true;
+          if (b.flares > 0 && Math.random() < 0.7) {
+            b.flares--; awPopFlares(b);
+            if (Math.random() < 0.42) { b.threat.target = null; b.threat.decoyed = true; samToast('MISSILE DECOYED BY FLARES', '#ffcc33', 1.4); }
+          }
+          b.breakT = 2.5; b.breakDir = Math.random() < 0.5 ? -1 : 1;
+        }
+      }
+    }
+    function raRtb(b) {
+      var home = b.home && b.home.owner === 'red' ? b.home : WAR.sectors.filter(function(s) { return s.type === 'capital' && s.owner === 'red'; })[0] || b.home;
+      b.mission = 'rtb'; b.home = home; b.target = null;
+    }
+    function raFighter(b, dt) {
+      var limit = (b.mission === 'cap' ? 260 : 200) * (RA.tanker && RA.tanker.alive ? 2 : 1);
+      if (b.mission !== 'rtb' && b.mission !== 'escort' && b.life > limit) raRtb(b);
+      if (b.mission === 'escort' && (!b.leader || !b.leader.alive || b.leader.mission === 'rtb') && !b.target) raRtb(b);
+      // look for trouble every second or so
+      if ((b.scanT = (b.scanT || 0) - dt) <= 0 && b.mission !== 'rtb') {
+        b.scanT = 1 + Math.random() * 0.5;
+        if (!b.target || !raTgtAlive(b.target)) {
+          var t = b.mission === 'intercept' && raPlayerTargetable() ? 'player' : raPickTarget(b);
+          if (t && b.mission === 'escort' && b.leader && raTgtPos(t).distanceTo(b.leader.pos) > 3500) t = null;
+          if (t && t !== b.target) { b.target = t; b.engageT = 0; if (t === 'player' && b.pos.distanceTo(position) < 6000) samToast('BANDIT ENGAGING', '#ff8a6a', 1.6); }
+        }
+      }
+      if (b.target && !raTgtAlive(b.target)) b.target = null;
+      if (b.target) {
+        var T = b.target, tp = raTgtPos(T), d = b.pos.distanceTo(tp);
+        b.engageT += dt;
+        if (d > 9000 || b.engageT > 120) { b.target = null; if (b.mission === 'intercept') raRtb(b); return; }
+        var tv = raTgtVel(T, _raV2), lead = THREE.MathUtils.clamp(d / 380, 0, 1.6);
+        var ax = tp.x + tv.x * lead, ay = tp.y + tv.y * lead, az = tp.z + tv.z * lead;
+        if (b.breakT > 0) {
+          // defensive break: hard turn away, then back into the fight
+          b.breakT -= dt;
+          var bf = awFwd(b, _raV);
+          ax = b.pos.x + (bf.x * Math.cos(1.2) - bf.z * Math.sin(1.2) * b.breakDir) * 800;
+          az = b.pos.z + (bf.z * Math.cos(1.2) + bf.x * Math.sin(1.2) * b.breakDir) * 800;
+          ay = b.pos.y - 60;
+        }
+        awSteer(b, ax, ay, az, dt, d > 1500 ? b.cruise * 1.3 : b.cruise * 1.05);
+        var fwd = awFwd(b, _raV), to = _raV3.copy(tp).sub(b.pos).normalize(), ang = Math.acos(THREE.MathUtils.clamp(fwd.dot(to), -1, 1));
+        if (T === 'player' && d < 3800) b.locking = true;
+        // missile: a heater off the rail when the nose is on
+        if (b.aam > 0 && b.missileCd <= 0 && d < 2300 && d > 450 && ang < 0.35 && !b.breakT) {
+          b.aam--; b.missileCd = 10 + Math.random() * 6;
+          if (T === 'player') raFireAtPlayer(b); else awFire(b.pos.clone(), T, null, true, b);
+        }
+        // guns: short bursts inside 750 m with the pipper on
+        if (d < 750 && ang < 0.12) {
+          if ((b.gunT -= dt) <= 0) {
+            if (++b.burst > 12) { b.burst = 0; b.gunT = 0.8 + Math.random() * 0.8; }
+            else {
+              b.gunT = 0.07;
+              if (T === 'player') raTracer(b, tp, tv, d);
+              else if (Math.random() < 0.025) awShotDown(T);
+            }
+          }
+        }
+        return;
+      }
+      b.locking = false;
+      if (b.mission === 'escort' && b.leader && b.leader.alive) {
+        var L = b.leader, lf = awFwd(L, _raV), side = b.slot % 2 ? 1 : -1;
+        var ex = L.pos.x - lf.x * 120 + lf.z * 160 * side, ez = L.pos.z - lf.z * 120 - lf.x * 160 * side;
+        awSteer(b, ex, L.pos.y + 60, ez, dt, L.speed + Math.min(40, b.pos.distanceTo(_raV2.set(ex, L.pos.y + 60, ez)) * 0.2));
+        return;
+      }
+      if (b.mission === 'cap' && b.capC) {
+        // racetrack-ish orbit around the patrol point
+        b.capA = (b.capA || Math.random() * 6.28) + dt * b.cruise / b.capR;
+        var cx = b.capC.x + Math.cos(b.capA) * b.capR, cz = b.capC.z + Math.sin(b.capA) * b.capR;
+        awSteer(b, cx, Math.max(getTerrainHeight(cx, cz), WATER_LEVEL) + 750, cz, dt, b.cruise);
+        return;
+      }
+      if (b.mission === 'intercept') {
+        // vectored toward where you were last seen
+        awSteer(b, position.x, Math.max(position.y, 300), position.z, dt, b.cruise * 1.2);
+        return;
+      }
+      raGoHome(b, dt);
+    }
+    function raGoHome(b, dt) {
+      var h = b.home || WAR.sectors[0];
+      var d = awSteer(b, h.x, Math.max(getTerrainHeight(h.x, h.z), WATER_LEVEL) + 500, h.z, dt, b.cruise);
+      if (d < 700) { if (b.home && b.home.strip && b.kind === 'fighter') b.home.stock = (b.home.stock || 0) + 1; raRemove(b); }
+    }
+    function raBomber(b, dt) {
+      if (b.mission === 'rtb') { raGoHome(b, dt); return; }
+      var T = b.raidTarget;
+      if (!T) { raRtb(b); return; }
+      if (b.leader && b.leader.alive && b.leader.mission === 'raid') {
+        var L = b.leader, lf = awFwd(L, _raV);
+        awSteer(b, L.pos.x - lf.x * 90 + lf.z * 70, L.pos.y, L.pos.z - lf.z * 90 - lf.x * 70, dt, L.speed + 4);
+      } else {
+        awSteer(b, T.x, Math.max(getTerrainHeight(T.x, T.z), WATER_LEVEL) + 650, T.z, dt, b.cruise);
+      }
+      var hd = Math.hypot(b.pos.x - T.x, b.pos.z - T.z);
+      if (hd < 9000 && RA.raid && !RA.raid.warned && RA.raid.target === T) {
+        RA.raid.warned = true;
+        awRadio('OVERLORD: Bombers nine kilometres out from ' + T.name + '!', '#ff9a7a');
+      }
+      // over the target: a stick of bombs, then home
+      if (hd < 450 && b.bombs > 0) {
+        if ((b.dropT = (b.dropT || 0) - dt) <= 0) { b.dropT = 0.35; b.bombs--; raDropBomb(b); }
+      }
+      if (b.bombs <= 0 && !b.hitDone) {
+        b.hitDone = true;
+        T.dmg = Math.min(100, (T.dmg || 0) + 34);
+        WAR.dirty = true; WAR.terrDirty = true;
+        samToast(T.name + ' BOMBED — DAMAGE ' + Math.round(T.dmg) + '%', '#ff6a4a', 3);
+        awRadio('OVERLORD: ' + T.name + ' has been hit. Damage at ' + Math.round(T.dmg) + ' percent.', '#ff9a7a');
+        raRtb(b);
+      }
+    }
+    function raOrbit(b, dt) {
+      b.orbitA = (b.orbitA || 0) + dt * b.cruise / b.orbitR;
+      var x = b.orbitC.x + Math.cos(b.orbitA) * b.orbitR, z = b.orbitC.z + Math.sin(b.orbitA) * b.orbitR;
+      awSteer(b, x, Math.max(b.alt || 1400, getTerrainHeight(x, z) + 500), z, dt, b.cruise);
+    }
+
+    /* ---------- weapons ---------- */
+    function raFireAtPlayer(b) {
+      var m = null;
+      for (var i = 0; i < samMissiles.length; i++) if (!samMissiles[i].active) { m = samMissiles[i]; break; }
+      if (!m) return;
+      var f = awFwd(b, _raV);
+      m.pos.copy(b.pos).addScaledVector(f, 6).add(_raV2.set(0, -1.5, 0)); m.prev.copy(m.pos);
+      m.vel.copy(f).multiplyScalar(b.speed + 40);
+      m.active = true; m.life = 0; m.target = 'player'; m.lost = 0; m.seen = {}; m.smokeT = 0; m.reacquireTried = false;
+      m.los = (m.los || new THREE.Vector3()).copy(position).sub(m.pos).normalize();
+      m.owner = null; m.mid = null; m._miss = 99;
+      m.group.visible = true;
+      if (b.pos.distanceTo(position) < 2500) playMissileLaunchSound();
+      samLaunchWarn = 3;
+      samToast('MISSILE LAUNCH — BANDIT — FLARES!', '#ff3b30', 2.4);
+    }
+    function raTracer(b, tp, tv, d) {
+      for (var i = 0; i < AA_TRACERS.length; i++) {
+        var t = AA_TRACERS[i];
+        if (t.active) continue;
+        var f = awFwd(b, _raV);
+        t.pos.copy(b.pos).addScaledVector(f, 7);
+        var tof = d / 950;
+        var aim = _raV2.copy(tp).addScaledVector(tv, tof);
+        var dir = aim.sub(t.pos).normalize(), spread = 0.012 + (isStealthMode ? 0.01 : 0);
+        dir.x += (Math.random() - 0.5) * spread * 2; dir.y += (Math.random() - 0.5) * spread * 2; dir.z += (Math.random() - 0.5) * spread * 2;
+        t.vel.copy(dir.normalize()).multiplyScalar(950).addScaledVector(f, b.speed);
+        t.life = 0; t.max = d / 950 + 0.5; t.active = true; t.s.visible = true; t.dmg = 3.5;
+        if (d < 1500 && audioCtx && soundEnabled && typeof pvpGunSound === 'function' && Math.random() < 0.5) pvpGunSound();
+        return;
+      }
+    }
+    function raDropBomb(b) {
+      var bm = null;
+      for (var i = 0; i < RA.bombs.length; i++) if (!RA.bombs[i].active) { bm = RA.bombs[i]; break; }
+      if (!bm) {
+        var g = new THREE.Group();
+        var body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.3, 3, 8), RAM.heavyDark); body.rotation.x = Math.PI / 2; g.add(body);
+        scene.add(g); bm = { group: g, pos: new THREE.Vector3(), vel: new THREE.Vector3(), active: false }; RA.bombs.push(bm);
+      }
+      bm.active = true; bm.pos.copy(b.pos).add(_raV.set(0, -2, 0));
+      bm.vel.copy(awFwd(b, _raV2)).multiplyScalar(b.speed); bm.vel.y = Math.min(0, bm.vel.y);
+      bm.group.visible = true;
+    }
+    function raUpdateBombs(dt) {
+      RA.bombs.forEach(function(bm) {
+        if (!bm.active) return;
+        bm.vel.y -= 9.8 * dt; bm.pos.addScaledVector(bm.vel, dt);
+        bm.group.position.copy(bm.pos); bm.group.lookAt(_raV.copy(bm.pos).add(bm.vel));
+        var gh = Math.max(getEffectiveGroundHeight(bm.pos.x, bm.pos.z), WATER_LEVEL);
+        if (bm.pos.y <= gh + 0.5) {
+          bm.active = false; bm.group.visible = false; bm.pos.y = gh + 0.5;
+          triggerMissileBlast(bm.pos.clone());
+          for (var s = 0; s < 6; s++) samEmitSmoke(bm.pos, _raV.set((Math.random() - 0.5) * 14, 6 + Math.random() * 8, (Math.random() - 0.5) * 14), 14, 6, 0.6, 0.3);
+          var dd = bm.pos.distanceTo(position);
+          if (dd < 2500) playMissileImpactSound();
+          if (dd < 40 && started && !crashing) { pvpDamage(40 * (1 - dd / 40), null); gfxShockwave(bm.pos, 0.6); }
+        }
+      });
+    }
+
+    /* ---------- taking hits ---------- */
+    function raHit(b, dmg, by) {
+      if (!b.alive || b.state === 'down') return;
+      b.hp -= dmg;
+      if (by === 'gun' || by === 'aam') { b.target = b.target || 'player'; b.hitBy = by; }
+      if (b.hp > 0) {
+        if (by === 'aam') samToast(b.name + ' HIT', '#ffd27a', 1.2);
+        if (b.hp < b.maxHp * 0.4) b.smoking = true;
+        return;
+      }
+      b.state = 'down'; b.fallV = 0; b.target = null;
+      triggerMissileBlast(b.pos.clone());
+      if (b.pos.distanceTo(position) < 2500) playMissileImpactSound();
+      var K = RA_KIND[b.kind];
+      if (by === 'gun' || by === 'aam') {
+        coins += K.bounty; lastCoinSaveAt = -999; maybeSaveCoins(elapsedSeconds);
+        WAR.kills++; WAR.airKills = (WAR.airKills || 0) + 1; WAR.score += K.score; WAR.dirty = true;
+        samToast((b.kind === 'fighter' ? 'SPLASH ONE — ' : '') + K.label + ' DOWN  +◆' + K.bounty, '#7dff8a', 2.6);
+        if (typeof pvpFeed === 'function') pvpFeed('<b style="color:#7dff8a">' + pvpEsc(net.name || 'YOU') + '</b> splashed <b style="color:#ff6a4a">' + K.label + '</b>');
+        if (b.kind === 'awacs' || b.kind === 'tanker') warBanner(K.label + ' DOWN', 'High-value target destroyed  ·  +◆' + K.bounty, '#7dff8a', 4);
+      } else {
+        WAR.score += Math.round(K.score / 3); WAR.dirty = true;
+        awRadio('Splash one ' + K.label.toLowerCase() + '! Good kill.', '#9fd0ff');
+      }
+      if (RA.raid && RA.raid.bombers.indexOf(b) >= 0 && !RA.raid.bombers.some(function(x) { return x.alive && x.state !== 'down'; })) {
+        awRadio('OVERLORD: Raid broken up — ' + RA.raid.target.name + ' is safe. Nice work.', '#9fd0ff');
+        RA.raid = null;
+      }
+      if (b === RA.awacs) awRadio('OVERLORD: Their AWACS is down. They\'re half blind out there.', '#9fd0ff');
+      if (b === RA.tanker) awRadio('OVERLORD: Tanker down. Their patrols will be running short of fuel.', '#9fd0ff');
+    }
+
+    /* ---------- our side joins in: wingmen take shots at bandits that come close ---------- */
+    function raWingmen(dt) {
+      AW.list.forEach(function(a) {
+        if (!a.alive || a.kind !== 'fighter' || a.state === 'down' || a.state === 'catwait' || a.state === 'cat' || a.state === 'parked') return;
+        if (a.aam === undefined) a.aam = 2;
+        if (a.aam <= 0 || (a.aamCd = (a.aamCd || 0) - dt) > 0) return;
+        var best = null, bd = 3200;
+        RA.list.forEach(function(b) {
+          if (!b.alive || b.state === 'down' || b.state === 'roll') return;
+          var d = a.pos.distanceTo(b.pos);
+          if (d < bd) { bd = d; best = b; }
+        });
+        if (!best) return;
+        a.aam--; a.aamCd = 7;
+        awFire(a.pos.clone(), best, null, false, a);
+        awRadio(a.name + ': Fox two on a ' + RA_KIND[best.kind].label.toLowerCase() + '!', '#bfe3ff');
+        best.threat = { pos: a.pos, active: true, target: best, reacted: true };
+      });
+    }
+
+    /* ---------- per frame ---------- */
+    function raUpdate(dt) {
+      RA.t += dt;
+      raStrategy(dt);
+      var lock = 0, search = false;
+      RA.emitters.length = 0;
+      for (var i = RA.list.length - 1; i >= 0; i--) {
+        var b = RA.list[i];
+        if (b.gone) { RA.list.splice(i, 1); continue; }
+        raFly(b, dt);
+        if (b.gone) continue;
+        b.vel.copy(awFwd(b, b.vel)).multiplyScalar(b.state === 'down' ? 0 : b.speed);
+        awPose(b);
+        if (b.smoking && b.state !== 'down' && Math.random() < dt * 14) samEmitSmoke(b.pos, _raV.set(0, 0.5, 0), 4, 2.5, 0.5, 0.25);
+        var dp = b.pos.distanceTo(position);
+        // what can we see of them: up close, from our AWACS, near our ground radars
+        b.seen = dp < 6500 || (isAwacsMode && dp < 12000) || (b.mission === 'raid' && RA.raid) ||
+                 WAR.sectors.some(function(s) { return s.owner === 'blue' && Math.hypot(s.x - b.pos.x, s.z - b.pos.z) < 4500; });
+        if (b.kind === 'fighter' && b.target === 'player' && b.locking && dp < 3800) {
+          lock = Math.max(lock, THREE.MathUtils.clamp(1 - dp / 3800, 0.2, 1));
+          RA.emitters.push({ x: b.pos.x, z: b.pos.z, lethal: true, sym: 'F' });
+        } else if (b.kind === 'awacs' && dp < 14000) { search = true; RA.emitters.push({ x: b.pos.x, z: b.pos.z, lethal: false, sym: 'A' }); }
+      }
+      RA.lock = lock; RA.search = search;
+      raUpdateBombs(dt);
+      raWingmen(dt);
+    }
+    // bandits on the chart: red arrowheads, the raid's track to its target
+    function raMap(ctx, toS, exp, inView, label, rot) {
+      if (RA.raid && RA.raid.target) {
+        var lead = RA.raid.bombers.filter(function(b) { return b.alive && b.state !== 'down'; })[0];
+        if (lead) {
+          var p0 = toS(lead.pos.x, lead.pos.z), p1 = toS(RA.raid.target.x, RA.raid.target.z);
+          ctx.strokeStyle = 'rgba(255,80,60,0.75)'; ctx.lineWidth = 1.3; ctx.setLineDash([4, 4]);
+          ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke(); ctx.setLineDash([]);
+        }
+      }
+      RA.list.forEach(function(b) {
+        if (!b.alive || !b.seen || b.state === 'roll' || (b.t < 0)) return;
+        var p = toS(b.pos.x, b.pos.z);
+        if (!inView(p, 4)) return;
+        var big = b.kind !== 'fighter', s = big ? 1.5 : 1;
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(-b.heading + rot);
+        ctx.fillStyle = b.state === 'down' ? 'rgba(160,160,160,.8)' : '#ff4a3a'; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, -6 * s); ctx.lineTo(4.2 * s, 4.5 * s); ctx.lineTo(0, 2.2 * s); ctx.lineTo(-4.2 * s, 4.5 * s); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.restore();
+        if (exp && big) label(RA_KIND[b.kind].label, p.x, p.y - 12, '#ff7a64', 8);
+      });
+    }
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
@@ -21408,8 +21962,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       setTimeout(function() { d.classList.add('fade'); setTimeout(function() { d.remove(); }, 600); }, 6000);
     }
     function pvpEsc(s) { return String(s || '').replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-    function pvpArmed() { return started && !crashing && !ejecting && !isCarMode && !isDroneMode; }
-    function pvpEnemies() { return Object.keys(net.peers).map(function(id) { return net.peers[id]; }).filter(function(p) { return p.model && p.model.visible && !(p.flags & 1); }); }
+    function pvpArmed() { return started && !crashing && !ejecting && !isCarMode && !isDroneMode && !isAwacsMode; }
+    function pvpEnemies() {
+      return Object.keys(net.peers).map(function(id) { return net.peers[id]; }).filter(function(p) { return p.model && p.model.visible && !(p.flags & 1); })
+        .concat(raEnemies().filter(function(b) { return b.pos.distanceTo(position) < 7000; }));
+    }
     function pvpInSafeZone(x, z) { var dx = x - RUNWAY_CENTER_X, dz = z - RUNWAY_CENTER_Z; return dx * dx + dz * dz < PVP_SAFE_R * PVP_SAFE_R; }
 
     /* ---------- audio: gun rasp, missile growl / lock tone ---------- */
@@ -21472,10 +22029,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var done = r.life > PVP_GUN_RANGE_T || r.pos.y < gh;
         for (var k = 0; k < enemies.length && !done; k++) {
           var e = enemies[k];
-          var rad = e.type === 'helicopter' ? 7 : 6;
+          var rad = e.isBandit ? (e.kind === 'fighter' ? 7 : 16) : e.type === 'helicopter' ? 7 : 6;
           if (pvpSegHitsSphere(r.prev, r.pos, e.rPos, rad)) {
             done = true;
-            netEmit('hit', { t: e.id, d: PVP_GUN_DMG });
+            if (e.isBandit) raHit(e, PVP_GUN_DMG * 1.6, 'gun');
+            else netEmit('hit', { t: e.id, d: PVP_GUN_DMG });
             pvpSpark.sprite.position.copy(r.pos); pvpSpark.sprite.scale.set(5, 5, 1);
             pvpSpark.sprite.material.opacity = 1; pvpSpark.sprite.visible = true; pvpSpark.life = 0; pvpSpark.maxLife = 0.12;
             pvp.hitFlash = 0.25;
@@ -21508,6 +22066,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var mid = net.id + '-' + (++pvp.mid);
       var p = _pvA.copy(position).addScaledVector(forwardVec, 4).add(_pvB.set(0, -1.2, 0));
       var v = _pvB.copy(forwardVec).multiplyScalar(Math.max(Math.abs(speed), 60) + 40);
+      if (pvp.lockTgt.isBandit) {
+        // a campaign bandit: this missile is the real thing, flown and scored right here
+        var bc = pvpSpawnCosmetic(p, v, pvp.lockTgt, mid);
+        if (bc) pvp.lockTgt.threat = bc;
+        playMissileLaunchSound();
+        samToast('FOX 2', '#ffe7a8', 1.2);
+        return;
+      }
       netEmit('aam', { t: pvp.lockTgt.id, m: mid, p: [Math.round(p.x), Math.round(p.y), Math.round(p.z)], v: [Math.round(v.x), Math.round(v.y), Math.round(v.z)] });
       pvpSpawnCosmetic(p, v, pvp.lockTgt, mid);
       playMissileLaunchSound();
@@ -21518,7 +22084,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       for (var i = 0; i < pvpCosmetic.length; i++) if (!pvpCosmetic[i].active) { c = pvpCosmetic[i]; break; }
       if (!c) return;
       c.pos.copy(p); c.vel.copy(v); c.target = target; c.active = true; c.life = 0; c.smokeT = 0; c.mid = mid;
+      c.bandit = !!(target && target.isBandit); c.reacted = false; c.decoyed = false;
       c.group.visible = true;
+      return c;
     }
     function pvpUpdateCosmetic(dt) {
       for (var i = 0; i < pvpCosmetic.length; i++) {
@@ -21529,8 +22097,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         spd = c.life < 2.4 ? Math.min(spd + 230 * dt, 470) : Math.max(160, spd - 16 * dt);
         var dir = _pvA.copy(c.vel).normalize();
         if (c.target && c.target.model) {
-          var to = _pvB.copy(c.target.rPos).sub(c.pos).normalize();
-          var ang = Math.acos(THREE.MathUtils.clamp(dir.dot(to), -1, 1)), maxT = (SAM_MAX_LAT_ACCEL / Math.max(spd, 60)) * dt;
+          var to = _pvB.copy(c.target.rPos);
+          // against a bandit: lead pursuit on the predicted intercept point, and a 40 G airframe
+          if (c.bandit && c.target.vel) { var tgo = c.pos.distanceTo(to) / Math.max(spd, 150); to.addScaledVector(c.target.vel, Math.min(tgo, 4)); }
+          to.sub(c.pos).normalize();
+          var ang = Math.acos(THREE.MathUtils.clamp(dir.dot(to), -1, 1)), maxT = ((c.bandit ? 392 : SAM_MAX_LAT_ACCEL) / Math.max(spd, 60)) * dt;
           if (ang > 1e-4) dir.lerp(to, Math.min(1, maxT / ang)).normalize();
         }
         c.vel.copy(dir).multiplyScalar(spd);
@@ -21540,6 +22111,15 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (c.flame) { var fs = (c.life < 2.4 ? 3 : 1.5) * (0.85 + Math.random() * 0.3); c.flame.scale.set(fs, fs, 1); }
         c.smokeT -= dt;
         if (c.smokeT <= 0) { c.smokeT = c.life < 2.4 ? 0.04 : 0.09; samEmitSmoke(_pvB.copy(c.pos).addScaledVector(dir, -2), _pvC.set(0, 0.3, 0), c.life < 2.4 ? 6 : 3.5, 3.5, 0.6, 0.93); }
+        if (c.bandit) {
+          // against a campaign bandit the outcome is decided here: proximity fuse, ground, or burnout
+          var bt = c.target;
+          if (bt && (!bt.alive || bt.state === 'down')) { c.target = null; bt = null; }
+          if (bt && pvpSegHitsSphere(_raPrev.copy(c.pos).addScaledVector(c.vel, -dt), c.pos, bt.pos, bt.kind === 'fighter' ? 20 : 28)) {
+            raHit(bt, 160, 'aam'); pvpEndCosmetic(c, c.pos.clone()); continue;
+          }
+          if (c.life > 15 || c.pos.y < Math.max(getTerrainHeight(c.pos.x, c.pos.z), WATER_LEVEL)) { pvpEndCosmetic(c, c.pos.clone()); continue; }
+        }
         // the victim's game decides the real outcome; this copy just flies until told, or times out
         if (c.life > 22) pvpEndCosmetic(c, null);
       }
@@ -21694,10 +22274,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (pvp.shield > 0) pvp.shield -= dt;
       if (pvp.hitFlash > 0) pvp.hitFlash -= dt;
       var mp = net.status === 'online' && net.roster.length > 1;
-      var armedUI = mp && pvpArmed();
+      var armedUI = (mp || WAR.on) && pvpArmed();
       pvpGunBtn.classList.toggle('hidden', !armedUI);
       pvpAamBtn.classList.toggle('hidden', !armedUI);
-      pvpHullGauge.classList.toggle('hidden', !mp);
+      pvpHullGauge.classList.toggle('hidden', !(mp || WAR.on));
       if (armedUI && pvp.gunHeld && pvp.ammo > 0) {
         pvp.gunT -= dt;
         while (pvp.gunT <= 0 && pvp.ammo > 0) { pvp.gunT += 1 / PVP_GUN_RATE; pvpFireRound(); }
