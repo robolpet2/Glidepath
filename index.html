@@ -2042,7 +2042,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var SKY_TOP = 0x1D63A8, SKY_BOTTOM = 0xE8F3F7;
 
     // --- day/night cycle ---
-    var DAY_CYCLE_SECONDS = 240;  // full sun circuit (sunrise -> noon -> sunset -> midnight -> sunrise)
+    var DAY_CYCLE_SECONDS = 480;  // full sun circuit (8 min) (sunrise -> noon -> sunset -> midnight -> sunrise)
     var DAY_CYCLE_ENABLED = true;
 
     /* ============================================================
@@ -7273,11 +7273,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
     }
 
+    // the next ring spawns 320-900 m ahead, so a fixed window only let the fast jets chain at all:
+    // give every aircraft time to cover the far spawn distance at its top speed
+    function ringChainWindow() {
+      var p = PLANE_TYPES[selectedPlaneType], v = p ? p.maxSpeedKmh / 3.6 : 194;
+      return THREE.MathUtils.clamp(RING_SPAWN_MAX_DIST / Math.max(v, 30) + 1, RING_CHAIN_WINDOW, 12);
+    }
     function catchRing(ring, nowSeconds) {
       ring.userData.consumed = true;
       ring.visible = false;
 
-      var withinChain = (nowSeconds - lastRingCatchAt) <= RING_CHAIN_WINDOW;
+      var withinChain = (nowSeconds - lastRingCatchAt) <= ringChainWindow();
       ringStreak = withinChain ? ringStreak + 1 : 1;
       lastRingCatchAt = nowSeconds;
 
@@ -7301,7 +7307,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function updateRingCollisions(dt, nowSeconds) {
       if (!ringsEnabled) return;
       // streak expires quietly (no popup) once the chain window lapses with no new catch
-      if (ringStreak > 0 && (nowSeconds - lastRingCatchAt) > RING_CHAIN_WINDOW) {
+      if (ringStreak > 0 && (nowSeconds - lastRingCatchAt) > ringChainWindow()) {
         ringStreak = 0;
       }
       var catchRadiusSq = (RING_RADIUS_TUBE - 1.5) * (RING_RADIUS_TUBE - 1.5);
@@ -12161,8 +12167,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     // --- fuel ---
     var FUEL_MAX = 100;                 // percent, full tank
     var FUEL_BURN_IDLE = 0.14;          // %/sec burned at zero throttle (engine still idling) — ~12 min if just idling
-    var FUEL_BURN_FULL = 0.62;          // %/sec burned at full throttle — full tank lasts ~2.7 min flat-out
-    var FUEL_BURN_BOOST = 0.9;          // %/sec extra burned while boosting (afterburner guzzles fuel)
+    var FUEL_BURN_FULL = 0.42;          // %/sec burned at full throttle — full tank lasts ~4 min flat-out (room for a strike sortie)
+    var FUEL_BURN_BOOST = 0.75;         // %/sec extra burned while boosting (afterburner guzzles fuel)
     var FUEL_LOW_THRESHOLD = 15;        // percent, below which the low-fuel warning kicks in
     var FUEL_REFILL_RATE = 18;          // %/sec while parked on the ground at the airport — full tank in a few seconds
     var fuel = FUEL_MAX;
@@ -16947,7 +16953,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var SAM_MAX_AIRBORNE = 2;          // missiles the site will guide at once
     var SAM_MASK_AGL = 30;             // below this height (AGL) the radar loses you in ground clutter
     var SAM_MAX_LAT_ACCEL = 30 * 9.8;  // missile turn limit: ~30 G
-    var SAM_REPAIR_TIME = 120;         // destroyed equipment is replaced after this long
+    var SAM_REPAIR_TIME = 180;         // destroyed equipment is replaced after this long (long enough to rearm and come back)
     var FLARE_MAX = 32;
 
     var samEngineKilled = false;
@@ -17806,7 +17812,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
        Hellfire), so you can keep steering them after launch. TRACK locks
        the gimbal onto a vehicle so it stays centred while you fly.
        ============================================================ */
-    var STRIKE_REPAIR_TIME = 150;
+    var STRIKE_REPAIR_TIME = 240;     // destroyed targets (and AA guns) stay down long enough to land, rearm and return
     var STRIKE_ROAD_R = 252;
     var strikeTargets = [];
     var strikeConvoy = { angle: 0, speed: 9, alarmed: false };
@@ -18480,7 +18486,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var ARS_ARMOR = { vehicle: 1, fuel: 1.25, ammo: 1.1, bunker: 0.42 };
 
     /* ---------- damage model ---------- */
-    function arsDamage(pos, radius, dmg, quiet) {
+    function arsDamage(pos, radius, dmg, quiet, pay) {
       if (!SAM_BASE) return;
       arsTargets().forEach(function(t) {
         if (!t.alive) return;
@@ -18489,17 +18495,27 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var f = 1 - d / radius;
         var armor = t.armor || ARS_ARMOR[t.kind] || 1;
         if (t.kind === 'bunker' && f < 0.6) armor *= 0.35;     // hardened: only a near-direct hit really hurts
-        arsHit(t, dmg * (0.3 + 0.7 * f) * armor, quiet);
+        arsHit(t, dmg * (0.3 + 0.7 * f) * armor, quiet, pay);
       });
     }
-    function arsHit(t, amount, quiet) {
+    // coins for what you destroy yourself (air-wing strikes don't pay)
+    var ARS_BOUNTY = { vehicle: 40, fuel: 50, ammo: 80, bunker: 120 };
+    function arsBounty(t) {
+      if (t.isAA) return 60;
+      if (t === samRadar) return 150;
+      if (samLaunchers.indexOf(t) >= 0) return 100;
+      return (t.label === 'APC' ? 60 : ARS_BOUNTY[t.kind]) || 40;
+    }
+    function arsHit(t, amount, quiet, pay) {
       if (!t.alive || amount <= 0) return;
       if (t.hp === undefined) t.hp = t.maxHp || 100;
       t.hp -= amount;
       var max = t.maxHp || 100;
       if (t.hp <= 0) {
         t.hp = 0; t.dmgState = 0;
-        arsMarker(t, 'DESTROYED', '#ff5a3c');
+        var bounty = pay ? arsBounty(t) : 0;
+        arsMarker(t, bounty ? 'DESTROYED  +◆' + bounty : 'DESTROYED', '#ff5a3c');
+        if (bounty) { coins += bounty; lastCoinSaveAt = -999; maybeSaveRingProgress(elapsedSeconds); }
         if (t.kind && strikeTargets.indexOf(t) >= 0) stKill(t);
         else if (t === samRadar) samKill(samRadar, true);
         else if (samLaunchers.indexOf(t) >= 0) samKill(t, false);
@@ -18700,7 +18716,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (at.distanceTo(position) < 2500) playMissileImpactSound();
       if (at.distanceTo(position) < 160) fxShake = Math.max(fxShake, 0.6 * (1 - at.distanceTo(position) / 160));
       netEmit('boom', { p: [Math.round(at.x), Math.round(at.y), Math.round(at.z)] });
-      arsDamage(at, p.w.rad, p.w.dmg);
+      arsDamage(at, p.w.rad, p.w.dmg, false, true);
     }
     function arsRetire(p) {
       if (p.mesh) {
@@ -18797,7 +18813,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           b.active = false; b.s.visible = false;
           b.pos.y = gy + 0.4;
           arsMiniBlast(b.pos, 4 + Math.random() * 3);
-          arsDamage(b.pos, b.w.rad, b.w.dmg, true);
+          arsDamage(b.pos, b.w.rad, b.w.dmg, true, true);
           pops++;
         }
       }
