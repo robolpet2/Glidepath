@@ -10531,7 +10531,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     /* ============================================================
        AUDIO (synthesized engine drone)
        ============================================================ */
-    var audioCtx = null, engineOsc = null, engineOsc2 = null, engineGain = null, engineFilter = null, soundEnabled = true;
+    var audioCtx = null, engineGain = null, soundEnabled = true;
     var rotorGain = null, rotorChop = null, rotorLfo = null;
     function initAudio() {
       if (audioCtx) return;
@@ -10539,24 +10539,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var AC = window.AudioContext || window.webkitAudioContext;
         audioCtx = new AC();
         gpAudioBuses();
-        engineFilter = audioCtx.createBiquadFilter();
-        engineFilter.type = 'lowpass';
-        engineFilter.frequency.value = 900;
+        // every vehicle's engine voice plays into this one gain (see ENGINE SOUNDS)
         engineGain = audioCtx.createGain();
         engineGain.gain.value = 0.0001;
-        engineOsc = audioCtx.createOscillator();
-        engineOsc.type = 'sawtooth';
-        engineOsc.frequency.value = 60;
-        engineOsc2 = audioCtx.createOscillator();
-        engineOsc2.type = 'square';
-        engineOsc2.frequency.value = 90;
-        var gain2 = audioCtx.createGain();
-        gain2.gain.value = 0.35;
-        engineOsc.connect(engineFilter);
-        engineOsc2.connect(gain2).connect(engineFilter);
-        engineFilter.connect(engineGain).connect(gpBus ? gpBus.engine : audioCtx.destination);
-        engineOsc.start();
-        engineOsc2.start();
+        engineGain.connect(gpBus ? gpBus.engine : audioCtx.destination);
         // helicopter rotor: filtered noise chopped at the blade-passing frequency
         var nb = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate), nd = nb.getChannelData(0);
         for (var ni = 0; ni < nd.length; ni++) nd[ni] = Math.random() * 2 - 1;
@@ -10573,25 +10559,281 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         audioCtx = null;
       }
     }
-    function updateAudio(speedRatio) {
+    function updateAudio(speedRatio, dt) {
       if (!audioCtx || !soundEnabled) return;
       var now = audioCtx.currentTime;
-      var freq = 46 + speedRatio * 130;
-      var gain = 0.05 + speedRatio * 0.09;
       if (rotorGain) {
         var heliOn = isHelicopterMode && started && !crashing;
         rotorGain.gain.setTargetAtTime(heliOn ? 0.02 + 0.2 * heliRpm * (0.45 + 0.8 * heliColl) : 0.0001, now, 0.15);
         rotorLfo.frequency.setTargetAtTime(Math.max(1, heliRpm * 18.5), now, 0.2);
-        if (heliOn) {
-          // turbine whine follows the engine spool and load instead of airspeed
-          freq = 70 + heliSpool * 150 + heliTorque * 45;
-          gain = 0.015 + heliSpool * 0.045;
-        }
       }
-      engineOsc.frequency.setTargetAtTime(freq, now, 0.12);
-      engineOsc2.frequency.setTargetAtTime(freq * 1.5, now, 0.12);
-      engineGain.gain.setTargetAtTime(gain, now, 0.18);
+      engineGain.gain.setTargetAtTime(started ? 1 : 0.0001, now, 0.25);
+      esUpdate(speedRatio, dt || 1 / 60, now);
     }
+    /* ============================================================
+       ENGINE SOUNDS — every vehicle has its own synthesized engine
+         · Interceptor: turbine whine over a jet roar; the afterburner lights with a thump and
+           crackles while it burns
+         · Voyager: twin turboprops; two propellers a hair out of sync give the classic "wah-wah" beat
+         · Rocket: no tone at all, just a roar, a chest-deep rumble and sputtering crackle
+         · Helicopter: the turbine's whine, the buzz of the tail rotor and a low blade thump, on top of
+           the main-rotor chop
+         · Car: a straight-six with a five-speed box; revs climb, the shift dips them, and lifting
+           off at high revs pops the exhaust. Tyre roar on the road
+         · Reaper Drone: the nasal buzz of a pusher propeller
+         · Nighthawk Wing: buried engines, so a deep muffled rumble with only a hint of whine
+         · Albatross: two lumpy radial piston engines, loping and crackling
+       Engines spool up and down at their own pace (a jet takes its time, a piston answers at
+       once). Every aircraft also gets wind noise that grows with airspeed, a stall-warning horn,
+       tyre chirps or a splash on touchdown, and a hydraulic whirr when the flaps move.
+       In the cockpit view the canopy muffles everything outside.
+       ============================================================ */
+    var ES = { type: '', voice: null, muffle: null, rpm: 0, ab: 0, boostWas: false, gear: 1, gearDip: 0, carRpm: 0, lastLoad: 0, now: 0, white: null, brown: null };
+    var ES_SPOOL = {
+      interceptor: { idle: 0.2, up: 1.6, down: 2.4 }, voyager: { idle: 0.22, up: 0.9, down: 1.4 },
+      rocket: { idle: 0.08, up: 0.18, down: 0.35 }, helicopter: { idle: 0, up: 1, down: 1 },
+      car: { idle: 0.1, up: 0.2, down: 0.3 }, drone: { idle: 0.25, up: 0.7, down: 1.1 },
+      stealth: { idle: 0.2, up: 2, down: 2.8 }, seaplane: { idle: 0.25, up: 0.45, down: 0.8 }
+    };
+    function esP(param, v, tc) { param.setTargetAtTime(v, ES.now, tc || 0.06); }
+    function esInit() {
+      var n = audioCtx.sampleRate * 2, sr = audioCtx.sampleRate;
+      ES.white = audioCtx.createBuffer(1, n, sr);
+      ES.brown = audioCtx.createBuffer(1, n, sr);
+      var w = ES.white.getChannelData(0), b = ES.brown.getChannelData(0), last = 0, i;
+      for (i = 0; i < n; i++) { var r = Math.random() * 2 - 1; w[i] = r; last = (last + 0.02 * r) / 1.02; b[i] = last * 3.5; }
+      for (i = 0; i < n; i++) b[i] -= (b[n - 1] - b[0]) * i / (n - 1); // no click where the loop wraps
+      ES.muffle = audioCtx.createBiquadFilter(); ES.muffle.type = 'lowpass'; ES.muffle.frequency.value = 16000; ES.muffle.Q.value = 0.5;
+      ES.muffle.connect(engineGain);
+      // wind over the airframe
+      var wv = esVoice(ES.muffle);
+      ES.windF = wv.filt('bandpass', 600, 0.5);
+      ES.windG = wv.chain(wv.noise(), ES.windF, wv.gain());
+      ES.wind = wv; wv.out.gain.value = 1;
+      // stall warning horn: a pulsing tone straight to the effects bus
+      var sv = esVoice(audioCtx.destination);
+      var horn = sv.osc('square', 430), hornF = sv.filt('lowpass', 1800);
+      ES.stallG = sv.chain(horn, hornF, sv.gain());
+      ES.stallL = sv.lfo('square', 3.6, ES.stallG.gain, 0);
+      sv.out.gain.value = 1;
+    }
+    function esVoice(dest) {
+      var v = { src: [], out: audioCtx.createGain() };
+      v.out.gain.value = 0;
+      v.out.connect(dest || ES.muffle);
+      v.osc = function(type, f) { var o = audioCtx.createOscillator(); o.type = type; o.frequency.value = f; o.start(); v.src.push(o); return o; };
+      v.noise = function(brown) { var s = audioCtx.createBufferSource(); s.buffer = brown ? ES.brown : ES.white; s.loop = true; s.start(0, Math.random() * 1.9); v.src.push(s); return s; };
+      v.filt = function(type, f, q) { var b = audioCtx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q || 0.7; return b; };
+      v.gain = function(g) { var n = audioCtx.createGain(); n.gain.value = g || 0; return n; };
+      // a -> b -> ... -> voice out; returns the last node
+      v.chain = function() { var a = arguments; for (var i = 0; i < a.length - 1; i++) a[i].connect(a[i + 1]); a[a.length - 1].connect(v.out); return a[a.length - 1]; };
+      // an LFO wobbling an AudioParam around its own value by +/- depth
+      v.lfo = function(type, f, param, depth) { var o = v.osc(type, f), d = v.gain(depth); o.connect(d).connect(param); return { o: o, d: d }; };
+      return v;
+    }
+    var ES_VOICES = {
+      interceptor: function(v) {
+        var wh = v.osc('sine', 1500), whG = v.chain(wh, v.gain());
+        var wh2 = v.osc('triangle', 700), wh2G = v.chain(wh2, v.gain());
+        var roF = v.filt('lowpass', 800, 0.5), roG = v.chain(v.noise(), roF, v.gain());
+        var ruG = v.chain(v.noise(true), v.filt('lowpass', 140), v.gain());
+        var abG = v.chain(v.noise(true), v.filt('lowpass', 380), v.gain());
+        var crG = v.chain(v.noise(), v.filt('bandpass', 2400, 0.8), v.gain());
+        var crL = v.lfo('square', 17, crG.gain, 0);
+        return function(s) {
+          var r = s.rpm, ab = s.ab;
+          esP(wh.frequency, 1300 + 2700 * r); esP(whG.gain, 0.004 + 0.016 * r);
+          esP(wh2.frequency, 520 + 1100 * r); esP(wh2G.gain, 0.006 * r);
+          esP(roF.frequency, 380 + 2400 * r + 1200 * ab); esP(roG.gain, 0.03 + 0.15 * r * r + 0.08 * ab);
+          esP(ruG.gain, 0.05 + 0.12 * r + 0.1 * ab);
+          esP(abG.gain, 0.34 * ab);
+          esP(crG.gain, 0.035 * ab); esP(crL.d.gain, 0.035 * ab); esP(crL.o.frequency, 13 + Math.random() * 14, 0.02);
+        };
+      },
+      voyager: function(v) {
+        var p1 = v.osc('sawtooth', 70), p2 = v.osc('sawtooth', 71), pF = v.filt('lowpass', 600, 2.5), pG = v.gain();
+        p1.connect(pF); p2.connect(pF); pF.connect(pG); pG.connect(v.out);
+        var hF = v.filt('bandpass', 300, 5), hG = v.chain(v.noise(), hF, v.gain());
+        var wh = v.osc('sine', 2400), whG = v.chain(wh, v.gain());
+        var roF = v.filt('lowpass', 900), roG = v.chain(v.noise(), roF, v.gain());
+        return function(s) {
+          var r = s.rpm, bp = 52 + 48 * r;
+          esP(p1.frequency, bp); esP(p2.frequency, bp * 1.013);
+          esP(pF.frequency, 380 + 520 * r); esP(pG.gain, 0.035 + 0.075 * r);
+          esP(hF.frequency, bp * 4); esP(hG.gain, 0.025 * r);
+          esP(wh.frequency, 2000 + 1500 * r); esP(whG.gain, 0.003 + 0.008 * r);
+          esP(roF.frequency, 500 + 1100 * r); esP(roG.gain, 0.015 + 0.05 * r);
+        };
+      },
+      rocket: function(v) {
+        var roF = v.filt('lowpass', 2000, 0.4), roG = v.chain(v.noise(), roF, v.gain());
+        var ruG = v.chain(v.noise(true), v.filt('lowpass', 85), v.gain());
+        var crG = v.chain(v.noise(), v.filt('highpass', 2600), v.gain());
+        var crL = v.lfo('square', 24, crG.gain, 0);
+        var hum = v.osc('sawtooth', 38), huG = v.chain(hum, v.filt('lowpass', 120), v.gain());
+        return function(s) {
+          var r = s.rpm, k = r * (1 + 0.35 * s.ab);
+          esP(roF.frequency, 900 + 3600 * r); esP(roG.gain, 0.03 + 0.16 * k);
+          esP(ruG.gain, 0.05 + 0.22 * k);
+          esP(crG.gain, 0.03 * k); esP(crL.d.gain, 0.04 * k); esP(crL.o.frequency, 14 + Math.random() * 26, 0.015);
+          esP(hum.frequency, 34 + 18 * r); esP(huG.gain, 0.04 * k);
+        };
+      },
+      helicopter: function(v) {
+        var wh = v.osc('sine', 2000), whG = v.chain(wh, v.gain());
+        var wh2 = v.osc('triangle', 1000), wh2G = v.chain(wh2, v.gain());
+        var tr = v.osc('sawtooth', 90), trG = v.chain(tr, v.filt('bandpass', 420, 2.5), v.gain());
+        var thG = v.chain(v.osc('sine', 62), v.gain());
+        var thL = v.lfo('sine', 18, thG.gain, 0);
+        return function() {
+          var sp = heliSpool, rp = heliRpm, t = 0.045 * rp * (0.4 + 0.8 * heliColl);
+          esP(wh.frequency, 1400 + 3300 * sp + 300 * heliTorque); esP(whG.gain, 0.012 * sp);
+          esP(wh2.frequency, 600 + 1500 * sp); esP(wh2G.gain, 0.006 * sp);
+          esP(tr.frequency, Math.max(1, rp * 96)); esP(trG.gain, 0.03 * rp);
+          esP(thG.gain, t); esP(thL.d.gain, t); esP(thL.o.frequency, Math.max(1, rp * 18.5));
+        };
+      },
+      car: function(v) {
+        var e = v.osc('sawtooth', 40), eF = v.filt('lowpass', 400, 4), eG = v.chain(e, eF, v.gain());
+        var sub = v.osc('square', 20), sG = v.chain(sub, v.filt('lowpass', 160), v.gain());
+        var inF = v.filt('bandpass', 300, 4), inG = v.chain(v.noise(), inF, v.gain());
+        var tyG = v.chain(v.noise(true), v.filt('lowpass', 320), v.gain());
+        return function(s) {
+          var f = s.carRpm / 60 * 3, load = s.load, dip = s.dip; // six cylinders: three firings per turn
+          esP(e.frequency, f, 0.03); esP(sub.frequency, f / 2, 0.03);
+          esP(eF.frequency, 180 + s.carRpm * 0.32 * (0.6 + 0.4 * load));
+          esP(eG.gain, (0.04 + 0.07 * load) * dip, 0.03);
+          esP(sG.gain, (0.03 + 0.03 * load) * dip, 0.03);
+          esP(inF.frequency, f * 3); esP(inG.gain, (0.008 + 0.03 * load) * dip);
+          esP(tyG.gain, s.ground ? Math.min(1, s.kmh / 150) * 0.07 : 0);
+        };
+      },
+      drone: function(v) {
+        var a = v.osc('sawtooth', 120), b = v.osc('sawtooth', 241), bF = v.filt('bandpass', 850, 1.6), g = v.gain();
+        a.connect(bF); b.connect(bF); bF.connect(g); g.connect(v.out);
+        var wob = v.lfo('sine', 7.3, g.gain, 0);
+        var wh = v.osc('sine', 2900), whG = v.chain(wh, v.gain());
+        var roG = v.chain(v.noise(), v.filt('lowpass', 700), v.gain());
+        return function(s) {
+          var r = s.rpm, f = 92 + 78 * r, gg = 0.055 + 0.09 * r;
+          esP(a.frequency, f); esP(b.frequency, f * 2.01); esP(bF.frequency, 650 + 500 * r);
+          esP(g.gain, gg); esP(wob.d.gain, gg * 0.25);
+          esP(wh.frequency, 2500 + 900 * r); esP(whG.gain, 0.004 + 0.006 * r);
+          esP(roG.gain, 0.015 + 0.05 * r);
+        };
+      },
+      stealth: function(v) {
+        var dF = v.filt('lowpass', 200, 0.9), dG = v.chain(v.noise(true), dF, v.gain());
+        var hF = v.filt('bandpass', 230, 4), hG = v.chain(v.noise(), hF, v.gain());
+        var sub = v.osc('sine', 40), sG = v.chain(sub, v.gain());
+        var wh = v.osc('sine', 900), wG = v.chain(wh, v.filt('lowpass', 900), v.gain());
+        return function(s) {
+          var r = s.rpm, k = r + 0.3 * s.ab;
+          esP(dF.frequency, 110 + 280 * k); esP(dG.gain, 0.08 + 0.24 * k);
+          esP(hF.frequency, 180 + 120 * r); esP(hG.gain, 0.01 + 0.035 * k);
+          esP(sub.frequency, 34 + 24 * r); esP(sG.gain, 0.04 + 0.07 * k);
+          esP(wh.frequency, 650 + 1100 * r); esP(wG.gain, 0.004 + 0.008 * r);
+        };
+      },
+      seaplane: function(v) {
+        var e1 = v.osc('sawtooth', 80), e2 = v.osc('sawtooth', 81), eF = v.filt('lowpass', 500, 2), eG = v.gain();
+        e1.connect(eF); e2.connect(eF); eF.connect(eG); eG.connect(v.out);
+        var l1 = v.lfo('sine', 4.1, eG.gain, 0), l2 = v.lfo('sine', 6.7, eG.gain, 0);
+        var exG = v.chain(v.noise(), v.filt('bandpass', 1400, 1.1), v.gain());
+        var exL = v.lfo('square', 11, exG.gain, 0);
+        var ruG = v.chain(v.noise(true), v.filt('lowpass', 150), v.gain());
+        return function(s) {
+          var r = s.rpm, f = (900 + 1700 * r) / 60 * 4.5, g = 0.045 + 0.07 * r; // nine cylinders: 4.5 firings per turn
+          esP(e1.frequency, f); esP(e2.frequency, f * 1.017); esP(eF.frequency, 260 + 760 * r);
+          esP(eG.gain, g); esP(l1.d.gain, g * 0.22); esP(l2.d.gain, g * 0.14);
+          esP(exG.gain, 0.006 + 0.016 * r); esP(exL.d.gain, 0.006 + 0.012 * r); esP(exL.o.frequency, f / 9);
+          esP(ruG.gain, 0.03 + 0.06 * r);
+        };
+      }
+    };
+    function esSwitch(type) {
+      var old = ES.voice, now = audioCtx.currentTime;
+      if (old) {
+        old.out.gain.setTargetAtTime(0, now, 0.12);
+        old.src.forEach(function(s) { try { s.stop(now + 0.8); } catch (e) {} });
+        setTimeout(function() { old.out.disconnect(); }, 1200);
+      }
+      var v = esVoice();
+      v.update = (ES_VOICES[type] || ES_VOICES.interceptor)(v);
+      ES.voice = v; ES.type = type; ES.rpm = 0; ES.ab = 0; ES.gear = 1; ES.carRpm = 0;
+    }
+    var ES_GEARS = [0, 32, 60, 92, 128, 175]; // km/h at the top of each gear
+    function esCarModel(st, dt, on) {
+      var kmh = st.kmh, g = ES.gear;
+      if (g < 5 && kmh > ES_GEARS[g] * 0.96) { ES.gear = ++g; ES.gearDip = 0.14; if (ES.carRpm > 4300 && Math.random() < 0.6) esPops(2); }
+      else if (g > 1 && kmh < ES_GEARS[g - 1] * 0.78) ES.gear = --g;
+      var lo = g === 1 ? 0 : ES_GEARS[g - 1] * 0.6, frac = THREE.MathUtils.clamp((kmh - lo) / (ES_GEARS[g] - lo), 0, 1);
+      var load = on ? THREE.MathUtils.clamp(Math.abs(throttle) / MAX_SPEED * 1.1 + (keys.boost ? 0.3 : 0), 0.12, 1) : 0;
+      var target = !on ? 0 : kmh < 4 ? 850 + load * 2600 : 900 + frac * 5600 + load * 300;
+      ES.carRpm += (target - ES.carRpm) * Math.min(1, dt / 0.12);
+      if (ES.lastLoad - load > 0.45 && ES.carRpm > 4000) esPops(3); // lifting off hard: the exhaust crackles
+      ES.lastLoad = load;
+      ES.gearDip = Math.max(0, ES.gearDip - dt);
+      st.carRpm = ES.carRpm; st.load = load; st.dip = ES.gearDip > 0 ? 0.35 : 1;
+    }
+    function esUpdate(speedRatio, dt, now) {
+      ES.now = now;
+      if (!ES.muffle) esInit();
+      if (ES.type !== selectedPlaneType) esSwitch(selectedPlaneType);
+      var on = started && !crashing && !ejecting && (isCarMode || isHelicopterMode || !outOfFuel);
+      var boost = on && keys.boost && !isHelicopterMode && !isCarMode;
+      ES.ab += ((boost ? 1 : 0) - ES.ab) * Math.min(1, dt / (boost ? 0.18 : 0.5));
+      if (boost && !ES.boostWas && (selectedPlaneType === 'interceptor' || selectedPlaneType === 'rocket' || selectedPlaneType === 'stealth')) esLightUp();
+      ES.boostWas = boost;
+      var sp = ES_SPOOL[selectedPlaneType] || ES_SPOOL.interceptor;
+      var thr = THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1);
+      var target = on ? Math.max(sp.idle, Math.min(1.1, thr + ES.ab * 0.25)) : 0;
+      ES.rpm += (target - ES.rpm) * Math.min(1, dt / (target > ES.rpm ? sp.up : sp.down));
+      var st = { rpm: ES.rpm, ab: ES.ab, spd: speedRatio, kmh: Math.abs(speed) * 3.6, ground: wasGrounded };
+      if (isCarMode) esCarModel(st, dt, on);
+      ES.voice.update(st);
+      ES.voice.out.gain.setTargetAtTime(on ? 1 : 0, now, on ? 0.2 : 0.5);
+      // the canopy takes the edge off everything outside
+      ES.muffle.frequency.setTargetAtTime(ckActive ? 1300 : 16000, now, 0.15);
+      var air = Math.min(1.5, st.kmh / (isCarMode ? 420 : 650));
+      ES.windF.frequency.setTargetAtTime(350 + 1800 * Math.min(1, air), now, 0.2);
+      ES.windG.gain.setTargetAtTime(started && !crashing ? air * air * 0.16 * (ckActive ? 0.6 : 1) : 0, now, 0.25);
+      var horn = started && stalled && !wasGrounded && !crashing && !ejecting && !isCarMode && !isHelicopterMode ? 0.018 : 0;
+      ES.stallG.gain.setTargetAtTime(horn, now, 0.03); ES.stallL.d.gain.setTargetAtTime(horn, now, 0.03);
+    }
+
+    // ---------- one-shots ----------
+    function esShot(buf, filtType, f0, f1, peak, dur, at, dest) {
+      var now = audioCtx.currentTime + (at || 0), s = audioCtx.createBufferSource(), f = audioCtx.createBiquadFilter(), g = audioCtx.createGain();
+      s.buffer = buf; f.type = filtType; f.Q.value = filtType === 'bandpass' ? 3 : 0.7;
+      f.frequency.setValueAtTime(f0, now); f.frequency.exponentialRampToValueAtTime(f1, now + dur);
+      g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(peak, now + Math.min(0.04, dur * 0.2)); g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+      s.connect(f).connect(g).connect(dest || audioCtx.destination);
+      s.start(now, Math.random() * 1.2); s.stop(now + dur + 0.05);
+    }
+    // afterburner light-up: a deep whoomp as the fuel catches
+    function esLightUp() { if (ES.brown) esShot(ES.brown, 'lowpass', 160, 900, 0.7, 0.7, 0, ES.muffle); }
+    function esPops(n) {
+      if (!ES.white) return;
+      for (var i = 0; i < n; i++) esShot(ES.white, 'bandpass', 900 + Math.random() * 500, 400, 0.22 + Math.random() * 0.15, 0.06, i * (0.05 + Math.random() * 0.06), ES.muffle);
+    }
+    // touchdown: two tyre chirps (left and right main gear), or a splash for the flying boat on water
+    function esTouchdown() {
+      if (!audioCtx || !soundEnabled || !ES.white || isCarMode) return;
+      if (isSeaplaneMode && position.y < WATER_LEVEL + 4) { esShot(ES.brown, 'lowpass', 1200, 200, 0.45, 0.9); esShot(ES.white, 'highpass', 2500, 1200, 0.08, 0.6); return; }
+      esShot(ES.white, 'bandpass', 2400, 1300, 0.2, 0.14);
+      esShot(ES.white, 'bandpass', 2200, 1200, 0.16, 0.16, 0.07);
+    }
+    // flaps: a short hydraulic whirr
+    function esFlaps() {
+      if (!audioCtx || !soundEnabled || !ES.white) return;
+      var now = audioCtx.currentTime, o = audioCtx.createOscillator(), f = audioCtx.createBiquadFilter(), g = audioCtx.createGain();
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(130, now); o.frequency.linearRampToValueAtTime(185, now + 0.4); o.frequency.linearRampToValueAtTime(170, now + 1.3);
+      f.type = 'bandpass'; f.frequency.value = 650; f.Q.value = 2;
+      g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(0.025, now + 0.12); g.gain.setValueAtTime(0.025, now + 1.1); g.gain.exponentialRampToValueAtTime(0.0001, now + 1.4);
+      o.connect(f).connect(g).connect(audioCtx.destination); o.start(now); o.stop(now + 1.45);
+    }
+
     function playCrashBoom() {
       if (!audioCtx || !soundEnabled) return;
       var now = audioCtx.currentTime;
@@ -10791,6 +11033,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function setFlaps(down) {
       if (isHelicopterMode || isCarMode) return;
       if (down && speed > FLAPS_TOGGLE_LOCKOUT_KMH / 3.6) return; // too fast to extend safely
+      if (flapsDeployed !== down) esFlaps();
       flapsDeployed = down;
     }
     function toggleFlaps() { setFlaps(!flapsDeployed); }
@@ -11326,6 +11569,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     var touchdownMsgTimeout = null;
     function showTouchdownMessage() {
+      esTouchdown();
       var el = document.getElementById('touchdownMsg');
       el.style.opacity = '1';
       if (touchdownMsgTimeout) clearTimeout(touchdownMsgTimeout);
@@ -13714,6 +13958,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var elapsedSeconds = 0;
 
     function update(dt) {
+      // the flight block below (which drives the engine sound) is skipped while crashing or
+      // ejecting, so keep the sound going here: the engine winds down instead of droning on
+      if (crashing || ejecting) updateAudio(0, dt);
       if (!crashing && !ejecting) {
         var pitchInput = 0, rollInput = 0;
         if (keys.up) pitchInput -= 1;
@@ -14285,7 +14532,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         forestCollide(dt);
         recycleClouds(position.x, position.z);
         updateBirds(dt, elapsedSeconds, position.x, position.z);
-        updateAudio(speedRatio);
+        updateAudio(speedRatio, dt);
         updateNpcPlanes(dt);
 
         ringsEnabled = !wasGrounded;
