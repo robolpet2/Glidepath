@@ -1814,9 +1814,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       },
       stealth: {
         name: 'Nighthawk Wing', tagline: 'flying-wing stealth bomber — heavy, ominous, slow to turn',
-        maxSpeedKmh: 380, engineAccel: 12, boostAccel: 16,
-        stallSpeedKmh: 55, takeoffSpeedKmh: 150,
-        colors: { body: 0x0a0a0c, trim: 0x050506, wing: 0x0a0a0c },
+        maxSpeedKmh: 380, engineAccel: 8, boostAccel: 12,
+        // heavy: rotates at 170 km/h and lifts off around 185-195 (see NIGHTHAWK TAKEOFF PHYSICS)
+        stallSpeedKmh: 80, takeoffSpeedKmh: 185,
+        colors: { body: 0x101215, trim: 0x0a0b0d, wing: 0x101215 },
         isStealth: true,
         // gyro/handling feel: heavy flying-wing manners — sluggish roll authority (huge
         // wingspan, high moment of inertia), gentle pitch, wide slow turns, bleeds speed hard
@@ -5324,294 +5325,816 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     droneBody.visible = false;
 
     /* ============================================================
-       STEALTH BOMBER MODEL — flying wing, all-black, faceted low-poly
-       panels reading as radar-absorbent skin. Separate body group,
-       hidden unless the "stealth" preset is active.
+       NIGHTHAWK WING — flying-wing stealth bomber (B-2 style)
+       One smooth parametric skin, sampled into panels:
+         · planform: 33° leading edge, the "double-W" trailing edge (every edge is parallel to one of
+           the two leading edges), knife-edge wingtips; span 15.2, length 6 (1 unit ≈ 3.45 m)
+         · section: a 13.5 %-thick centrebody blending into a thin outer wing; the cockpit hump and
+           two engine humps rise out of the upper skin, and each engine hump ends in a step that
+           hides the exhaust, which runs out over a recessed heat-tiled deck
+         · serrated intake lips, a gold-tinted four-pane windscreen, and a skin texture with RAM tape
+           seams, sawtooth access panels, weapon bays and gear doors
+         · moving parts: three elevons a side and split drag rudders at the tips (driven by the
+           stick), auxiliary inlet doors that open for takeoff, weapon bay doors that open for a
+           release, and tricycle gear (four-wheel main bogies) that folds away behind its doors, with
+           oleo struts that squat and stretch and a steerable nose wheel
+         · nav lights (red port, green starboard), a tail light and flashing anti-collision beacons
+       The skin is split into a centrebody and inner/outer wing panels so battle damage and crashes
+       tear real pieces off.
        ============================================================ */
     var stealthBody = new THREE.Group();
     plane.add(stealthBody);
 
-    // B-2 Spirit: near-black RAM coating — extremely low gloss, catches only the sharpest
-    // rim highlights. Small clearcoat to pick up one razor-thin specular line on the leading edge.
-    var stealthMat = new THREE.MeshPhysicalMaterial({
-      color: 0x080809, flatShading: true, roughness: 0.88, metalness: 0.08,
-      clearcoat: 0.18, clearcoatRoughness: 0.72
-    });
-    var stealthMatDark = new THREE.MeshStandardMaterial({ color: 0x020203, flatShading: true, roughness: 0.95, metalness: 0.05 });
-    var stealthMatGlass = new THREE.MeshStandardMaterial({ color: 0x080c12, flatShading: true, roughness: 0.08, metalness: 0.92, envMapIntensity: 1.4 });
-    var stealthMatPanel = new THREE.MeshStandardMaterial({ color: 0x050506, flatShading: true, roughness: 0.92, metalness: 0.06 });
+    var NHB = 7.6, NHZN = -3.05, NHYS = -0.2, NHK = 0.649, NH_ZMAX = 3.0;
+    // trailing-edge breakpoints (x, z): centre tooth, notch, tooth, notch, tooth, wingtip
+    var NH_TE = [[0, 2.94], [1.566, 1.92], [3.045, 2.88], [4.495, 1.94], [6.09, 2.97], [7.6, 2.0]];
+    // thickness / chord across the span (x / half-span)
+    var NH_TAU = [[0, 0.135], [0.2, 0.12], [0.45, 0.095], [0.75, 0.075], [1.0, 0.06]];
+    // control surfaces on the right wing (mirrored on the left): span range and hinge (fraction of chord)
+    var NH_CS = [{ k: 0, xa: 1.66, xb: 2.95, uh: 0.84 }, { k: 1, xa: 3.14, xb: 4.40, uh: 0.82 },
+                 { k: 2, xa: 4.59, xb: 5.99, uh: 0.78 }, { k: 3, xa: 6.19, xb: 7.25, uh: 0.70, split: true }];
+    var NH_XS = [0, 0.1, 0.2, 0.3, 0.42, 0.55, 0.62, 0.7, 0.74, 0.82, 0.92, 1.02, 1.12, 1.22, 1.32, 1.42, 1.5, 1.54, 1.566,
+                 1.62, 1.66, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 2.95, 3.045, 3.14, 3.4, 3.7, 4.0, 4.2, 4.4, 4.495,
+                 4.59, 4.9, 5.2, 5.5, 5.8, 5.99, 6.09, 6.19, 6.45, 6.7, 6.95, 7.25, 7.42, 7.6];
+    var NH_US = (function() {
+      var us = [], N = 26, k;
+      for (k = 0; k <= N; k++) us.push(0.5 * (1 - Math.cos(Math.PI * k / N)));
+      [0.70, 0.78, 0.82, 0.84, 0.30, 0.43, 0.47, 0.53, 0.775, 0.781, 0.787, 0.792, 0.797, 0.93].forEach(function(u) { us.push(u); });
+      us.sort(function(a, b) { return a - b; });
+      return us.filter(function(u, i) { return i === 0 || u - us[i - 1] > 0.0025 || [0.70, 0.78, 0.82, 0.84].indexOf(u) >= 0; })
+               .filter(function(u, i, a) { return i === 0 || u - a[i - 1] > 1e-6; });
+    })();
 
-    // ── B-2 SPIRIT WING GEOMETRY ─────────────────────────────────────────────
-    // Stations run centerline → wingtip. Each station defines the leading-edge (zFront),
-    // trailing-edge (zBack) and top/bottom chord-thickness at that spanwise position.
-    //
-    // The TRAILING EDGE follows the real B-2's iconic "double-W" sawtooth:
-    //   centerbody (x≈0)  → sweeps AFT to exhaust bay notch  (deep aft peak, x≈0.5)
-    //   → forward into inner notch (x≈1.1)
-    //   → aft again to second shallower tooth (x≈1.7)
-    //   → forward sweep begins the long straight taper to wingtip
-    //
-    // Independent vertex strips per skin surface → zero normal blending across chine lines
-    // → every panel edge reads as a hard crease (razor facets, not smoothed).
-    function buildStealthWingGeometry() {
-      var stations = [
-        // x      zFront   zBack    yTop    yBot
-        [ 0.00,  -4.10,    1.05,    0.28,  -0.13 ], // centerline nose — long sharp nose point
-        [ 0.18,  -4.00,    1.12,    0.265, -0.125],
-        [ 0.50,  -3.72,    1.85,    0.24,  -0.115], // W-tooth 1: deepest aft excursion
-        [ 0.85,  -3.38,    1.22,    0.21,  -0.10 ], // inner notch forward
-        [ 1.22,  -3.00,    1.60,    0.185, -0.088], // W-tooth 2: second aft peak
-        [ 1.65,  -2.55,    1.10,    0.155, -0.074], // notch sweeps forward again
-        [ 2.20,  -2.00,    1.00,    0.118, -0.056], // begins straight outboard taper
-        [ 3.00,  -1.22,    0.92,    0.080, -0.038],
-        [ 3.85,  -0.42,    0.85,    0.050, -0.024],
-        [ 4.70,   0.28,    0.78,    0.028, -0.014],
-        [ 5.50,   0.82,    0.96,    0.012, -0.006],
-        [ 6.10,   1.10,    1.22,    0.004, -0.004 ] // wingtip: true knife-edge
-      ];
+    function nhTable(T, v) {
+      if (v <= T[0][0]) return T[0][1];
+      for (var i = 1; i < T.length; i++) if (v <= T[i][0]) { var a = T[i - 1], b = T[i]; return a[1] + (b[1] - a[1]) * (v - a[0]) / (b[0] - a[0]); }
+      return T[T.length - 1][1];
+    }
+    function nhSS(e0, e1, v) { var t = Math.min(1, Math.max(0, (v - e0) / (e1 - e0))); return t * t * (3 - 2 * t); }
+    function nhLE(ax) { return NHZN + NHK * ax; }
+    function nhChord(ax) { return nhTable(NH_TE, ax) - nhLE(ax); }
+    // section shape: half NACA four-digit, half biconvex — a leading edge that is sharp but not a razor
+    function nhFoil(u) {
+      var su = Math.sqrt(u), u2 = u * u;
+      return 2.5 * (0.2969 * su - 0.126 * u - 0.3516 * u2 + 0.2843 * u2 * u - 0.1036 * u2 * u2) + u * (1 - u);
+    }
+    // the cockpit hump, the engine humps (ending in the exhaust step) and the recessed exhaust deck
+    function nhHump(ax, u) {
+      var ck = 0.19 * Math.exp(-ax * ax / 0.30) * nhSS(0.05, 0.19, u) * (1 - nhSS(0.40, 0.72, u));
+      var en = 0.13 * Math.exp(-Math.pow((ax - 1.12) / 0.40, 2)) * nhSS(0.20, 0.36, u) * (1 - nhSS(0.776, 0.795, u));
+      var dk = -0.035 * Math.exp(-Math.pow((ax - 1.12) / 0.46, 2)) * nhSS(0.776, 0.795, u) * (1 - nhSS(0.93, 1.0, u));
+      return ck + en + dk;
+    }
+    // a point on the skin: x across the span, u along the local chord (0 = leading edge), upper or lower
+    function nhSkin(x, u, top, out) {
+      var ax = Math.abs(x), z0 = nhLE(ax), c = nhChord(ax), t = nhTable(NH_TAU, ax / NHB);
+      var yc = 0.012 * Math.sin(Math.PI * u), f = nhFoil(u);
+      var y = top ? NHYS + c * (yc + 1.24 * t * f) + nhHump(ax, u) : NHYS + c * (yc - 0.76 * t * f);
+      return out.set(x, y, z0 + u * c);
+    }
+    function nhSkinXZ(x, z, top, out) { var ax = Math.abs(x); return nhSkin(x, THREE.MathUtils.clamp((z - nhLE(ax)) / nhChord(ax), 0, 1), top, out); }
+    // smooth normals straight from the surface (so separately built panels shade as one skin)
+    var _nhA = new THREE.Vector3(), _nhB = new THREE.Vector3(), _nhDu = new THREE.Vector3(), _nhDx = new THREE.Vector3();
+    function nhNormal(x, u, top, out) {
+      nhSkin(x - 0.002, u, top, _nhA); nhSkin(x + 0.002, u, top, _nhB); _nhDx.subVectors(_nhB, _nhA);
+      nhSkin(x, Math.max(0, u - 0.0015), top, _nhA); nhSkin(x, Math.min(1, u + 0.0015), top, _nhB); _nhDu.subVectors(_nhB, _nhA);
+      if (top) out.crossVectors(_nhDu, _nhDx); else out.crossVectors(_nhDx, _nhDu);
+      return out.normalize();
+    }
+    function nhUV(x, z, top) { return [(x + NHB) / (2 * NHB), 1 - (((z - NHZN) / (NH_ZMAX - NHZN)) * 0.49 + (top ? 0.005 : 0.505))]; }
 
-      var n = stations.length;
-      var positions = [];
-      var faces = [];
-      var vi = 0;
+    // ---------- geometry assembly ----------
+    function NhGeo() { this.p = []; this.n = []; this.uv = []; this.i = []; this.vc = 0; }
+    NhGeo.prototype.v = function(P, N, top, uv) {
+      this.p.push(P.x, P.y, P.z); this.n.push(N.x, N.y, N.z);
+      var t = uv || nhUV(P.x, P.z, top); this.uv.push(t[0], t[1]);
+      return this.vc++;
+    };
+    NhGeo.prototype.tri = function(a, b, c) { this.i.push(a, b, c); };
+    var _nhN = new THREE.Vector3(), _nhE1 = new THREE.Vector3(), _nhE2 = new THREE.Vector3();
+    // a flat quad a-b-c-d (in order around it) facing along hint
+    NhGeo.prototype.quad = function(a, b, c, d, hint, top) {
+      _nhE1.subVectors(c, a); _nhE2.subVectors(d, b); _nhN.crossVectors(_nhE2, _nhE1);
+      if (_nhN.lengthSq() < 1e-12) return;
+      _nhN.normalize();
+      var flip = _nhN.dot(hint) < 0;
+      if (flip) _nhN.negate();
+      var i0 = this.v(a, _nhN, top), i1 = this.v(b, _nhN, top), i2 = this.v(c, _nhN, top), i3 = this.v(d, _nhN, top);
+      _nhE1.subVectors(b, a); _nhE2.subVectors(c, a);
+      var cw = _nhE1.cross(_nhE2).dot(_nhN) < 0;
+      if (!cw) { this.tri(i0, i1, i2); this.tri(i0, i2, i3); } else { this.tri(i0, i2, i1); this.tri(i0, i3, i2); }
+    };
+    NhGeo.prototype.build = function(center) {
+      var g = new THREE.BufferGeometry(), p = this.p;
+      if (center) for (var k = 0; k < p.length; k += 3) { p[k] -= center.x; p[k + 1] -= center.y; p[k + 2] -= center.z; }
+      g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+      g.setIndex(this.i);
+      g.computeBoundingSphere();
+      return g;
+    };
+    NhGeo.prototype.center = function() {
+      var b = new THREE.Box3(), v = new THREE.Vector3();
+      for (var k = 0; k < this.p.length; k += 3) b.expandByPoint(v.set(this.p[k], this.p[k + 1], this.p[k + 2]));
+      return b.getCenter(new THREE.Vector3());
+    };
 
-      function pushStrip(getPt, flip) {
-        var stripStart = vi;
-        for (var i = 0; i < n; i++) {
-          var s = stations[i];
-          var p0 = getPt(s, 0), p1 = getPt(s, 1);
-          positions.push(p0[0], p0[1], p0[2]);
-          positions.push(p1[0], p1[1], p1[2]);
-          vi += 2;
-        }
+    // stations across x0..x1 (one side of the centreline, or straddling it), doubled where a
+    // control-surface cut-out starts or ends so the trailing edge can step in and out cleanly
+    function nhUmax(ax) { for (var i = 0; i < NH_CS.length; i++) if (ax > NH_CS[i].xa + 1e-6 && ax < NH_CS[i].xb - 1e-6) return NH_CS[i].uh; return 1; }
+    function nhStations(x0, x1) {
+      var set = [];
+      NH_XS.forEach(function(v) { [v, -v].forEach(function(x) { if (x >= x0 - 1e-9 && x <= x1 + 1e-9 && set.indexOf(x) < 0) set.push(x); }); });
+      set.sort(function(a, b) { return a - b; });
+      var out = [];
+      set.forEach(function(x) {
+        var ax = Math.abs(x), cs = null, start = false;
+        NH_CS.forEach(function(c) { if (Math.abs(ax - c.xa) < 1e-6) { cs = c; start = true; } else if (Math.abs(ax - c.xb) < 1e-6) { cs = c; start = false; } });
+        if (!cs) { out.push({ x: x, umax: nhUmax(ax) }); return; }
+        var cutAfter = (x >= 0) === start;   // does the cut-out lie on the +x side of this station?
+        var rib = { x: x, umax: 1, rib: cs, hint: cutAfter ? 1 : -1 };
+        if (cutAfter) { out.push(rib); out.push({ x: x, umax: cs.uh }); }
+        else { out.push({ x: x, umax: cs.uh }); out.push(rib); }
+      });
+      return out;
+    }
+    var _nhP = new THREE.Vector3(), _nhQ = new THREE.Vector3(), _nhR = new THREE.Vector3(), _nhS = new THREE.Vector3();
+    var NH_AFT = new THREE.Vector3(0, 0, 1), NH_FWD = new THREE.Vector3(0, 0, -1), NH_UP = new THREE.Vector3(0, 1, 0), NH_DOWN = new THREE.Vector3(0, -1, 0);
+    function nhSurface(G, st, us, top) {
+      var rows = [];
+      st.forEach(function(s) {
+        var row = [];
+        for (var j = 0; j < us.length && us[j] <= s.umax + 1e-6; j++) row.push(G.v(nhSkin(s.x, us[j], top, _nhP), nhNormal(s.x, us[j], top, _nhQ), top));
+        rows.push(row);
+      });
+      for (var i = 0; i < st.length - 1; i++) {
+        if (st[i + 1].x - st[i].x < 1e-7) continue;      // a doubled station: the rib wall closes it
+        var A = rows[i], Bq = rows[i + 1], n = Math.min(A.length, Bq.length);
         for (var j = 0; j < n - 1; j++) {
-          var a = stripStart + j * 2, b = stripStart + (j + 1) * 2;
-          if (!flip) { faces.push(a, a+1, b+1,  a, b+1, b); }
-          else        { faces.push(a, b+1, a+1,  a, b,   b+1); }
+          var a = A[j], b = Bq[j], c = Bq[j + 1], d = A[j + 1];
+          if (top) { G.tri(a, d, c); G.tri(a, c, b); } else { G.tri(a, c, d); G.tri(a, b, c); }
         }
       }
-
-      function buildHalf(sign, flip) {
-        // top surface
-        pushStrip(function(s,k){ return k===0 ? [sign*s[0], s[3], s[1]] : [sign*s[0], s[3], s[2]]; }, flip);
-        // leading-edge bevel (bottom-lead → top-lead): creates a sharp crease line
-        pushStrip(function(s,k){ return k===0 ? [sign*s[0], s[4], s[1]] : [sign*s[0], s[3], s[1]]; }, flip);
-        // bottom surface
-        pushStrip(function(s,k){ return k===0 ? [sign*s[0], s[4], s[2]] : [sign*s[0], s[4], s[1]]; }, flip);
-        // trailing-edge bevel (top-trail → bottom-trail)
-        pushStrip(function(s,k){ return k===0 ? [sign*s[0], s[3], s[2]] : [sign*s[0], s[4], s[2]]; }, flip);
+    }
+    function nhPt(x, u, top) { return nhSkin(x, u, top, new THREE.Vector3()); }
+    function nhCaps(G, st) {
+      for (var i = 0; i < st.length; i++) {
+        var s = st[i];
+        if (s.rib) {                       // side wall of a control-surface cut-out
+          var h = new THREE.Vector3(s.hint, 0, 0);
+          var uu = NH_US.filter(function(u) { return u >= s.rib.uh - 1e-6; });
+          for (var j = 0; j < uu.length - 1; j++) G.quad(nhPt(s.x, uu[j], true), nhPt(s.x, uu[j + 1], true), nhPt(s.x, uu[j + 1], false), nhPt(s.x, uu[j], false), h, true);
+        }
+        var nx = st[i + 1];
+        if (nx && nx.x - s.x > 1e-7 && s.umax < 1 && nx.umax === s.umax)   // the hinge face along a cut-out
+          G.quad(nhPt(s.x, s.umax, true), nhPt(nx.x, s.umax, true), nhPt(nx.x, s.umax, false), nhPt(s.x, s.umax, false), NH_AFT, true);
+        if (Math.abs(Math.abs(s.x) - NHB) < 1e-6) {          // wingtip
+          var th = new THREE.Vector3(Math.sign(s.x), 0, 0);
+          for (var k = 0; k < NH_US.length - 1; k++) G.quad(nhPt(s.x, NH_US[k], true), nhPt(s.x, NH_US[k + 1], true), nhPt(s.x, NH_US[k + 1], false), nhPt(s.x, NH_US[k], false), th, true);
+        }
       }
-      buildHalf( 1, false);
-      buildHalf(-1, true);
+    }
 
-      // centerline and wingtip closure caps
-      function pushCap(pts, flip) {
-        var base = vi;
-        pts.forEach(function(p){ positions.push(p[0],p[1],p[2]); vi++; });
-        if (!flip) { faces.push(base, base+1, base+2,  base, base+2, base+3); }
-        else        { faces.push(base, base+2, base+1,  base, base+3, base+2); }
+    // ---------- skin texture: RAM tape seams, sawtooth panels, bays and wells ----------
+    function nhMakeSkinTexture() {
+      var W = 2048, H = 2048, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var g = cv.getContext('2d'), rng = mulberry32(5150);
+      function X(x) { return (x + NHB) / (2 * NHB) * W; }
+      function Y(z, bot) { return ((((z - NHZN) / (NH_ZMAX - NHZN)) * 0.49) + (bot ? 0.505 : 0.005)) * H; }
+      function path(pts, bot) { g.beginPath(); pts.forEach(function(p, i) { if (i) g.lineTo(X(p[0]), Y(p[1], bot)); else g.moveTo(X(p[0]), Y(p[1], bot)); }); }
+      function line(pts, bot, w, col) { path(pts, bot); g.lineWidth = w; g.strokeStyle = col; g.stroke(); }
+      // a sawtooth edge from p to q (the tape outline real low-observable panels use)
+      function saw(p, q, teeth, amp) {
+        var pts = [], dx = q[0] - p[0], dz = q[1] - p[1], L = Math.hypot(dx, dz), nxv = -dz / L, nzv = dx / L;
+        for (var k = 0; k <= teeth * 2; k++) { var t = k / (teeth * 2), a = (k % 2) ? amp : 0; pts.push([p[0] + dx * t + nxv * a, p[1] + dz * t + nzv * a]); }
+        return pts;
       }
-      [1,-1].forEach(function(sign){
-        var flip = sign < 0;
-        var s0 = stations[0];
-        pushCap([
-          [sign*s0[0], s0[3], s0[1]], [sign*s0[0], s0[3], s0[2]],
-          [sign*s0[0], s0[4], s0[2]], [sign*s0[0], s0[4], s0[1]]
-        ], !flip);
-        var sT = stations[n-1];
-        pushCap([
-          [sign*sT[0], sT[3], sT[1]], [sign*sT[0], sT[3], sT[2]],
-          [sign*sT[0], sT[4], sT[2]], [sign*sT[0], sT[4], sT[1]]
-        ], flip);
+      function sawRect(x0, z0, x1, z1, bot, teeth, amp, col, fill) {
+        var pts = [].concat(saw([x0, z0], [x1, z0], teeth, amp), [[x1, z1]], saw([x1, z1], [x0, z1], teeth, amp), [[x0, z0]]);
+        path(pts, bot); g.closePath();
+        if (fill) { g.fillStyle = fill; g.fill(); }
+        g.lineWidth = 2.5; g.strokeStyle = col; g.stroke();
+      }
+      g.fillStyle = 'rgb(222,222,222)'; g.fillRect(0, 0, W, H);
+      // weathering: soft mottling, darker toward the trailing edges where the exhaust and hands go
+      for (var i = 0; i < 1400; i++) {
+        var x = rng() * W, y = rng() * H, r = 8 + rng() * 70, light = rng() < 0.5;
+        var gr = g.createRadialGradient(x, y, 0, x, y, r);
+        gr.addColorStop(0, light ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.045)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+      }
+      [false, true].forEach(function(bot) {
+        var ink = 'rgba(40,42,46,0.55)', faint = 'rgba(40,42,46,0.28)', tape = 'rgba(255,255,255,0.16)';
+        // leading-edge band
+        path([[-NHB, nhLE(NHB)], [0, NHZN], [NHB, nhLE(NHB)], [NHB, nhLE(NHB) + 0.22], [0, NHZN + 0.22], [-NHB, nhLE(NHB) + 0.22]], bot);
+        g.closePath(); g.fillStyle = 'rgba(255,255,255,0.12)'; g.fill();
+        line([[-NHB, nhLE(NHB) + 0.22], [0, NHZN + 0.22], [NHB, nhLE(NHB) + 0.22]], bot, 2.5, ink);
+        // seams parallel to the leading edges
+        [0.75, 1.5, 2.3].forEach(function(d) {
+          [-1, 1].forEach(function(s) {
+            var pts = [];
+            for (var ax = 0.2; ax <= NHB; ax += 0.05) if (nhLE(ax) + d < nhTable(NH_TE, ax) - 0.35) pts.push([s * ax, nhLE(ax) + d]); else if (pts.length) break;
+            if (pts.length > 1) line(pts, bot, 2, faint);
+          });
+        });
+        // seams parallel to each trailing-edge segment, ahead of the control surfaces
+        for (var k = 0; k < NH_TE.length - 1; k++) {
+          var a = NH_TE[k], b = NH_TE[k + 1];
+          [0.55, 1.15].forEach(function(d) {
+            [-1, 1].forEach(function(s) {
+              var pts = [];
+              for (var t = 0.04; t <= 0.96; t += 0.04) { var ax = a[0] + (b[0] - a[0]) * t, z = a[1] + (b[1] - a[1]) * t - d; if (z > nhLE(ax) + 0.3) pts.push([s * ax, z]); }
+              if (pts.length > 1) line(pts, bot, 2, faint);
+            });
+          });
+        }
+        // structural joints between the panels
+        [1.566, 3.045, 4.495, 6.09].forEach(function(ax) { [-1, 1].forEach(function(s) { line([[s * ax, nhLE(ax) + 0.24], [s * ax, nhTable(NH_TE, ax) - 0.05]], bot, 2, faint); }); });
+        // control-surface hinge lines
+        NH_CS.forEach(function(c) {
+          [-1, 1].forEach(function(s) {
+            var pts = [];
+            for (var t = 0; t <= 1.0001; t += 0.1) { var ax = c.xa + (c.xb - c.xa) * t; pts.push([s * ax, nhLE(ax) + c.uh * nhChord(ax)]); }
+            line(pts, bot, 3, ink);
+            [c.xa, c.xb].forEach(function(ax) { line([[s * ax, nhLE(ax) + c.uh * nhChord(ax)], [s * ax, nhTable(NH_TE, ax)]], bot, 2.5, ink); });
+          });
+        });
+        // light RAM tape strips
+        [-1, 1].forEach(function(s) { line([[s * 0.55, -1.2], [s * 0.55, 1.6]], bot, 4, tape); line([[s * 2.2, nhLE(2.2) + 0.4], [s * 2.2, 1.8]], bot, 3, tape); });
+        if (!bot) {
+          // windscreen surround and the dorsal panels around the intakes and aux inlets
+          sawRect(-0.62, -2.52, 0.62, -1.78, false, 7, 0.045, ink);
+          [-1, 1].forEach(function(s) {
+            sawRect(s * 0.68, -1.10, s * 1.56, -0.28, false, 6, 0.04, ink);
+            sawRect(s * 0.18, 0.30, s * 0.42, 0.78, false, 3, 0.03, faint);
+            sawRect(s * 2.5, 0.7, s * 2.9, 1.15, false, 3, 0.03, faint);
+          });
+          line([[0, -1.6], [0, 2.7]], false, 2, faint);
+        } else {
+          // outlines of the weapon bays and gear wells (the doors themselves are separate panels)
+          [-1, 1].forEach(function(s) {
+            sawRect(s * 0.06, -1.08, s * 0.62, 0.43, true, 4, 0.05, ink);
+            sawRect(s * 1.48, -0.45, s * 2.02, 1.21, true, 3, 0.05, ink);
+            sawRect(s * 0.25, 1.0, s * 0.55, 1.5, true, 3, 0.03, faint);
+            sawRect(s * 3.2, 0.9, s * 3.6, 1.4, true, 3, 0.03, faint);
+          });
+          sawRect(-0.18, -2.33, 0.18, -1.63, true, 3, 0.04, ink);
+          line([[0, -2.9], [0, -2.32]], true, 2, faint);
+        }
       });
-
-      var geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-      geo.setIndex(faces);
-      geo.computeVertexNormals();
-      return geo;
+      var tex = new THREE.CanvasTexture(cv);
+      tex.encoding = THREE.sRGBEncoding;
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy ? Math.min(8, renderer.capabilities.getMaxAnisotropy()) : 1;
+      return tex;
     }
-    var stealthWing = new THREE.Mesh(buildStealthWingGeometry(), stealthMat);
-    stealthWing.castShadow = true;
-    stealthWing.receiveShadow = true;
-    stealthBody.add(stealthWing);
+    function nhMakeDeckTexture() {
+      var cv = document.createElement('canvas'); cv.width = cv.height = 256;
+      var g = cv.getContext('2d'), rng = mulberry32(77);
+      g.fillStyle = 'rgb(205,205,203)'; g.fillRect(0, 0, 256, 256);
+      for (var i = 0; i < 8; i++) for (var j = 0; j < 8; j++) {
+        var v = 190 + Math.floor(rng() * 34);
+        g.fillStyle = 'rgb(' + v + ',' + v + ',' + (v - 2) + ')'; g.fillRect(i * 32 + 1, j * 32 + 1, 30, 30);
+      }
+      for (var k = 0; k < 40; k++) { g.fillStyle = 'rgba(60,50,40,0.06)'; g.beginPath(); g.arc(rng() * 256, rng() * 256, 6 + rng() * 26, 0, 7); g.fill(); }
+      var t = new THREE.CanvasTexture(cv); t.encoding = THREE.sRGBEncoding; t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      return t;
+    }
 
-    // ── COCKPIT ──────────────────────────────────────────────────────────────
-    // Flat-angled 4-panel glazing, flush with the centerbody top surface.
-    // Real B-2 has a narrow, deeply raked windscreen — no bubble, no curve.
+    // ---------- materials ----------
+    var stealthMat = new THREE.MeshPhysicalMaterial({
+      color: 0x101215, map: nhMakeSkinTexture(), roughness: 0.62, metalness: 0.18,
+      clearcoat: 0.2, clearcoatRoughness: 0.5, envMapIntensity: 0.8
+    });
+    var NHM = {
+      dark: new THREE.MeshStandardMaterial({ color: 0x050506, roughness: 1, metalness: 0 }),
+      nozzle: new THREE.MeshStandardMaterial({ color: 0x0c0a09, roughness: 0.85, metalness: 0.2, emissive: 0x2a1407, emissiveIntensity: 0.7 }),
+      glass: new THREE.MeshPhysicalMaterial({ color: 0x1c1404, metalness: 0.85, roughness: 0.06, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 0.7 }),
+      deck: new THREE.MeshStandardMaterial({ color: 0x2c2f33, map: nhMakeDeckTexture(), roughness: 0.8, metalness: 0.12 }),
+      gear: new THREE.MeshStandardMaterial({ color: 0xd2d5d8, roughness: 0.42, metalness: 0.35 }),
+      chrome: new THREE.MeshStandardMaterial({ color: 0xeef1f4, roughness: 0.12, metalness: 1 }),
+      tire: new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.92, metalness: 0 }),
+      doorIn: new THREE.MeshStandardMaterial({ color: 0xbcc0c4, roughness: 0.6, metalness: 0.2 })
+    };
+
+    // ---------- skin panels: centrebody, inner and outer wings ----------
+    [[-NHB, -4.495], [-4.495, -1.566], [-1.566, 1.566], [1.566, 4.495], [4.495, NHB]].forEach(function(r) {
+      var G = new NhGeo(), st = nhStations(r[0], r[1]);
+      nhSurface(G, st, NH_US, true); nhSurface(G, st, NH_US, false); nhCaps(G, st);
+      var c = G.center(), m = new THREE.Mesh(G.build(c), stealthMat);
+      m.position.copy(c); stealthBody.add(m);
+    });
+
+    // ---------- control surfaces, each in a pivot on its hinge line ----------
+    var NH_SURF = [];   // { pivot, axis, sign, side, k, half }
+    function nhHingeMid(x, u) { return nhSkin(x, u, true, new THREE.Vector3()).add(nhSkin(x, u, false, _nhR)).multiplyScalar(0.5); }
+    function nhBuildSurface(cs, side, half) {     // half: 0 whole, 1 upper, -1 lower (split drag rudder)
+      var xs = NH_XS.filter(function(v) { return v >= cs.xa - 1e-9 && v <= cs.xb + 1e-9; }).map(function(v) { return side * v; }).sort(function(a, b) { return a - b; });
+      var us = NH_US.filter(function(u) { return u >= cs.uh - 1e-6; }); us[0] = cs.uh + 0.006;
+      var G = new NhGeo();
+      function mid(x, u) { return nhSkin(x, u, true, new THREE.Vector3()).add(nhSkin(x, u, false, _nhR)).multiplyScalar(0.5); }
+      function P(x, u, top) { return half === 0 || (half > 0) === top ? nhSkin(x, u, top, new THREE.Vector3()) : mid(x, u); }
+      var st = xs.map(function(x) { return { x: x, umax: 1 }; });
+      if (half >= 0) nhSurface(G, st, us, true);
+      if (half <= 0) nhSurface(G, st, us, false);
+      if (half !== 0) {      // the split face between the two halves of a drag rudder
+        for (var i = 0; i < xs.length - 1; i++) for (var j = 0; j < us.length - 1; j++)
+          G.quad(mid(xs[i], us[j]), mid(xs[i + 1], us[j]), mid(xs[i + 1], us[j + 1]), mid(xs[i], us[j + 1]), half > 0 ? NH_DOWN : NH_UP, half > 0);
+      }
+      for (var i2 = 0; i2 < xs.length - 1; i2++)   // leading face behind the hinge gap
+        G.quad(P(xs[i2], us[0], true), P(xs[i2 + 1], us[0], true), P(xs[i2 + 1], us[0], false), P(xs[i2], us[0], false), NH_FWD, true);
+      [[xs[0], -1], [xs[xs.length - 1], 1]].forEach(function(e) {   // end walls
+        var h = new THREE.Vector3(e[1], 0, 0);
+        for (var j2 = 0; j2 < us.length - 1; j2++) G.quad(P(e[0], us[j2], true), P(e[0], us[j2 + 1], true), P(e[0], us[j2 + 1], false), P(e[0], us[j2], false), h, true);
+      });
+      var h1 = nhHingeMid(side > 0 ? xs[0] : xs[xs.length - 1], cs.uh), h2 = nhHingeMid(side > 0 ? xs[xs.length - 1] : xs[0], cs.uh);
+      var pivot = new THREE.Group(); pivot.position.copy(h1);
+      var mesh = new THREE.Mesh(G.build(h1), stealthMat); pivot.add(mesh);
+      stealthBody.add(pivot);
+      var axis = h2.clone().sub(h1).normalize();
+      // which way round the hinge raises the trailing edge?
+      var te = nhSkin(side * (cs.xa + cs.xb) / 2, 1, true, new THREE.Vector3()).sub(h1);
+      var sign = te.clone().applyAxisAngle(axis, 0.2).y > te.y ? 1 : -1;
+      NH_SURF.push({ pivot: pivot, axis: axis, sign: sign, side: side, k: cs.k, half: half });
+    }
+    NH_CS.forEach(function(cs) { [-1, 1].forEach(function(side) { if (cs.split) { nhBuildSurface(cs, side, 1); nhBuildSurface(cs, side, -1); } else nhBuildSurface(cs, side, 0); }); });
+
+    // a patch that follows the skin over (x,u) corners a,b,c,d (bilinear), lifted off it a hair
+    function nhOverlay(G, corners, top, lift, nu, nv, uvFn, flip) {
+      var idx = [];
+      for (var i = 0; i <= nu; i++) {
+        var row = [];
+        for (var j = 0; j <= nv; j++) {
+          var s = i / nu, t = j / nv, a = corners;
+          var x = (a[0][0] * (1 - s) + a[1][0] * s) * (1 - t) + (a[3][0] * (1 - s) + a[2][0] * s) * t;
+          var u = (a[0][1] * (1 - s) + a[1][1] * s) * (1 - t) + (a[3][1] * (1 - s) + a[2][1] * s) * t;
+          nhSkin(x, u, top, _nhP); nhNormal(x, u, top, _nhQ);
+          _nhP.addScaledVector(_nhQ, lift);
+          if (flip) _nhQ.negate();
+          row.push(G.v(_nhP, _nhQ, top, uvFn ? uvFn(x, u) : null));
+        }
+        idx.push(row);
+      }
+      for (var i2 = 0; i2 < nu; i2++) for (var j2 = 0; j2 < nv; j2++) {
+        var p00 = idx[i2][j2], p10 = idx[i2 + 1][j2], p11 = idx[i2 + 1][j2 + 1], p01 = idx[i2][j2 + 1];
+        // check the facing of the first triangle against the normal and wind to match
+        var A = G.p, ia = p00 * 3, ib = p10 * 3, ic = p11 * 3;
+        _nhE1.set(A[ib] - A[ia], A[ib + 1] - A[ia + 1], A[ib + 2] - A[ia + 2]);
+        _nhE2.set(A[ic] - A[ia], A[ic + 1] - A[ia + 1], A[ic + 2] - A[ia + 2]);
+        _nhN.set(G.n[ia], G.n[ia + 1], G.n[ia + 2]);
+        if (_nhE1.cross(_nhE2).dot(_nhN) >= 0) { G.tri(p00, p10, p11); G.tri(p00, p11, p01); } else { G.tri(p00, p11, p10); G.tri(p00, p01, p11); }
+      }
+    }
+    function nhXU(x, z) { var ax = Math.abs(x); return [x, (z - nhLE(ax)) / nhChord(ax)]; }
+
+    // ---------- windscreen: four gold-tinted panes on the front of the cockpit hump ----------
     (function() {
-      var cg = new THREE.BufferGeometry();
-      // 6 verts: 2 at base-front, 2 at base-rear, 2 at peak (raked forward and low)
-      var cv = new Float32Array([
-        -0.30, 0.285, -2.55,  // 0 base-front left
-         0.30, 0.285, -2.55,  // 1 base-front right
-        -0.28, 0.285, -1.65,  // 2 base-rear left
-         0.28, 0.285, -1.65,  // 3 base-rear right
-        -0.16, 0.38,  -2.20,  // 4 peak left  (raised, raked)
-         0.16, 0.38,  -2.20   // 5 peak right
-      ]);
-      cg.setAttribute('position', new THREE.BufferAttribute(cv, 3));
-      // front glass panel, two side panels, rear flat panel
-      cg.setIndex([
-        0,1,5, 0,5,4,   // front rake
-        0,4,2,           // left side
-        1,3,5,           // right side
-        4,5,3, 4,3,2     // rear slope
-      ]);
-      cg.computeVertexNormals();
-      var stealthCockpit = new THREE.Mesh(cg, stealthMatGlass);
-      stealthCockpit.castShadow = false;
-      stealthBody.add(stealthCockpit);
-
-      // thin framing strip around the glazing
-      var frameGeo = new THREE.BufferGeometry();
-      var fv = new Float32Array([
-        -0.305, 0.283, -2.56,   0.305, 0.283, -2.56,
-         0.305, 0.283, -1.64,  -0.305, 0.283, -1.64
-      ]);
-      frameGeo.setAttribute('position', new THREE.BufferAttribute(fv, 3));
-      frameGeo.setIndex([0,1,2, 0,2,3]);
-      frameGeo.computeVertexNormals();
-      stealthBody.add(new THREE.Mesh(frameGeo, stealthMatDark));
+      var G = new NhGeo();
+      [[[-0.30, 0.112], [-0.02, 0.112], [-0.02, 0.168], [-0.29, 0.162]], [[0.02, 0.112], [0.30, 0.112], [0.29, 0.162], [0.02, 0.168]],
+       [[-0.47, 0.126], [-0.33, 0.114], [-0.32, 0.160], [-0.45, 0.158]], [[0.33, 0.114], [0.47, 0.126], [0.45, 0.158], [0.32, 0.160]]]
+        .forEach(function(c) { nhOverlay(G, c, true, 0.006, 4, 3); });
+      stealthBody.add(new THREE.Mesh(G.build(), NHM.glass));
     })();
 
-    // ── DORSAL INTAKES ───────────────────────────────────────────────────────
-    // B-2 has 4 S-duct intakes (2 per engine) buried in the upper wing surface,
-    // with serrated inlet lips. Modelled as flush rectangular scoops with a raised
-    // outer lip and a deep dark throat.
-    function addStealthIntake(sign) {
-      // outer scoop lip — a thin raised frame
-      var lipGeo = new THREE.BufferGeometry();
-      var ox = sign * 0.88, ox2 = sign * 1.52;
-      var lv = new Float32Array([
-        ox,  0.295, -1.55,   ox2, 0.295, -1.55,
-        ox2, 0.295,  0.05,   ox,  0.295,  0.05,
-        ox,  0.32,  -1.55,   ox2, 0.32,  -1.55,
-        ox2, 0.32,   0.05,   ox,  0.32,   0.05
-      ]);
-      lipGeo.setAttribute('position', new THREE.BufferAttribute(lv, 3));
-      // frame sides: front, back, inner, outer
-      lipGeo.setIndex([
-        0,1,5, 0,5,4,  // front wall
-        3,7,6, 3,6,2,  // back wall
-        0,4,7, 0,7,3,  // inner side
-        1,2,6, 1,6,5   // outer side
-      ]);
-      lipGeo.computeVertexNormals();
-      stealthBody.add(new THREE.Mesh(lipGeo, stealthMatPanel));
-
-      // dark throat (visible depth illusion)
-      var throat = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(ox2 - ox) - 0.04, 0.06, 1.55), stealthMatDark);
-      throat.position.set(sign * 1.20, 0.268, -0.75);
-      stealthBody.add(throat);
-    }
-    addStealthIntake(1);
-    addStealthIntake(-1);
-
-    // ── EXHAUST SLOTS ────────────────────────────────────────────────────────
-    // Wide, flat, heat-shielded slots recessed inside the W-notch bays.
-    // Each has a pair of narrow slots separated by a center divider.
-    function addStealthExhaust(sign) {
-      [-0.22, 0.22].forEach(function(dz) {
-        var slot = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.055, 0.38), stealthMatDark);
-        slot.position.set(sign * 0.62, 0.19, 1.48 + dz);
-        stealthBody.add(slot);
-      });
-      // center divider strip
-      var divider = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.07, 0.04), stealthMatPanel);
-      divider.position.set(sign * 0.62, 0.19, 1.48);
-      stealthBody.add(divider);
-    }
-    addStealthExhaust(1);
-    addStealthExhaust(-1);
-
-    // ── WEAPON BAY DOORS ─────────────────────────────────────────────────────
-    // Two large flush panels on the belly at the centerline — just panel-line geometry.
+    // ---------- intakes: serrated lips standing proud of the engine humps ----------
     (function() {
-      var bayW = 0.82, bayL = 2.10;
-      [-0.42, 0.42].forEach(function(bx) {
-        var door = new THREE.Mesh(new THREE.BoxGeometry(bayW, 0.018, bayL), stealthMatPanel);
-        door.position.set(bx, -0.115, -1.10);
-        stealthBody.add(door);
-        // recessed seam lines
-        var seam = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.022, bayL + 0.08), stealthMatDark);
-        seam.position.set(bx + (bx > 0 ? bayW/2 : -bayW/2), -0.108, -1.10);
-        stealthBody.add(seam);
+      var skinG = new NhGeo(), darkG = new NhGeo();
+      [-1, 1].forEach(function(s) {
+        var NX = 18, uF = 0.30, uR = 0.45, tops = [], unders = [], bases = [];
+        for (var k = 0; k <= NX; k++) {
+          var ax = 0.72 + (1.52 - 0.72) * k / NX, x = s * ax, uf = uF + (k % 2 ? 0.012 : 0);
+          var rowT = [], rowU = [];
+          for (var m = 0; m <= 6; m++) {
+            var u = uf + (uR - uf) * m / 6, t = (u - uF) / (uR - uF), hgt = 0.105 * Math.pow(Math.max(0, 1 - t), 1.4) + 0.004;
+            nhSkin(x, u, true, _nhP); nhNormal(x, u, true, _nhQ);
+            rowT.push(_nhP.clone().addScaledVector(_nhQ, hgt));
+            rowU.push(_nhP.clone().addScaledVector(_nhQ, Math.max(0.003, hgt - 0.014)));
+          }
+          tops.push(rowT); unders.push(rowU); bases.push(nhSkin(x, uF + 0.03, true, new THREE.Vector3()));
+        }
+        for (var k2 = 0; k2 < NX; k2++) {
+          for (var m2 = 0; m2 < 6; m2++) {
+            skinG.quad(tops[k2][m2], tops[k2 + 1][m2], tops[k2 + 1][m2 + 1], tops[k2][m2 + 1], NH_UP, true);
+            darkG.quad(unders[k2][m2], unders[k2 + 1][m2], unders[k2 + 1][m2 + 1], unders[k2][m2 + 1], NH_DOWN, true);
+          }
+          // the lip's front edge and the dark throat beneath it
+          skinG.quad(tops[k2][0], tops[k2 + 1][0], unders[k2 + 1][0], unders[k2][0], NH_FWD, true);
+          darkG.quad(unders[k2][0], unders[k2 + 1][0], bases[k2 + 1], bases[k2], NH_FWD, true);
+        }
+        [[0, -1], [NX, 1]].forEach(function(e) {     // side walls
+          var k3 = e[0], h = new THREE.Vector3(e[1] * s, 0, 0);
+          for (var m3 = 0; m3 < 6; m3++) darkG.quad(unders[k3][m3], unders[k3][m3 + 1], tops[k3][m3 + 1], tops[k3][m3], h, true);
+          darkG.quad(bases[k3], unders[k3][0], unders[k3][6], unders[k3][6], h, true);
+        });
       });
+      stealthBody.add(new THREE.Mesh(skinG.build(), stealthMat));
+      stealthBody.add(new THREE.Mesh(darkG.build(), NHM.dark));
     })();
 
-    // ── PANEL LINES ──────────────────────────────────────────────────────────
-    // Subtle surface panel seams on the top skin — very thin dark strips at key chine angles
+    // ---------- exhausts: the dark nozzle slot on each engine step, and the heat-tiled deck behind ----------
     (function() {
-      var lineData = [
-        // [x, z, w, l, rotY] — all on top surface y≈0.24 at center fading out
-        { x:  1.10, z: -1.80, w: 0.018, l: 2.60, ry:  0.48 },
-        { x: -1.10, z: -1.80, w: 0.018, l: 2.60, ry: -0.48 },
-        { x:  2.60, z: -0.50, w: 0.012, l: 2.10, ry:  0.38 },
-        { x: -2.60, z: -0.50, w: 0.012, l: 2.10, ry: -0.38 },
-      ];
-      lineData.forEach(function(d) {
-        var pl = new THREE.Mesh(new THREE.BoxGeometry(d.w, 0.008, d.l), stealthMatDark);
-        pl.position.set(d.x, 0.155, d.z);
-        pl.rotation.y = d.ry;
-        stealthBody.add(pl);
+      var nz = new NhGeo(), dk = new NhGeo();
+      [-1, 1].forEach(function(s) {
+        var NX = 16, rowsT = [], rowsB = [];
+        for (var k = 0; k <= NX; k++) {
+          var x = s * (0.70 + 0.84 * k / NX);
+          rowsT.push(nhSkin(x, 0.7745, true, new THREE.Vector3()).add(new THREE.Vector3(0, 0, 0.006)));
+          rowsB.push(nhSkin(x, 0.7965, true, new THREE.Vector3()).add(new THREE.Vector3(0, 0.004, 0.006)));
+        }
+        for (var k2 = 0; k2 < NX; k2++) nz.quad(rowsT[k2], rowsT[k2 + 1], rowsB[k2 + 1], rowsB[k2], NH_AFT, true);
+        var x0 = s * 0.62, x1 = s * 1.62;
+        nhOverlay(dk, s > 0 ? [[x0, 0.797], [x1, 0.797], [x1, 0.985], [x0, 0.985]] : [[x1, 0.797], [x0, 0.797], [x0, 0.985], [x1, 0.985]], true, 0.003, 14, 6,
+          function(x, u) { return [(Math.abs(x) - 0.62) * 5, (u - 0.797) * 12]; });
       });
+      stealthBody.add(new THREE.Mesh(nz.build(), NHM.nozzle));
+      stealthBody.add(new THREE.Mesh(dk.build(), NHM.deck));
     })();
 
-    // ── ENGINE GLOWS ─────────────────────────────────────────────────────────
-    var stealthGlowTexture = makeRadialGlowTexture('160,175,240', '30,50,110');
-    var stealthGlowL = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: stealthGlowTexture, transparent: true, depthWrite: false, fog: false,
-      blending: THREE.AdditiveBlending, opacity: 0
-    }));
-    stealthGlowL.position.set(-0.62, 0.19, 1.70);
-    stealthGlowL.scale.set(0.45, 0.30, 1);
-    stealthBody.add(stealthGlowL);
-    var stealthGlowR = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: stealthGlowTexture, transparent: true, depthWrite: false, fog: false,
-      blending: THREE.AdditiveBlending, opacity: 0
-    }));
-    stealthGlowR.position.set(0.62, 0.19, 1.70);
-    stealthGlowR.scale.set(0.45, 0.30, 1);
-    stealthBody.add(stealthGlowR);
-    var stealthEngineGlows = [stealthGlowL, stealthGlowR];
+    // ---------- engine glows (in the nozzle slots) ----------
+    var stealthGlowTexture = makeRadialGlowTexture('255,176,120', '90,34,12');
+    var stealthEngineGlows = [-1, 1].map(function(s) {
+      var spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: stealthGlowTexture, transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+      spr.position.copy(nhSkin(s * 1.12, 0.80, true, new THREE.Vector3())).add(new THREE.Vector3(0, 0.03, 0.05));
+      spr.scale.set(0.9, 0.22, 1);
+      stealthBody.add(spr);
+      return spr;
+    });
 
-    // retractable tricycle gear — B-2 has twin-wheel bogies on each main gear
-    function addStealthWheel(x, z) {
-      var strut = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.60, 6), stealthMatDark);
-      strut.position.set(x, -0.52, z);
-      stealthBody.add(strut);
-      // twin wheels side by side
-      [-0.10, 0.10].forEach(function(dz) {
-        var wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.20, 0.13, 10), stealthMatDark);
-        wheel.rotation.x = Math.PI / 2;
-        wheel.position.set(x, -0.84, z + dz);
-        stealthBody.add(wheel);
-      });
+    // ---------- hinged panels: aux inlet doors (top), gear and weapon bay doors (underneath) ----------
+    var NH_DOORS = [];
+    // corners in (x,z) on the planform; hinge along the edge h0-h1; opens by `open` radians the way that
+    // swings its free edge `dir` (+1 up, -1 down)
+    function nhDoor(corners, top, h0, h1, open, dir, inner, kind) {
+      var cxu = corners.map(function(c) { return nhXU(c[0], c[1]); });
+      var hp0 = nhSkinXZ(h0[0], h0[1], top, new THREE.Vector3()), hp1 = nhSkinXZ(h1[0], h1[1], top, new THREE.Vector3());
+      var pivot = new THREE.Group(); pivot.position.copy(hp0);
+      var G = new NhGeo();
+      nhOverlay(G, cxu, top, 0.004, 3, 4);
+      var m = new THREE.Mesh(G.build(hp0), stealthMat); pivot.add(m);
+      if (inner) {
+        var Gi = new NhGeo();
+        nhOverlay(Gi, cxu, top, -0.008, 3, 4, null, true);
+        var mi = new THREE.Mesh(Gi.build(hp0), NHM.doorIn); pivot.add(mi);
+      }
+      stealthBody.add(pivot);
+      var axis = hp1.clone().sub(hp0).normalize();
+      // which rotation sense moves the free edge the right way?
+      var c = new THREE.Vector3(); corners.forEach(function(p) { c.add(nhSkinXZ(p[0], p[1], top, _nhR)); }); c.multiplyScalar(1 / corners.length).sub(hp0);
+      var sign = c.clone().applyAxisAngle(axis, 0.3).y * dir > c.y * dir ? 1 : -1;
+      var D = { pivot: pivot, axis: axis, angle: open * sign, kind: kind, amt: 0 };
+      pivot.userData.nhDoor = true;
+      NH_DOORS.push(D);
+      return D;
     }
-    addStealthWheel(-1.25, -0.45);
-    addStealthWheel( 1.25, -0.45);
-    var stealthNoseStrut = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.50, 6), stealthMatDark);
-    stealthNoseStrut.position.set(0, -0.44, -2.80);
-    stealthBody.add(stealthNoseStrut);
-    var stealthNoseWheel = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.11, 10), stealthMatDark);
-    stealthNoseWheel.rotation.x = Math.PI / 2;
-    stealthNoseWheel.position.set(0, -0.68, -2.80);
-    stealthBody.add(stealthNoseWheel);
+    // the dark openings the doors cover: weapon bays, gear wells, aux inlets (only drawn while their
+    // doors are open — shut, the doors and wells are hidden and the skin's own outline shows)
+    var NH_WELLS = (function() {
+      var G = { gear: new NhGeo(), bay: new NhGeo(), aux: new NhGeo() };
+      function well(k, x0, z0, x1, z1) { nhOverlay(G[k], [nhXU(x0, z0), nhXU(x1, z0), nhXU(x1, z1), nhXU(x0, z1)], false, 0.002, 3, 4); }
+      [-1, 1].forEach(function(s) {
+        well('bay', s * 0.08, -1.05, s * 0.60, 0.40);
+        well('gear', s * 1.50, -0.42, s * 2.00, 1.18);
+        [0.94, 1.30].forEach(function(cx) {
+          nhOverlay(G.aux, [[s * (cx - 0.10), 0.47], [s * (cx + 0.10), 0.47], [s * (cx + 0.10), 0.53], [s * (cx - 0.10), 0.53]], true, 0.002, 2, 2);
+        });
+      });
+      well('gear', -0.16, -2.30, 0.16, -1.66);
+      var out = {};
+      Object.keys(G).forEach(function(k) { out[k] = new THREE.Mesh(G[k].build(), NHM.dark); out[k].userData.nhDoor = true; stealthBody.add(out[k]); });
+      return out;
+    })();
+    [-1, 1].forEach(function(s) {
+      // auxiliary inlet doors on the engine humps: hinged at the front, the back edge lifts
+      [0.94, 1.30].forEach(function(cx) {
+        var a = [s * (cx - 0.10), 0], b = [s * (cx + 0.10), 0];
+        var za = function(ax, u) { return nhLE(ax) + u * nhChord(ax); };
+        nhDoor([[a[0], za(cx - 0.10, 0.47)], [b[0], za(cx + 0.10, 0.47)], [b[0], za(cx + 0.10, 0.53)], [a[0], za(cx - 0.10, 0.53)]],
+          true, [a[0], za(cx - 0.10, 0.47)], [b[0], za(cx + 0.10, 0.47)], 0.55, 1, false, 'aux');
+      });
+      // main gear doors, hinged along their outer edges
+      nhDoor([[s * 1.50, -0.42], [s * 1.75, -0.42], [s * 1.75, 1.18], [s * 1.50, 1.18]], false, [s * 1.50, -0.42], [s * 1.50, 1.18], 1.62, -1, true, 'gear');
+      nhDoor([[s * 1.75, -0.42], [s * 2.00, -0.42], [s * 2.00, 1.18], [s * 1.75, 1.18]], false, [s * 2.00, -0.42], [s * 2.00, 1.18], 1.62, -1, true, 'gear');
+      // weapon bay doors
+      nhDoor([[s * 0.08, -1.05], [s * 0.34, -1.05], [s * 0.34, 0.40], [s * 0.08, 0.40]], false, [s * 0.08, -1.05], [s * 0.08, 0.40], 1.7, -1, true, 'bay');
+      nhDoor([[s * 0.34, -1.05], [s * 0.60, -1.05], [s * 0.60, 0.40], [s * 0.34, 0.40]], false, [s * 0.60, -1.05], [s * 0.60, 0.40], 1.7, -1, true, 'bay');
+      // nose gear doors
+      nhDoor([[0, -2.30], [s * 0.16, -2.30], [s * 0.16, -1.66], [0, -1.66]], false, [s * 0.16, -2.30], [s * 0.16, -1.66], 1.55, -1, true, 'gear');
+    });
 
-    // faint formation/position lights — a single dim red and green tip light, the only visual
-    // break in an otherwise all-black airframe (real aircraft carry these even in stealth ops
-    // for mid-air collision avoidance below combat conditions)
-    var stealthLightMatR = new THREE.MeshStandardMaterial({ color: 0x2a0505, emissive: 0xaa1010, emissiveIntensity: 0.9, flatShading: true });
-    var stealthLightMatG = new THREE.MeshStandardMaterial({ color: 0x052a08, emissive: 0x10aa20, emissiveIntensity: 0.9, flatShading: true });
-    var stealthTipLightR = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), stealthLightMatR);
-    stealthTipLightR.position.set(6.10, 0.0, 1.16);
-    stealthBody.add(stealthTipLightR);
-    var stealthTipLightG = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), stealthLightMatG);
-    stealthTipLightG.position.set(-6.10, 0.0, 1.16);
-    stealthBody.add(stealthTipLightG);
+    // ---------- landing gear ----------
+    function nhMerge(list) {      // [{ geo, pos, rot? }] -> one geometry
+      var P = [], N = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), one = new THREE.Vector3(1, 1, 1), nm = new THREE.Matrix3();
+      list.forEach(function(it) {
+        var g = it.geo.index ? it.geo.toNonIndexed() : it.geo;
+        q.setFromEuler(e.set(it.rot ? it.rot[0] : 0, it.rot ? it.rot[1] : 0, it.rot ? it.rot[2] : 0));
+        m.compose(new THREE.Vector3(it.pos[0], it.pos[1], it.pos[2]), q, one);
+        g = g.clone(); g.applyMatrix4(m);
+        var pa = g.attributes.position.array, na = g.attributes.normal.array;
+        for (var i = 0; i < pa.length; i++) { P.push(pa[i]); N.push(na[i]); }
+      });
+      var out = new THREE.BufferGeometry();
+      out.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+      out.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+      out.computeBoundingSphere();
+      return out;
+    }
+    function nhRod(a, b, r) {      // a cylinder from point a to point b
+      var d = new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]), len = d.length();
+      var g = new THREE.CylinderGeometry(r, r, len, 10);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize())));
+      g.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+      return g;
+    }
+    function nhWheel(r, w) { var g = new THREE.CylinderGeometry(r, r, w, 18); g.rotateZ(Math.PI / 2); return g; }
+    function nhHub(r, w) { var g = new THREE.CylinderGeometry(r * 0.55, r * 0.55, w * 1.08, 12); g.rotateZ(Math.PI / 2); return g; }
+    var NH_COMP_STATIC = 0.06;
+    var NH_GEAR = { legs: [], noseLower: null, lowers: [], light: null };
+    function nhLeg(x, z, wheelR, nose) {
+      var top = nhSkinXZ(x, z, false, new THREE.Vector3());
+      var axleY = (-PLANE_GROUND_OFFSET + wheelR) - top.y;          // axle height below the pivot, at static compression
+      var pivot = new THREE.Group(); pivot.position.copy(top); pivot.userData.nhGear = true;
+      stealthBody.add(pivot);
+      var upper = [], lowerP = [], lowerC = [], lowerT = [], lowerH = [];
+      if (!nose) {
+        upper.push({ geo: nhRod([0, 0.02, 0], [0, axleY * 0.62, 0], 0.045), pos: [0, 0, 0] });
+        upper.push({ geo: nhRod([0, axleY * 0.45, 0], [0, 0.0, -0.42], 0.022), pos: [0, 0, 0] });        // drag brace
+        upper.push({ geo: nhRod([0, axleY * 0.5, 0], [Math.sign(x) * 0.22, 0.0, 0.05], 0.018), pos: [0, 0, 0] }); // side stay
+        lowerC.push({ geo: nhRod([0, axleY * 0.6, 0], [0, axleY, 0], 0.03), pos: [0, 0, 0] });
+        lowerP.push({ geo: new THREE.BoxGeometry(0.07, 0.06, 0.52), pos: [0, axleY, 0] });               // bogie beam
+        lowerP.push({ geo: nhRod([-0.13, axleY, -0.19], [0.13, axleY, -0.19], 0.016), pos: [0, 0, 0] });
+        lowerP.push({ geo: nhRod([-0.13, axleY, 0.19], [0.13, axleY, 0.19], 0.016), pos: [0, 0, 0] });
+        [-0.19, 0.19].forEach(function(dz) { [-0.085, 0.085].forEach(function(dx) {
+          lowerT.push({ geo: nhWheel(wheelR, 0.085), pos: [dx, axleY, dz] });
+          lowerH.push({ geo: nhHub(wheelR, 0.085), pos: [dx, axleY, dz] });
+        }); });
+      } else {
+        upper.push({ geo: nhRod([0, 0.02, 0], [0, axleY * 0.58, 0], 0.035), pos: [0, 0, 0] });
+        upper.push({ geo: nhRod([0, axleY * 0.4, 0], [0, 0.0, 0.32], 0.018), pos: [0, 0, 0] });
+        lowerC.push({ geo: nhRod([0, axleY * 0.55, 0], [0, axleY, 0], 0.024), pos: [0, 0, 0] });
+        lowerP.push({ geo: nhRod([-0.1, axleY, 0], [0.1, axleY, 0], 0.016), pos: [0, 0, 0] });
+        lowerP.push({ geo: new THREE.BoxGeometry(0.07, 0.04, 0.06), pos: [0, axleY * 0.72, -0.05] });   // taxi light housing
+        [-0.065, 0.065].forEach(function(dx) {
+          lowerT.push({ geo: nhWheel(wheelR, 0.07), pos: [dx, axleY, 0] });
+          lowerH.push({ geo: nhHub(wheelR, 0.07), pos: [dx, axleY, 0] });
+        });
+      }
+      pivot.add(new THREE.Mesh(nhMerge(upper), NHM.gear));
+      var lower = new THREE.Group(); pivot.add(lower);
+      lower.add(new THREE.Mesh(nhMerge(lowerC), NHM.chrome));
+      lower.add(new THREE.Mesh(nhMerge(lowerP.concat(lowerH)), NHM.gear));
+      lower.add(new THREE.Mesh(nhMerge(lowerT), NHM.tire));
+      NH_GEAR.legs.push({ pivot: pivot, lower: lower, nose: nose });
+      NH_GEAR.lowers.push(lower);
+      if (nose) {
+        NH_GEAR.noseLower = lower;
+        var ll = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeRadialGlowTexture('255,252,235', '255,230,170'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+        ll.position.set(0, axleY * 0.72, -0.1); ll.scale.set(0.7, 0.7, 1);
+        lower.add(ll); NH_GEAR.light = ll;
+      }
+      return pivot;
+    }
+    var NH_ZM = 0.55, NH_ZNOSE = -1.95;
+    nhLeg(-1.75, NH_ZM, 0.17, false);
+    nhLeg(1.75, NH_ZM, 0.17, false);
+    nhLeg(0, NH_ZNOSE, 0.13, true);
+
+    // ---------- lights ----------
+    var NH_LIGHTS = { nav: [], beacons: [] };
+    function nhLight(pos, rgb, size, kind) {
+      var spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeRadialGlowTexture(rgb, rgb), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.6 }));
+      spr.position.copy(pos); spr.scale.set(size, size, 1); stealthBody.add(spr);
+      (kind === 'beacon' ? NH_LIGHTS.beacons : NH_LIGHTS.nav).push(spr);
+    }
+    nhLight(nhSkin(-7.42, 0.35, true, new THREE.Vector3()).add(new THREE.Vector3(0, 0.01, 0)), '255,50,40', 0.42, 'nav');    // port: red
+    nhLight(nhSkin(7.42, 0.35, true, new THREE.Vector3()).add(new THREE.Vector3(0, 0.01, 0)), '60,255,110', 0.42, 'nav');    // starboard: green
+    nhLight(nhSkin(0, 0.995, true, new THREE.Vector3()).add(new THREE.Vector3(0, 0, 0.03)), '255,255,255', 0.34, 'nav');     // tail
+    nhLight(nhSkin(0, 0.55, true, new THREE.Vector3()).add(new THREE.Vector3(0, 0.02, 0)), '255,40,30', 0.7, 'beacon');
+    nhLight(nhSkin(0, 0.62, false, new THREE.Vector3()).add(new THREE.Vector3(0, -0.02, 0)), '255,40,30', 0.7, 'beacon');
 
     stealthBody.visible = false;
+
+    // clones of the bomber (AI wingmen, other players) fly clean: gear up, every door shut
+    function nhCloneClean(root) {
+      root.traverse(function(o) {
+        if (o.userData && o.userData.nhGear) o.visible = false;
+        if (o.userData && o.userData.nhDoor) { o.quaternion.identity(); o.visible = false; }
+      });
+    }
+
+    /* ---------- state shared by the animation and the takeoff physics ---------- */
+    var nh = {
+      mode: 'roll',    // 'roll' on the wheels / 'liftoff' climbing out through the first few metres /
+                       // 'landing' settling onto the runway from the air / 'air'
+      wow: true,       // weight on wheels
+      hw: 0,           // main wheels above the ground (m)
+      lw: 0,           // lift / weight
+      spool: 0,        // engine core speed 0..1
+      airT: 99,        // seconds since the wheels left the ground
+      gear: 1, gearCmd: 1,
+      comp: NH_COMP_STATIC, compV: 0,
+      steer: 0, stickP: 0, stickR: 0, pitch: 0,
+      el: {}, dr: [0, 0], aux: 0, bay: 0, bayT: 0,
+      calls: {}
+    };
+    function nhReset(onGround) {
+      if (onGround && isStealthMode && started) { wasGrounded = true; verticalVel = 0; velocityVec.set(0, 0, 0); }
+      nh.mode = onGround ? 'roll' : 'air'; nh.wow = !!onGround; nh.hw = 0; nh.spool = onGround ? 0 : 0.7; nh.pitch = pitchAngle;
+      nh.airT = onGround ? 0 : 99; nh.gear = nh.gearCmd = onGround ? 1 : 0; nh.lw = onGround ? 0 : 1;
+      nh.comp = NH_COMP_STATIC; nh.compV = 0; nh.steer = 0; nh.bay = 0; nh.bayT = 0; nh.calls = {};
+      nh.dr = [0, 0]; nh.el = {};
+    }
+    function nhBayOpen() { nh.bayT = 2.6; }
+
+    /* ---------- NIGHTHAWK TAKEOFF PHYSICS ----------
+       The bomber has its own ground roll and lift-off instead of the shared "chase the throttle at a
+       fixed rate, leave the ground at takeoff speed" model:
+         · thrust-limited acceleration: the engines spool up over a couple of seconds, thrust lapses a
+           little with speed, drag and rolling resistance take their share: about 0.3 g at brake
+           release, ~20 s and ~600 m to lift-off (much less with the boost held)
+         · the nose stays on its wheel until the elevons have the airspeed to lift it; pulling back
+           then rotates the airframe about the main gear (never far enough to scrape the tail)
+         · it leaves the ground when lift beats weight. Lift grows with the square of the speed and
+           with the rotation angle, plus ground effect near the runway, so it unsticks gently and
+           eases into the normal climb over the first few metres
+         · on the wheels the wings stay level and the nose wheel steers (the drag rudders at speed);
+           brakes and drag rudders stop it
+         · V1 / ROTATE / POSITIVE RATE calls; the gear comes up after a positive climb and goes back
+           down for the approach. Landings settle onto the gear instead of snapping to the runway
+    */
+    var NH_V1 = 155 / 3.6, NH_VR = 170 / 3.6, NH_VREF = 190 / 3.6;     // V1, rotate, lift-off speed at the reference rotation
+    var NH_ROT_MAX = THREE.MathUtils.degToRad(12), NH_ROT_CMD = THREE.MathUtils.degToRad(10);
+    function nhStick(p, r) { nh.stickP = p; nh.stickR = r; }
+    // height of the aircraft's origin above the runway with the main wheels on it, rotated nose-up by theta
+    function nhRide(theta) { return PLANE_GROUND_OFFSET * Math.cos(theta) + NH_ZM * Math.sin(theta); }
+    function nhLiftRatio(v, theta, hw) {
+      var a = Math.max(0, THREE.MathUtils.radToDeg(theta) + 2.0);   // effective angle of attack (the section is cambered)
+      var ge = 1 + 0.12 * Math.max(0, 1 - hw / 7);                   // ground effect inside about half a span
+      var q = v / NH_VREF;
+      return q * q * a / 10.5 * ge;
+    }
+    function nhLandable() {
+      return isOverRunway(position.x, position.z, RUNWAY_LANDING_MARGIN) || isOverHighway(position.x, position.z, RUNWAY_LANDING_MARGIN) ||
+        worldLandable(position.x, position.z, RUNWAY_LANDING_MARGIN) || (isOverCarrierDeck(position.x, position.z) && position.y > CARRIER.deckY - 1.5);
+    }
+    function nhSpeedStep(dt, targetSpeed, boosting) {
+      var dead = outOfFuel || samEngineKilled;
+      var thr = THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1);
+      // taxiing, the engines are run up to close the gap to the selected speed, not just to the lever position
+      if (wasGrounded && nh.wow && targetSpeed > speed) thr = Math.max(thr, THREE.MathUtils.clamp((targetSpeed - speed) / 15, 0, 1));
+      var want = dead ? 0 : Math.max(0.06, boosting ? 1 : thr);
+      nh.spool += (want - nh.spool) * Math.min(1, dt / (want > nh.spool ? 2.2 : 1.6));
+      var v = speed, wheels = wasGrounded && nh.wow;
+      if (v < 0 && targetSpeed > v) {               // stopping a reverse taxi
+        speed = Math.min(targetSpeed, v + 2.8 * dt);
+      } else if (targetSpeed > v) {
+        var a = 3.5 * nh.spool * (1 - 0.0025 * Math.max(0, v)) + (boosting ? 1.7 : 0) - 0.00018 * v * v - (wheels ? 0.22 : 0);
+        // once off the ground, hand over to the normal flight model's engine response over the first seconds of the climb
+        if (!wheels) a += (ENGINE_ACCEL + (boosting ? BOOST_ACCEL : 0) - a) * THREE.MathUtils.smoothstep(nh.airT, 0, 8);
+        speed = Math.min(targetSpeed, v + Math.max(0, a) * dt);
+      } else {
+        // anti-skid brakes plus the drag rudders split wide open (their drag grows with speed)
+        var d = wheels ? (Math.abs(v) > 1 ? 4.4 : 1.5) + 0.0003 * v * v : ENGINE_ACCEL;
+        speed = Math.max(targetSpeed, v - d * dt);
+      }
+    }
+    // attitude while the wheels are on (or just off) the ground; the normal model takes over above that
+    function nhAttitude(dt, pitchIn, rollIn) {
+      if (nh.mode === 'landing') { nh.pitch = pitchAngle; return; }
+      var v = Math.max(0, speed), f = THREE.MathUtils.clamp(v / NH_VR, 0, 1);
+      if (nh.wow) {
+        rollAngle *= Math.max(0, 1 - 8 * dt); rollRate = 0;
+        heading -= rollIn * THREE.MathUtils.lerp(0.5, 0.09, f) * Math.min(1, Math.abs(speed) / 2.5) * dt;
+        nh.steer += (rollIn * THREE.MathUtils.lerp(0.55, 0.06, f) - nh.steer) * Math.min(1, 6 * dt);
+      } else nh.steer *= Math.max(0, 1 - 4 * dt);
+      // the elevons need dynamic pressure before they can lift the nose off its wheel
+      var auth = nh.wow ? THREE.MathUtils.clamp((v * v / (NH_VR * NH_VR) - 0.72) / 0.28, 0, 1) : 1;
+      var target = nh.wow ? Math.max(0, pitchIn) * NH_ROT_CMD * auth : THREE.MathUtils.clamp(pitchIn * MAX_PITCH, -MAX_PITCH * 0.5, MAX_PITCH);
+      var maxRate = THREE.MathUtils.degToRad(nh.wow ? 3.2 : 4.5);
+      var rate = THREE.MathUtils.clamp((target - nh.pitch) * 2.4, -maxRate, maxRate);
+      nh.pitch += rate * dt;
+      if (nh.wow) nh.pitch = THREE.MathUtils.clamp(nh.pitch, THREE.MathUtils.degToRad(-0.6), NH_ROT_MAX);
+      pitchAngle = nh.pitch; pitchRate = rate;
+    }
+    // vertical motion on the roll and through the first few metres of the climb
+    function nhVertical(dt) {
+      var v = Math.max(0, speed);
+      // on the wheels the lift depends on how far the nose is rotated; once flying, the wing is trimmed
+      // to carry the aircraft as long as the speed holds
+      var lw = nhLiftRatio(v, nh.wow ? pitchAngle : Math.max(pitchAngle, NH_ROT_CMD), nh.hw);
+      nh.lw = lw;
+      var e = lw - 1;
+      var gen = THREE.MathUtils.clamp(Math.sin(pitchAngle) * v, -MAX_CLIMB_RATE, MAX_CLIMB_RATE);
+      if (e > 0) verticalVel += (gen * Math.min(1, e / 0.15) - verticalVel) * Math.min(1, 1.6 * dt);
+      else verticalVel += GRAVITY * Math.max(-1, e) * dt;
+    }
+    function nhGroundContact(groundHeight, clearance, overWater) {
+      if (nh.mode === 'air') { nh.mode = 'roll'; nh.gear = nh.gearCmd = 1; nh.pitch = pitchAngle; }
+      var ride = nhRide(pitchAngle), hw = position.y - groundHeight - ride;
+      nh.hw = Math.max(0, hw);
+      // the wheels only leave the runway when lift carries them up (lowering the nose after a landing,
+      // or a dip in the runway, just lets the struts follow the ground)
+      if (hw <= 0 || (nh.wow && verticalVel <= 0.3 && hw < 0.35)) {
+        if (overWater) { triggerCrash(true); return; }
+        if (!nh.wow) {
+          var vs = verticalVel;
+          if (vs < SAFE_DESCENT_RATE) { triggerCrash(false); return; }
+          if (nh.mode === 'landing') { showTouchdownMessage(); kjOnTouchdown(vs); nh.pitch = pitchAngle; }
+          nh.compV += Math.max(0, -vs) * 0.12;      // the oleos take the hit
+          nh.mode = 'roll';
+        }
+        nh.wow = true;
+        position.y = groundHeight + ride;
+        if (verticalVel < 0) verticalVel = 0;
+        if (velocityVec.y < 0) velocityVec.y = 0;
+      } else {
+        if (nh.wow && nh.mode === 'roll') nh.mode = 'liftoff';
+        nh.wow = false;
+        // settling in to land: only over something you can land on, like everyone else
+        if (nh.mode === 'landing' && !nhLandable()) { triggerCrash(overWater); return; }
+      }
+      if (clearance >= CRASH_BUFFER) { wasGrounded = false; nh.mode = 'air'; nh.wow = false; }
+    }
+    function nhCall(msg) {
+      samToast(msg, '#e4ecf5', 1.7);
+      if (!audioCtx || !soundEnabled) return;
+      var t = audioCtx.currentTime;
+      [[1046, 0], [784, 0.11]].forEach(function(n) {
+        var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.type = 'sine'; o.frequency.value = n[0];
+        g.gain.setValueAtTime(0.0001, t + n[1]); g.gain.exponentialRampToValueAtTime(0.05, t + n[1] + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + n[1] + 0.13);
+        o.connect(g).connect(audioCtx.destination); o.start(t + n[1]); o.stop(t + n[1] + 0.15);
+      });
+    }
+    // per frame: callouts, the gear sequence, timers
+    function nhTick(dt) {
+      if (wasGrounded && nh.wow) nh.airT = 0; else nh.airT += dt;
+      if (!wasGrounded) nh.pitch = pitchAngle;
+      var v = speed, C = nh.calls, agl = kjAgl();
+      if (wasGrounded && nh.wow) {
+        if (v < 40 / 3.6) { C.v1 = C.vr = C.pos = false; C.armed = true; }
+        if (throttle < MAX_SPEED * 0.5) C.thrust = false;
+        if (!C.thrust && nh.spool > 0.9 && v < 60 / 3.6 && throttle > MAX_SPEED * 0.8) { C.thrust = true; nhCall('THRUST SET'); }
+        // takeoff calls only on a takeoff roll (one that started from a crawl), never on a landing roll-out
+        if (C.armed && !C.v1 && v >= NH_V1 && throttle > v) { C.v1 = true; nhCall('V1'); }
+        if (C.armed && !C.vr && v >= NH_VR && throttle > v) { C.vr = true; nhCall(GFX_IS_TOUCH ? 'ROTATE — PULL BACK' : 'ROTATE — PULL BACK  (S / ↓)'); }
+        nh.gearCmd = 1;
+      } else if (nh.mode !== 'landing') {
+        if (!C.pos && nh.gearCmd === 1 && nh.airT < 20 && agl > 2.5 && verticalVel > 1.2) { C.pos = true; C.armed = false; nhCall('POSITIVE RATE — GEAR UP'); nh.gearCmd = 0; }
+        // gear down for an approach (low, slow, descending), back up on a go-around
+        if (nh.gearCmd === 0 && verticalVel < -0.5 && (agl < 25 || (agl < 90 && v < 270 / 3.6))) { nh.gearCmd = 1; nhCall('GEAR DOWN'); }
+        else if (nh.gearCmd === 1 && nh.airT > 3 && agl > 45 && verticalVel > 2) nh.gearCmd = 0;
+      }
+      nh.gear += THREE.MathUtils.clamp(nh.gearCmd - nh.gear, -dt / 4.5, dt / 4.5);
+      if (nh.bayT > 0) nh.bayT -= dt;
+    }
+    function nhEase(t) { return t * t * (3 - 2 * t); }
+    function nhAnimate(dt) {
+      var sp = nh.stickP, sr = nh.stickR, k = Math.min(1, 9 * dt);
+      var braking = nh.wow && speed > 2 && throttle < speed - 1;
+      NH_SURF.forEach(function(S) {
+        var key = S.k + ':' + S.side + ':' + S.half, cur = nh.el[key] || 0, tgt;
+        if (S.k < 3) {
+          // elevons: pitch on all of them (mostly inboard), roll mostly outboard
+          tgt = THREE.MathUtils.clamp(sp * [0.42, 0.32, 0.22][S.k] + S.side * sr * [0.15, 0.26, 0.34][S.k], -0.45, 0.45);
+        } else {
+          // split drag rudders: wide open as brakes on the roll-out, cracked on the approach, and
+          // opened on the inside of a turn for yaw
+          var open = Math.max(braking ? 0.85 : 0, !nh.wow && nh.gear > 0.5 ? 0.09 : 0, nh.wow ? 0 : Math.max(0, S.side * sr) * 0.4);
+          tgt = open * S.half;
+        }
+        cur += (tgt - cur) * k; nh.el[key] = cur;
+        S.pivot.quaternion.setFromAxisAngle(S.axis, S.sign * cur);
+      });
+      var g = nh.gear, door = nhEase(THREE.MathUtils.clamp(g * 5.5, 0, 1));
+      nh.aux += ((nh.spool > 0.25 && (nh.wow || (speed < 250 / 3.6 && nh.airT < 25)) ? 1 : 0) - nh.aux) * Math.min(1, 2 * dt);
+      nh.bay += ((nh.bayT > 0.4 ? 1 : 0) - nh.bay) * Math.min(1, 6 * dt);
+      var amt = { gear: door, bay: nhEase(nh.bay), aux: nhEase(nh.aux) };
+      NH_DOORS.forEach(function(D) {
+        var a = amt[D.kind];
+        D.pivot.visible = a > 0.002;
+        D.pivot.quaternion.setFromAxisAngle(D.axis, D.angle * a);
+      });
+      NH_WELLS.gear.visible = amt.gear > 0.002; NH_WELLS.bay.visible = amt.bay > 0.002; NH_WELLS.aux.visible = amt.aux > 0.002;
+      var fold = nhEase(THREE.MathUtils.clamp((1 - g) / 0.82, 0, 1));
+      NH_GEAR.legs.forEach(function(L) { L.pivot.rotation.x = fold * (L.nose ? 1.5 : 1.45); L.pivot.visible = g > 0.01; });
+      // oleo struts: squat under the weight, stretch as the wing takes it, jolt on bumps and touchdowns
+      var compT = nh.wow ? NH_COMP_STATIC * (1 - THREE.MathUtils.clamp(nh.lw, 0, 1)) +
+        (speed > 3 ? (Math.sin(elapsedSeconds * 23.1) + Math.sin(elapsedSeconds * 37.7)) * 0.0022 * Math.min(1, speed / 30) : 0) : 0;
+      nh.compV += ((compT - nh.comp) * 140 - nh.compV * 16) * dt;
+      nh.comp = THREE.MathUtils.clamp(nh.comp + nh.compV * dt, 0, 0.16);
+      stealthBody.position.y = NH_COMP_STATIC - nh.comp;
+      NH_GEAR.lowers.forEach(function(l) { l.position.y = nh.comp - NH_COMP_STATIC; });
+      if (NH_GEAR.noseLower) NH_GEAR.noseLower.rotation.y = nh.wow ? nh.steer : 0;
+      // lights
+      var night = typeof cityNightFactor === 'function' ? cityNightFactor() : 0.5;
+      NH_LIGHTS.nav.forEach(function(s) { s.material.opacity = 0.12 + 0.88 * night; });
+      NHM.nozzle.emissiveIntensity = 0.08 + 0.92 * night;
+      // the exhaust only shows a glow once it's dark
+      stealthEngineGlows.forEach(function(s) { s.material.opacity *= 0.15 + 0.85 * night; });
+      var tB = elapsedSeconds % 1.3, on = nh.spool > 0.1;
+      NH_LIGHTS.beacons.forEach(function(s, i) { s.material.opacity = on && Math.abs(tB - i * 0.65) < 0.07 ? 0.55 + 0.45 * night : 0; });
+      if (NH_GEAR.light) NH_GEAR.light.material.opacity = g > 0.95 && (nh.wow || kjAgl() < 300) ? 0.06 + 0.94 * night : 0;
+    }
 
     scene.add(plane);
 
@@ -5730,10 +6253,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         // unevenly from it), so pivoting on it makes the plane swing off-axis as it
         // spins. Recenter using the actual bounding box, then apply a uniform scale
         // to fit the preview frame consistently across aircraft of different sizes.
-        var box = new THREE.Box3().setFromObject(plane);
+        // only the aircraft that's actually shown (the hidden bodies of the other types live in the same group)
+        plane.updateMatrixWorld(true);
+        var box = new THREE.Box3();
+        plane.traverseVisible(function(o) { if (o.isMesh) box.expandByObject(o); });
+        if (box.isEmpty()) box.setFromObject(plane);
         var center = box.getCenter(new THREE.Vector3());
         var size = box.getSize(new THREE.Vector3());
-        var fitScale = 3.4 / Math.max(size.x, size.y, size.z, 0.001);
+        // a flying wing is all span and no depth: look down on it more and let it fill more of the frame
+        pCamera.position.set(0, isStealthMode ? 3.4 : 1.1, isStealthMode ? 6.8 : 7.5);
+        pCamera.lookAt(0, 0, 0);
+        var fitScale = (isStealthMode ? 4.4 : 3.4) / Math.max(size.x, size.y, size.z, 0.001);
         plane.scale.setScalar(fitScale);
         plane.position.set(-center.x * fitScale, -center.y * fitScale, -center.z * fitScale);
       }
@@ -9154,6 +9684,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
         if (o.isMesh) o.castShadow = true;
       });
+      nhCloneClean(c);
       if (scale) c.scale.multiplyScalar(scale);
       root.add(c); scene.add(root);
       return root;
@@ -11561,6 +12092,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (throttleSlider) throttleSlider.value = 0;
       plane.position.copy(position);
       plane.rotation.set(0, 0, 0);
+      nhReset(true);
       camPos.copy(position).add(camOffset);
       camera.position.copy(camPos);
       ringStreak = 0; // banked coins carry over across respawns/plane switches; the streak doesn't
@@ -12129,6 +12661,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       NUKE.vel.y -= 2;
       nukeBomb.visible = true;
       nukeBomb.position.copy(NUKE.pos);
+      nhBayOpen();
       playMissileLaunchSound();
       samToast('☢ WEAPON AWAY — CHUTE DEPLOYING · GET OUT OF THERE', '#ff7a5a', 3);
       if (typeof kjNukeReleased === 'function') kjNukeReleased();
@@ -12581,6 +13114,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       wasGrounded = false;
       plane.visible = true;
       if (isHelicopterMode) heliResetState(true);
+      nhReset(false);
       document.getElementById('crashMsg').classList.add('hidden');
       crashing = false;
       samOnPlayerReset();
@@ -14100,6 +14634,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
 
 
+        if (isStealthMode) { nhStick(pitchInput, rollInput); if (wasGrounded) nhAttitude(dt, pitchInput, rollInput); }
         plane.rotation.x = pitchAngle;
         plane.rotation.y = heading;
         plane.rotation.z = -rollAngle;
@@ -14172,10 +14707,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var jetMinSpeed = (wasGrounded && !crashing) ? -REVERSE_SPEED : MIN_SPEED;
         var targetSpeed = (keys.boost && !outOfFuel) ? MAX_SPEED : throttle;
         if (!wasGrounded) targetSpeed = Math.max(targetSpeed, MIN_SPEED);
-        var accel = ENGINE_ACCEL + (keys.boost && !outOfFuel ? BOOST_ACCEL : 0);
-        var speedDiff = targetSpeed - speed;
-        if (Math.abs(speedDiff) <= accel * dt) speed = targetSpeed;
-        else speed += Math.sign(speedDiff) * accel * dt;
+        if (isStealthMode) nhSpeedStep(dt, targetSpeed, keys.boost && !outOfFuel);
+        else {
+          var accel = ENGINE_ACCEL + (keys.boost && !outOfFuel ? BOOST_ACCEL : 0);
+          var speedDiff = targetSpeed - speed;
+          if (Math.abs(speedDiff) <= accel * dt) speed = targetSpeed;
+          else speed += Math.sign(speedDiff) * accel * dt;
+        }
         speed = THREE.MathUtils.clamp(speed, jetMinSpeed, MAX_SPEED);
 
         // flaps: cap top speed while deployed (airflow load limit) and auto-retract if the
@@ -14198,7 +14736,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (flapsDeployed) liftAuthority = Math.min(1, liftAuthority + FLAPS_LIFT_BONUS * (1 - liftAuthority));
         // While still rolling on the runway, the plane needs real takeoff speed before it can
         // generate enough lift to leave the ground — no hopping off the tarmac at a crawl.
-        if (wasGrounded && speed < effTakeoffSpeed) liftAuthority = 0;
+        if (wasGrounded && speed < effTakeoffSpeed && !(isStealthMode && nh.mode === 'landing')) liftAuthority = 0;
         stalled = speed < effStallSpeed && !wasGrounded;
 
         // banking rolls the lift vector away from vertical — steep banked turns lose climb authority
@@ -14210,12 +14748,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var desiredVy = Math.sin(pitchAngle) * speed * bankLiftFactor;
         desiredVy = THREE.MathUtils.clamp(desiredVy, -MAX_CLIMB_RATE, MAX_CLIMB_RATE);
 
-        // gravity always accumulates into vertical velocity — it is never blended away
-        verticalVel -= GRAVITY * dt;
-        // lift only counteracts/steers that fall in proportion to how much lift authority we have;
-        // at liftAuthority=1 the plane fully tracks desiredVy, at 0 it's pure freefall
-        var liftPull = (desiredVy - verticalVel) * liftAuthority;
-        verticalVel += liftPull * Math.min(1, 4.5 * dt);
+        // the Nighthawk works out its own lift on the takeoff roll and through the first few metres
+        var nhOwn = isStealthMode && wasGrounded && nh.mode !== 'landing';
+        if (nhOwn) nhVertical(dt);
+        else {
+          // gravity always accumulates into vertical velocity — it is never blended away
+          verticalVel -= GRAVITY * dt;
+          // lift only counteracts/steers that fall in proportion to how much lift authority we have;
+          // at liftAuthority=1 the plane fully tracks desiredVy, at 0 it's pure freefall
+          var liftPull = (desiredVy - verticalVel) * liftAuthority;
+          verticalVel += liftPull * Math.min(1, 4.5 * dt);
+        }
 
         if (stalled) {
           // hard stall: nose drops on its own, bleeding pitch toward nose-down regardless of input
@@ -14226,7 +14769,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         // Climbing steals forward energy (nose-up eats into speed); diving gives some back.
         // Only applies while the wings are actually producing lift (liftAuthority>0), so a
         // ballistic freefall after stall isn't also treated as an energy-conserving dive.
-        if (liftAuthority > 0) {
+        if (liftAuthority > 0 && !nhOwn) {
           if (verticalVel > 0) {
             speed -= verticalVel * CLIMB_SPEED_COST * liftAuthority * dt;
           } else {
@@ -14256,6 +14799,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         velocityVec.x += (targetVelocity.x - velocityVec.x) * Math.min(1, alignRate * dt);
         velocityVec.y += (targetVelocity.y - velocityVec.y) * Math.min(1, alignRate * dt);
         velocityVec.z += (targetVelocity.z - velocityVec.z) * Math.min(1, alignRate * dt);
+        // tyres don't slide sideways, and the climb-out tracks the lift model directly
+        if (nhOwn) { velocityVec.y = verticalVel; if (nh.wow) { velocityVec.x = horizForward.x * speed; velocityVec.z = horizForward.z * speed; } }
 
         position.addScaledVector(velocityVec, dt);
         if (currentWind > 0.01) position.addScaledVector(windPush, dt);
@@ -14297,6 +14842,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
         if (isHelicopterMode) {
           if (!crashing) heliGroundContact(groundHeight, overWater);
+        } else if (wasGrounded && isStealthMode) {
+          nhGroundContact(groundHeight, clearance, overWater);
         } else if (wasGrounded) {
           // resting/rolling on the ground (takeoff roll, taxi, or just landed) — only correct for
           // actually dipping below the surface, and never fight a genuine climb-out.
@@ -14329,7 +14876,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
                worldLandable(position.x, position.z, RUNWAY_LANDING_MARGIN) ||
                // the carrier deck — but only from above, not by flying into the side of the ship
                (isOverCarrierDeck(position.x, position.z) && position.y > CARRIER.deckY - 1.5)));
-          if (canTouchDown) {
+          if (canTouchDown && isStealthMode && !overWater) {
+            // the bomber isn't snapped onto the runway: it settles onto its gear, and the touchdown
+            // is called when the wheels actually get there
+            wasGrounded = true; nh.mode = 'landing'; nh.wow = false; nh.gearCmd = 1;
+          } else if (canTouchDown) {
             position.y = groundHeight + PLANE_GROUND_OFFSET;
             verticalVel = 0;
             velocityVec.y = 0;
@@ -14518,6 +15069,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           // flares bright like a fighter's afterburner, matching the low heat signature look
           var stealthGlowOp = THREE.MathUtils.clamp(0.12 + throttleRatio * 0.28 + (keys.boost ? 0.15 : 0), 0, 0.55);
           stealthEngineGlows.forEach(function(g) { g.material.opacity = stealthGlowOp; });
+          nhTick(dt);
+          nhAnimate(dt);
         }
         updateWeather(dt);
         if (lighthouseBeaconPivot) lighthouseBeaconPivot.rotation.y += dt * 1.4;
@@ -16026,8 +16579,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       [jetBody, heliBody, droneBody].forEach(function(b) { if (b) gfxUpgradeAircraft(b, geoCache, seen); });
       // the car keeps its smooth clear-coated paint (no riveted aircraft panels), but gets proper shadows
       carBody.traverse(function(o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-      // the stealth jet keeps its faceted shading on purpose — flat facets are how real
-      // low-observable airframes are built — but it still gets proper shadows
+      // the stealth bomber has its own skin and materials; it just needs shadows
       if (stealthBody) stealthBody.traverse(function(o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     })();
 
@@ -18053,6 +18605,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
       });
       strip.forEach(function(o) { if (o.parent) o.parent.remove(o); });
+      nhCloneClean(g);
       var heli = !!preset.isHelicopter, car = !!preset.isCar, drone = !!preset.isDrone, stealth = !!preset.isStealth, sea = !!preset.isSeaplane;
       var show = { jet: !heli && !car && !drone && !stealth && !sea, heli: heli, car: car, drone: drone, stealth: stealth, sea: sea };
       Object.keys(NET_BODY_IDX).forEach(function(k) { var c = g.children[NET_BODY_IDX[k]]; if (c) c.visible = show[k]; });
@@ -21657,6 +22210,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       isDroneMode = !!preset.isDrone;
       isStealthMode = !!preset.isStealth;
       isSeaplaneMode = !!preset.isSeaplane;
+      // the bomber is twice the size of the fighters: the chase camera sits further back
+      camOffset.set(0, isStealthMode ? 5.1 : 4.2, isStealthMode ? 13.2 : 9.6);
+      if (isStealthMode) nhReset(!started || wasGrounded);
       var throttleSliderEl = document.getElementById('throttleSlider');
       if (throttleSliderEl) {
         throttleSliderEl.max = preset.maxSpeedKmh;
