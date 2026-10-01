@@ -697,7 +697,7 @@
   }
   #gpFps.hidden{ display:none; }
   /* HUD off / minimap off */
-  body.gp-nohud #hud, body.gp-nohud #miniMapWrap, body.gp-nohud #kjTop, body.gp-nohud #rwrPanel, body.gp-nohud #controlHint,
+  body.gp-nohud #hud, body.gp-nohud #miniMapWrap, body.gp-nohud #kjTop, body.gp-nohud #rwrPanel, body.gp-nohud #controlHint, body.gp-nohud #arsPanel,
   body.gp-nohud #streakBanner, body.gp-nohud #ringPopup{ visibility:hidden !important; }
   body.gp-nomap #miniMapWrap{ visibility:hidden !important; }
 
@@ -936,7 +936,7 @@
 
   #fireBtn{
     position:fixed; z-index:12;
-    right:calc(22px + env(safe-area-inset-right)); bottom:calc(118px + env(safe-area-inset-bottom));
+    right:calc(188px + env(safe-area-inset-right)); bottom:calc(36px + env(safe-area-inset-bottom));
     width:64px; height:64px; border-radius:50%;
     background:rgba(255,120,20,.25); border:2px solid rgba(255,120,20,.9);
     color:#fff; font-size:12px; font-weight:700; letter-spacing:.06em;
@@ -945,6 +945,127 @@
   }
   #fireBtn:active, #fireBtn.active{ background:rgba(255,120,20,.55); transform:scale(.92); }
   #fireBtn.cooling{ opacity:.45; }
+
+  /* ---------- hangar ---------- */
+  body.hg-open > *:not(#hangar):not(#canvas):not(script):not(style){ visibility:hidden !important; }
+  #hangar{ position:fixed; inset:0; z-index:85; pointer-events:none; color:#e8ecef; font-family:inherit; -webkit-user-select:none; user-select:none; }
+  #hangar.hidden{ display:none; }
+  #hgDrag{ position:absolute; inset:0; pointer-events:auto; touch-action:none; cursor:grab; }
+  #hgDrag:active{ cursor:grabbing; }
+  #hangar .hg-top{ position:absolute; left:0; right:0; top:0; height:58px; display:flex; align-items:center; gap:18px;
+    padding:env(safe-area-inset-top) calc(18px + env(safe-area-inset-right)) 0 calc(18px + env(safe-area-inset-left));
+    background:linear-gradient(180deg, rgba(5,7,9,.9), rgba(5,7,9,.55) 70%, rgba(5,7,9,0)); pointer-events:none; }
+  #hangar .hg-top > *{ pointer-events:auto; }
+  .hg-back{ appearance:none; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.06); color:#e8ecef; font:700 13px/1 inherit; letter-spacing:.08em; text-transform:uppercase; padding:9px 14px; border-radius:3px; cursor:pointer; }
+  .hg-back:hover{ background:rgba(255,255,255,.14); }
+  .hg-title{ display:flex; flex-direction:column; gap:2px; }
+  .hg-title b{ font-size:19px; letter-spacing:.42em; font-weight:900; }
+  .hg-title span{ font-size:10px; letter-spacing:.24em; text-transform:uppercase; color:#8d99a3; }
+  .hg-coins{ margin-left:auto; font:800 15px ui-monospace, Menlo, monospace; color:#f3c454; background:rgba(0,0,0,.4); border:1px solid rgba(243,196,84,.35); padding:6px 12px; border-radius:3px; }
+  #hangar h3{ margin:0 0 8px; font-size:10px; letter-spacing:.28em; text-transform:uppercase; color:#8d99a3; font-weight:800; }
+  .hg-left{ position:absolute; left:calc(14px + env(safe-area-inset-left)); top:70px; bottom:96px; width:228px; overflow:auto; pointer-events:auto; scrollbar-width:thin; }
+  .hg-card{ display:block; width:100%; text-align:left; appearance:none; cursor:pointer; margin:0 0 6px; padding:9px 12px 9px 14px; color:#dfe5ea;
+    background:linear-gradient(90deg, rgba(12,15,19,.86), rgba(12,15,19,.62)); border:1px solid rgba(255,255,255,.08); border-left:3px solid rgba(255,255,255,.12); border-radius:2px; transition:background .15s ease, border-color .15s ease; }
+  .hg-card:hover{ background:linear-gradient(90deg, rgba(30,36,42,.92), rgba(30,36,42,.7)); }
+  .hg-card i{ display:block; font-style:normal; font-size:9px; letter-spacing:.2em; color:#8d99a3; font-weight:800; }
+  .hg-card b{ display:block; font-size:15px; margin:2px 0 1px; }
+  .hg-card span{ font-size:11px; color:#9aa6af; }
+  .hg-card.on{ background:linear-gradient(90deg, rgba(196,74,26,.55), rgba(120,40,16,.35)); border-color:rgba(255,140,70,.45); border-left-color:#ff7a33; color:#fff; }
+  .hg-card.on i, .hg-card.on span{ color:#ffd6bf; }
+  .hg-right{ position:absolute; right:calc(14px + env(safe-area-inset-right)); top:70px; bottom:96px; width:318px; overflow:auto; pointer-events:auto; scrollbar-width:thin;
+    background:linear-gradient(180deg, rgba(9,12,15,.86), rgba(9,12,15,.74)); border:1px solid rgba(255,255,255,.08); border-radius:3px; padding:14px 16px 16px;
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+  .hg-class{ font-size:10px; font-weight:800; letter-spacing:.26em; color:#ff8a4a; }
+  .hg-right h2{ margin:3px 0 2px; font-size:26px; font-weight:900; letter-spacing:.02em; }
+  .hg-right p{ margin:0 0 12px; font-size:12px; color:#9aa6af; }
+  #hgStats{ margin-bottom:16px; }
+  .hg-stat{ display:grid; grid-template-columns:1fr auto; gap:3px 8px; font-size:11.5px; margin-bottom:7px; }
+  .hg-stat span{ color:#b8c2c9; }
+  .hg-stat b{ font:700 11.5px ui-monospace, Menlo, monospace; color:#fff; }
+  .hg-bar{ grid-column:1 / 3; height:4px; background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden; }
+  .hg-bar i{ display:block; height:100%; background:linear-gradient(90deg, #d9622a, #ffb36a); }
+  .hg-pre{ display:block; width:100%; text-align:left; appearance:none; cursor:pointer; margin:0 0 7px; padding:9px 11px; color:#dfe5ea;
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.09); border-radius:3px; transition:background .15s ease, border-color .15s ease; }
+  .hg-pre:hover{ background:rgba(255,255,255,.09); }
+  .hg-pre b{ display:block; font-size:13.5px; }
+  .hg-pre span{ display:block; font-size:11px; color:#9aa6af; margin:2px 0 6px; }
+  .hg-pre em{ display:flex; flex-wrap:wrap; gap:4px; font-style:normal; }
+  .hg-pre.on{ border-color:#ff7a33; background:rgba(255,110,40,.16); box-shadow:inset 3px 0 0 #ff7a33; }
+  .hg-chip{ font:700 9.5px ui-monospace, Menlo, monospace; font-style:normal; padding:2px 6px; border-radius:2px; background:rgba(255,255,255,.1); color:#e8ecef; letter-spacing:.04em; }
+  .hg-chip.w-agm, .hg-w.w-agm{ --wc:#7fc4ff; } .hg-chip.w-hellfire, .hg-w.w-hellfire{ --wc:#b9e07a; } .hg-chip.w-lgb, .hg-w.w-lgb{ --wc:#ffcf5a; }
+  .hg-chip.w-cluster, .hg-w.w-cluster{ --wc:#ff9a5a; } .hg-chip.w-nuke, .hg-w.w-nuke{ --wc:#ff5a4a; }
+  .hg-chip{ box-shadow:inset 2px 0 0 var(--wc, #aaa); }
+  #hgWeapons{ margin-top:10px; }
+  .hg-w{ display:grid; grid-template-columns:1fr auto; gap:1px 8px; padding:7px 0 7px 10px; border-top:1px solid rgba(255,255,255,.06); box-shadow:inset 2px 0 0 var(--wc, #aaa); }
+  .hg-w b{ font-size:11.5px; letter-spacing:.06em; }
+  .hg-w span{ font:800 12px ui-monospace, Menlo, monospace; color:var(--wc); }
+  .hg-w small{ grid-column:1 / 3; font-size:10.5px; color:#93a0a9; }
+  .hg-none{ font-size:12px; color:#93a0a9; padding:8px 0; }
+  .hg-bottom{ position:absolute; left:0; right:0; bottom:0; display:flex; align-items:center; gap:12px;
+    padding:0 calc(18px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left)); pointer-events:none; }
+  .hg-bottom button{ pointer-events:auto; }
+  .hg-hint{ margin-right:auto; font-size:11px; letter-spacing:.06em; color:rgba(232,236,239,.6); background:rgba(0,0,0,.35); padding:6px 12px; border-radius:999px; }
+  #hgCarrier{ appearance:none; cursor:pointer; padding:14px 18px; font:800 12px/1 inherit; letter-spacing:.14em; text-transform:uppercase; color:#dbeaff; background:rgba(20,40,70,.72); border:1px solid rgba(120,180,255,.5); border-radius:3px; }
+  #hgGo{ appearance:none; border:0; cursor:pointer; padding:17px 54px 17px 46px; font:900 20px/1 inherit; letter-spacing:.18em; text-transform:uppercase; color:#fff;
+    background:linear-gradient(180deg, #e2481f, #a8220b); clip-path:polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+    box-shadow:0 8px 30px rgba(220,60,20,.35); text-shadow:0 1px 0 rgba(0,0,0,.3); transition:filter .15s ease, transform .1s ease; }
+  #hgGo:hover{ filter:brightness(1.12); }
+  #hgGo:active, #hgCarrier:active, .hg-card:active, .hg-pre:active{ transform:scale(.97); }
+  #hangarBtn{ appearance:none; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px; margin:0 0 12px; padding:12px 40px;
+    color:#fff; background:linear-gradient(180deg, #3a2a20, #1c1612); border:1px solid rgba(255,138,74,.55); border-bottom:3px solid #ff7a33; border-radius:4px;
+    box-shadow:0 4px 18px rgba(0,0,0,.3); position:relative; z-index:1; }
+  #hangarBtn span{ font-size:15px; font-weight:900; letter-spacing:.32em; text-transform:uppercase; }
+  #hangarBtn small{ font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:#ffcfae; }
+  #hangarBtn:active{ transform:scale(.96); }
+  @media (orientation: landscape) and (max-height: 500px) {
+    #hangar .hg-top{ height:44px; }
+    .hg-title b{ font-size:15px; } .hg-title span{ display:none; }
+    .hg-left{ top:50px; bottom:64px; width:156px; }
+    .hg-card{ padding:6px 9px; margin-bottom:4px; } .hg-card b{ font-size:12.5px; } .hg-card span{ display:none; }
+    .hg-right{ top:50px; bottom:64px; width:250px; padding:10px 12px; }
+    .hg-right h2{ font-size:19px; } .hg-right p{ margin-bottom:8px; }
+    .hg-stat{ margin-bottom:4px; font-size:10.5px; }
+    .hg-hint{ display:none; }
+    #hgGo{ font-size:15px; padding:12px 34px 12px 30px; } #hgCarrier{ padding:10px 12px; font-size:10.5px; }
+    .hg-bottom{ padding-bottom:calc(10px + env(safe-area-inset-bottom)); }
+  }
+  @media (orientation: portrait) and (max-width: 600px) {
+    .hg-title span, .hg-hint{ display:none; }
+    .hg-left{ top:58px; left:0; right:0; bottom:auto; width:auto; display:flex; overflow-x:auto; overflow-y:hidden; padding:0 10px; }
+    .hg-left h3{ display:none; }
+    #hgList{ display:flex; gap:6px; }
+    .hg-card{ flex:0 0 auto; width:auto; margin:0; padding:6px 10px; } .hg-card span{ display:none; } .hg-card b{ font-size:12.5px; white-space:nowrap; }
+    .hg-right{ left:10px; right:10px; width:auto; top:auto; bottom:78px; max-height:36vh; padding:10px 12px; }
+    .hg-right h2{ font-size:19px; }
+    #hgGo{ flex:1; font-size:16px; padding:15px 10px; }
+  }
+
+  /* ---------- weapons panel (arsenal) ---------- */
+  #arsPanel{
+    position:fixed; z-index:11; left:50%; transform:translateX(-50%); bottom:calc(128px + env(safe-area-inset-bottom));
+    display:flex; align-items:stretch; border-radius:9px; overflow:hidden;
+    background:rgba(10,13,16,.62); border:1px solid rgba(255,255,255,.1);
+    font:600 11px ui-monospace, Menlo, Consolas, monospace; color:#cfd8de; letter-spacing:.04em; white-space:nowrap;
+    pointer-events:none; backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
+  }
+  #arsPanel.hidden, #wpnBtn.hidden{ display:none; }
+  #arsPanel .ah{ display:flex; flex-direction:column; justify-content:center; padding:4px 10px; font-size:8.5px; letter-spacing:.16em; color:#8fa0aa; border-right:1px solid rgba(255,255,255,.1); line-height:1.35; }
+  #arsPanel .ah i{ font-style:normal; color:#9dffb0; letter-spacing:.1em; font-size:9.5px; }
+  #arsPanel .ar{ display:flex; align-items:center; gap:6px; padding:5px 10px; border-right:1px solid rgba(255,255,255,.06); }
+  #arsPanel .ar:last-child{ border-right:0; }
+  #arsPanel .ar b{ font-weight:700; color:#e8eef2; }
+  #arsPanel .ar.on{ background:linear-gradient(180deg, rgba(255,140,40,.38), rgba(255,140,40,.12)); color:#fff; box-shadow:inset 0 -2px 0 #ffa640; }
+  #arsPanel .ar.empty{ opacity:.4; }
+  #arsPanel kbd{ font:700 9px ui-monospace, Menlo, monospace; min-width:14px; text-align:center; padding:1px 3px; border-radius:3px; background:rgba(255,255,255,.12); color:#dfe8f2; }
+  #wpnBtn{
+    position:fixed; z-index:12;
+    right:calc(188px + env(safe-area-inset-right)); bottom:calc(110px + env(safe-area-inset-bottom));
+    width:64px; height:34px; border-radius:12px;
+    background:rgba(20,22,26,.35); border:2px solid rgba(255,166,64,.7);
+    color:#fff; font-size:10.5px; font-weight:700; letter-spacing:.06em;
+    display:flex; align-items:center; justify-content:center; user-select:none; -webkit-user-select:none;
+  }
+  #wpnBtn:active{ transform:scale(.94); background:rgba(255,140,40,.35); }
 
   #droneCamBtn{
     position:fixed; z-index:12;
@@ -1049,17 +1170,6 @@
   }
   @keyframes droneCamBlink{ 50%{ opacity:.2; } }
 
-  #bombBtn{
-    position:fixed; z-index:12;
-    right:calc(22px + env(safe-area-inset-right)); bottom:calc(118px + env(safe-area-inset-bottom));
-    width:72px; height:72px; border-radius:14px;
-    background:rgba(200,50,15,.22); border:2px solid rgba(255,70,10,.85);
-    color:#fff; font-size:11px; font-weight:800; letter-spacing:.05em; line-height:1.25;
-    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
-    transition:transform .1s ease, background .15s ease;
-  }
-  #bombBtn:active, #bombBtn.active{ background:rgba(255,50,10,.60); transform:scale(.91); }
-  #bombBtn.cooling{ opacity:.38; }
 
   /* ---------- helicopter flight panel (inside the HUD card) ---------- */
   #heliHudBox{ margin:2px 0 8px; padding-top:7px; border-top:1px solid rgba(255,255,255,.08); }
@@ -1226,9 +1336,12 @@
     #gunBtn span, #aamBtn span{ font-size:11px; }
     #gunBtn{ right:calc(12px + env(safe-area-inset-right)); }
     #aamBtn{ right:calc(72px + env(safe-area-inset-right)); }
-    #fireBtn{ right:calc(12px + env(safe-area-inset-right)); bottom:calc(84px + env(safe-area-inset-bottom)); width:54px; height:54px; font-size:10.5px; }
-    #bombBtn{ right:calc(12px + env(safe-area-inset-right)); bottom:calc(80px + env(safe-area-inset-bottom)); width:56px; height:56px; font-size:9.5px; }
+    #fireBtn{ right:calc(198px + env(safe-area-inset-right)); bottom:calc(12px + env(safe-area-inset-bottom)); width:54px; height:54px; font-size:10.5px; }
     #droneCamBtn{ right:calc(12px + env(safe-area-inset-right)); bottom:calc(146px + env(safe-area-inset-bottom)); width:58px; height:30px; font-size:9.5px; }
+    #wpnBtn{ right:calc(198px + env(safe-area-inset-right)); bottom:calc(74px + env(safe-area-inset-bottom)); width:54px; height:28px; font-size:9.5px; }
+    #arsPanel{ bottom:calc(100px + env(safe-area-inset-bottom)); font-size:9.5px; }
+    #arsPanel .ar{ padding:4px 7px; gap:4px; }
+    #arsPanel .ah{ padding:3px 7px; }
     #rwrPanel{ top:calc(4px + env(safe-area-inset-top)); }
     #samToast{ top:calc(88px + env(safe-area-inset-top)); font-size:11.5px; }
     #killFeed{ top:calc(108px + env(safe-area-inset-top)); }
@@ -1287,7 +1400,9 @@
         <div><b>U</b>Cardboard box</div>
         <div><b>Y</b>Walkman</div>
         <div><b>N</b>Drop cargo</div>
-        <div><b>B</b>Nuke (bomber)</div>
+        <div><b>1-5</b>Pick weapon</div>
+        <div><b>M</b>Fire</div>
+        <div><b>T</b>Next target</div>
         <div><b>Backspace</b>Respawn</div>
       </div>
       <div class="col">
@@ -1297,6 +1412,8 @@
         <div><b>Hold ⚡</b>Boost</div>
         <div><b>↺ / ↻</b>Barrel roll</div>
         <div><b>FLAPS</b>Toggle flaps</div>
+        <div><b>FIRE</b>Fire weapon</div>
+        <div><b>WPN</b>Next weapon</div>
         <div><b>📻 / 📷</b>Codec / photo</div>
         <div><b>📦</b>Box (stopped)</div>
       </div>
@@ -1366,6 +1483,7 @@
       </div>
       <div id="mpStatus" class="mpStatus offline">OFFLINE</div>
     </div>
+    <button id="hangarBtn" type="button"><span>Hangar</span><small>Aircraft · loadout</small></button>
     <button id="startBtn">Take Off</button>
     <button id="carrierStartBtn" type="button" style="appearance:none;cursor:pointer;margin-top:10px;background:rgba(20,40,70,.55);color:#dbeaff;padding:11px 26px;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;border-radius:999px;border:1px solid rgba(120,180,255,.55)">⚓ Start on the carrier</button>
     <p class="foot">You start on the runway at a standstill — push the throttle up yourself to accelerate and lift off. Ease down gently over the runway to land — dive into it and it's another story.</p>
@@ -1489,6 +1607,7 @@
           <nav class="gpm-list">
             <button class="gpm-item primary" data-act="resume"><span>Resume</span><kbd>Esc</kbd></button>
             <button class="gpm-item" data-act="page:settings"><span>Settings</span><i>Graphics · Audio · Controls</i></button>
+            <button class="gpm-item" data-act="hangar"><span>Hangar</span><i>Aircraft &amp; loadout</i></button>
             <button class="gpm-item" data-act="page:vehicle"><span>Change aircraft</span><i id="gpmVehName"></i></button>
             <button class="gpm-item" data-act="respawn"><span>Respawn at the airfield</span><kbd>Backspace</kbd></button>
             <button class="gpm-item" data-act="page:controls"><span>Controls</span><i>Keyboard &amp; touch</i></button>
@@ -1652,7 +1771,6 @@
   <div id="ejectBtn" class="hidden">⏏ EJECT</div>
   <div id="fireBtn" class="hidden">FIRE</div>
   <div id="droneCamBtn" class="hidden">CAM</div>
-  <div id="bombBtn" class="hidden">☢ NUKE</div>
 
   <div id="heliDpad" class="hidden">
     <div class="dpadBtn" id="dpadUp">▲<span>LIFT</span></div>
@@ -1671,6 +1789,29 @@
   </div>
 
   <canvas id="canvas"></canvas>
+  <div id="hangar" class="hidden">
+    <div id="hgDrag"></div>
+    <div class="hg-top">
+      <button type="button" class="hg-back" id="hgBack">‹<span> Back</span></button>
+      <div class="hg-title"><b>HANGAR</b><span>Aircraft · Loadout</span></div>
+      <div class="hg-coins" id="hgCoins">◆ 0</div>
+    </div>
+    <div class="hg-left"><h3>Aircraft</h3><div id="hgList"></div></div>
+    <div class="hg-right">
+      <div class="hg-class" id="hgClass"></div>
+      <h2 id="hgName"></h2>
+      <p id="hgTag"></p>
+      <div id="hgStats"></div>
+      <h3>Loadout</h3>
+      <div id="hgPresets"></div>
+      <div id="hgWeapons"></div>
+    </div>
+    <div class="hg-bottom">
+      <div class="hg-hint">Drag to walk around · scroll or pinch to zoom</div>
+      <button type="button" id="hgCarrier">⚓ Carrier</button>
+      <button type="button" id="hgGo">Take off ▸</button>
+    </div>
+  </div>
   <div id="vignette"></div>
   <div id="lightningFlash"></div>
   <div id="gEffect"></div>
@@ -5302,25 +5443,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var droneNoseWheel = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), droneMatDark);
     droneNoseWheel.position.set(0, -0.5, -2.35);
     droneBody.add(droneNoseWheel);
-
-    // underwing missile pylons — visual mounts only, sit just outboard of the fuselage on
-    // each wing, matching where a real MQ-9 carries its Hellfires
-    var dronePylonMat = new THREE.MeshStandardMaterial({ color: 0x3a3d38, flatShading: true, roughness: 0.5, metalness: 0.3 });
-    function addDronePylon(sign) {
-      var pylon = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.18, 0.5), dronePylonMat);
-      pylon.position.set(1.7 * sign, -0.32, -0.9);
-      droneBody.add(pylon);
-      var missileMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.85, 8), droneMatDark);
-      missileMesh.rotation.x = Math.PI / 2;
-      missileMesh.position.set(1.7 * sign, -0.46, -0.9);
-      var missileTip = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.16, 8), droneMatDark);
-      missileTip.rotation.x = -Math.PI / 2;
-      missileTip.position.set(1.7 * sign, -0.46, -1.4);
-      droneBody.add(missileMesh);
-      droneBody.add(missileTip);
-      return { body: missileMesh, tip: missileTip };
-    }
-    addDronePylon(1); addDronePylon(-1);
 
     droneBody.visible = false;
 
@@ -10860,10 +10982,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         case 'KeyV': if (val) toggleDroneCam(); return true;
         case 'KeyR': if (val) recenterDroneCam(); return true;
         case 'KeyM': case 'KeyX': if (val) fireMissile(); return true;
-        case 'KeyB': if (val) dropBombs(); return true;
+        case 'KeyB': if (val) arsFire(); return true;
+        case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5': if (val) arsSelect(+code.charAt(5) - 1); return true;
         case 'KeyG': flarePress(val); return true;
         case 'KeyH': if (val) flareToggleAuto(); return true;
-        case 'KeyT': if (val) toggleStrikeTrack(); return true;
+        case 'KeyT': if (val) { if (droneCamActive) toggleStrikeTrack(); else arsCycleLock(); } return true;
         case 'KeyJ': pvpGun(val); return true;
         case 'KeyK': if (val) pvpFireAAM(); return true;
         case 'KeyL': if (val) carrierLaunchPress(); return true;
@@ -11038,10 +11161,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     fireBtn.addEventListener('touchstart', fireTap, { passive: false });
     fireBtn.addEventListener('mousedown', fireTap);
 
-    var bombBtn = document.getElementById('bombBtn');
-    function bombTap(e) { dropBombs(); if (e) e.preventDefault(); }
-    bombBtn.addEventListener('touchstart', bombTap, { passive: false });
-    bombBtn.addEventListener('mousedown', bombTap);
 
     var throttleSlider = document.getElementById('throttleSlider');
     throttleSlider.addEventListener('input', function() {
@@ -12097,6 +12216,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       camera.position.copy(camPos);
       ringStreak = 0; // banked coins carry over across respawns/plane switches; the streak doesn't
       if (typeof pvpOnReset === 'function' && typeof pvp !== 'undefined') pvpOnReset();
+      if (ARS) arsRearm(true);
     }
 
     var touchdownMsgTimeout = null;
@@ -12163,52 +12283,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     /* ============================================================
-       DRONE MISSILES — fireable Hellfire-style projectiles, drone-only.
-       Flies in a straight line along the heading it was launched with,
-       arcing down under gravity, and explodes on hitting the ground,
-       water, or after its fuse runs out. Reuses the fire/smoke textures
-       from the crash explosion system but keeps its own small sprite
-       pool so several missile impacts can be alive and exploding at
-       once without fighting the single-shot crash explosion (or each
-       other) for particles.
+       MISSILE BLASTS — a small independent explosion pool for guided-weapon impacts
+       (the weapons themselves live in the ARSENAL section)
        ============================================================ */
-    var MISSILE_COUNT = 6;         // pool size — also caps missiles in flight at once
-    var MISSILE_SPEED = 260;       // m/s cruise speed once clear of the rail
-    var MISSILE_GRAVITY = 6;       // m/s^2 — mild arc, not a full ballistic drop
-    var MISSILE_FUSE = 6;          // seconds before a missile that hits nothing self-detonates
-    var MISSILE_COOLDOWN = 0.8;    // seconds between shots
-    var missileCooldownTimer = 0;
-
-    var missileGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.85, 8);
-    var missileTipGeo = new THREE.ConeGeometry(0.055, 0.16, 8);
-    var missiles = [];
-    for (var mci = 0; mci < MISSILE_COUNT; mci++) {
-      var mGroup = new THREE.Group();
-      var mBody = new THREE.Mesh(missileGeo, droneMatDark);
-      mBody.rotation.x = Math.PI / 2;
-      mGroup.add(mBody);
-      var mTip = new THREE.Mesh(missileTipGeo, droneMatDark);
-      mTip.rotation.x = -Math.PI / 2;
-      mTip.position.z = -0.5;
-      mGroup.add(mTip);
-      var mFlame = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: fireGlowTexture, transparent: true, depthWrite: false, fog: false,
-        blending: THREE.AdditiveBlending, opacity: 0
-      }));
-      mFlame.scale.set(0.35, 0.35, 1);
-      mFlame.position.z = 0.55;
-      mGroup.add(mFlame);
-      mGroup.visible = false;
-      scene.add(mGroup);
-      missiles.push({
-        group: mGroup, flame: mFlame,
-        active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0
-      });
-    }
-
     // small independent explosion pool for missile impacts — separate sprite set from the
     // crash explosion above so multiple missile hits can overlap visually
-    var MISSILE_BLAST_COUNT = 3; // simultaneous missile explosions supported before oldest is reused
+    var MISSILE_BLAST_COUNT = 8; // simultaneous missile explosions supported before oldest is reused
     var MISSILE_BLAST_FIRE = 26, MISSILE_BLAST_SMOKE = 20;
     function makeMissileBlastSprite(tex, additive) {
       var mat = new THREE.SpriteMaterial({
@@ -12289,64 +12369,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
     }
 
-    // fires the next available pooled missile from the drone's current position/heading;
-    // no-ops outside drone mode, mid-crash, or during cooldown
-    function fireMissile() {
-      if (!isDroneMode || crashing || missileCooldownTimer > 0) return;
-      var m = null;
-      for (var i = 0; i < missiles.length; i++) { if (!missiles[i].active) { m = missiles[i]; break; } }
-      if (!m) return; // pool exhausted — oldest in-flight missiles will free up shortly
+    function fireMissile() { arsFire(); }
 
-      missileCooldownTimer = MISSILE_COOLDOWN;
-      // in sensor-camera view, fire exactly along the reticle's look direction from the turret
-      // itself, so what you see lined up in the crosshair is what the missile actually flies —
-      // otherwise (chase-cam view) it launches from the airframe along the nose as before
-      var launchDir = droneCamActive ? droneCamLookDir.clone() : forwardVec.clone();
-      var launchOrigin = droneCamActive ? droneCamWorldPos : position;
-      m.pos.copy(launchOrigin).addScaledVector(launchDir, 2.2); // clear of the airframe before becoming visible
-      m.vel.copy(launchDir).multiplyScalar(MISSILE_SPEED);
-      if (!m.aim) m.aim = new THREE.Vector3();
-      m.guided = !!(droneCamActive && strikeLaser.valid);
-      if (m.guided) m.aim.copy(strikeLaser.point);
-      m.life = 0;
-      m.active = true;
-      m.group.visible = true;
-      m.group.position.copy(m.pos);
-      m.group.quaternion.copy(plane.quaternion);
-      m.flame.material.opacity = 1;
-      playMissileLaunchSound();
-    }
-
-    function updateMissiles(dt) {
-      if (missileCooldownTimer > 0) missileCooldownTimer = Math.max(0, missileCooldownTimer - dt);
-      for (var i = 0; i < missiles.length; i++) {
-        var m = missiles[i];
-        if (!m.active) continue;
-        m.life += dt;
-        if (m.guided) strikeGuideMissile(m, dt);
-        else m.vel.y -= MISSILE_GRAVITY * dt;
-        m.pos.addScaledVector(m.vel, dt);
-        m.group.position.copy(m.pos);
-        // orient the visible missile along its actual velocity vector, not the launch heading,
-        // so it visibly noses over as gravity pulls it into its arc
-        if (m.vel.lengthSq() > 0.01) {
-          var dir = m.vel.clone().normalize();
-          m.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), dir);
-        }
-        var terrainH = getEffectiveGroundHeight(m.pos.x, m.pos.z);
-        var groundH = Math.max(terrainH, WATER_LEVEL);
-        var hitGround = m.pos.y <= groundH || strikeMissileHit(m.pos);
-        var timedOut = m.life > (m.guided ? 16 : MISSILE_FUSE);
-        if (hitGround || timedOut) {
-          m.active = false;
-          m.group.visible = false;
-          m.flame.material.opacity = 0;
-          triggerMissileBlast(hitGround ? new THREE.Vector3(m.pos.x, groundH + 0.3, m.pos.z) : m.pos);
-          playMissileImpactSound();
-          samOnGroundBlast(m.pos, 14);
-        }
-      }
-    }
 
     /* ============================================================
        B-2 NUCLEAR WEAPON — one bomb, one parachute, one very bad day.
@@ -14078,8 +14102,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var lookHeading = heading + droneCamYaw;
       var headingDeg = Math.round(((THREE.MathUtils.radToDeg(-lookHeading) % 360) + 360) % 360);
       droneCamHeadingEl.textContent = String(headingDeg).padStart(3, '0');
-      droneCamAmmoEl.textContent = missileCooldownTimer > 0 ? 'RELOAD' : 'READY';
-      droneCamAmmoEl.style.color = missileCooldownTimer > 0 ? '#ff9a5a' : '#c8ffb0';
+      var dcW = arsCur(), dcN = dcW ? arsAmmo(dcW) : 0, dcCool = dcW && (ARS.cd[dcW] || 0) > 0;
+      droneCamAmmoEl.textContent = !dcW ? 'NO WPN' : !dcN ? 'WINCHESTER' : ARS_W[dcW].short + ' ×' + dcN + (dcCool ? ' · RELOAD' : '');
+      droneCamAmmoEl.style.color = !dcN || dcCool ? '#ff9a5a' : '#c8ffb0';
       // elevation of the ball relative to level flight — negative means looking down at the ground
       var elevDeg = Math.round(THREE.MathUtils.radToDeg(droneCamPitch));
       droneCamElevEl.textContent = (elevDeg >= 0 ? '+' : '') + elevDeg;
@@ -15099,8 +15124,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           updateHUD(clearance);
           maybeSaveBest(distanceMeters / 1000, elapsedSeconds);
           maybeSaveRingProgress(elapsedSeconds);
-          if (isDroneMode) fireBtn.classList.toggle('cooling', missileCooldownTimer > 0);
-          if (isStealthMode) bombBtn.classList.toggle('cooling', bombCooldownTimer > 0);
+          var fbW = arsCur();
+          fireBtn.classList.toggle('cooling', !fbW || arsAmmo(fbW) <= 0 || (ARS.cd[fbW] || 0) > 0);
         }
       }
       if (ejecting) {
@@ -15116,7 +15141,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         updateEjectPlaneFall(dt);
       }
       updateExplosion(dt);
-      updateMissiles(dt);
+      arsUpdate(dt);
       updateMissileBlasts(dt);
       updateBombs(dt);
       updateBombBlasts(dt);
@@ -17606,11 +17631,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       netEmit('boom', { p: [Math.round(pos.x), Math.round(pos.y), Math.round(pos.z)] });
       if (!SAM_BASE) return;
       strikeOnBlast(pos, radius);
-      samLaunchers.forEach(function(L) { if (L.alive && L.pos.distanceTo(pos) < radius + 5) samKill(L, false); });
-      if (samRadar && samRadar.alive && samRadar.pos.distanceTo(pos) < radius + 6) samKill(samRadar, true);
     }
     function samRepair(obj, isRadar) {
-      obj.alive = true;
+      obj.alive = true; if (obj.maxHp) arsResetHealth(obj);
       if (obj.origMats) obj.origMats.forEach(function(e) { e[0].material = e[1]; });
       if (!isRadar) { obj.turret.rotation.z = 0; obj.ammo = 4; obj.rounds.forEach(function(r) { r.visible = true; }); }
       else { obj.head.rotation.z = 0; }
@@ -17623,9 +17646,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       samMissiles.forEach(function(m) { m.active = false; m.group.visible = false; });
       flareHideAll();
       samHavePrev = false;
+      if (ARS) { arsRearm(true); ARS.hullHits = 0; }
     }
     function samRearmAtBase() {
       pvpRearm();
+      arsRearm();
       if (flareCount < FLARE_MAX) { flareCount = FLARE_MAX; samToast('FLARES REARMED', '#7dff8a', 1.6); }
       if (samEngineKilled) { samEngineKilled = false; samToast('ENGINE REPAIRED', '#7dff8a', 2); }
     }
@@ -17875,19 +17900,19 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var convoy = [['APC', stBuildApc(), 5.5], ['TRUCK', stBuildTruck('cargo'), 5], ['FUEL TRUCK', stBuildTruck('tanker'), 5],
                     ['TRUCK', stBuildTruck('cargo'), 5], ['TECHNICAL', stBuildTechnical(), 4]];
       convoy.forEach(function(c, i) {
-        stAddTarget({ kind: 'vehicle', label: c[0], group: c[1].group, wheels: c[1].wheels, hitR: c[2], maxHp: 1,
+        stAddTarget({ kind: 'vehicle', label: c[0], group: c[1].group, wheels: c[1].wheels, hitR: c[2], maxHp: c[0] === 'APC' ? 160 : 100,
           slot: i, fuel: c[0] === 'FUEL TRUCK' });
       });
       // fuel depot, ammo dump, bunkers — positions in the base's local frame
       [[-130, -40], [-117, -40], [-104, -40]].forEach(function(p) {
         var g = stBuildFuelTank(); g.position.set(B.x + p[0], B.y, B.z + p[1]);
-        stAddTarget({ kind: 'fuel', label: 'FUEL DEPOT', group: g, hitR: 7, maxHp: 1, fixed: true });
+        stAddTarget({ kind: 'fuel', label: 'FUEL DEPOT', group: g, hitR: 7, maxHp: 140, fixed: true });
       });
       var ammo = stBuildAmmoDump(); ammo.position.set(B.x - 40, B.y, B.z - 150);
-      stAddTarget({ kind: 'ammo', label: 'AMMO DUMP', group: ammo, hitR: 10, maxHp: 1, fixed: true });
+      stAddTarget({ kind: 'ammo', label: 'AMMO DUMP', group: ammo, hitR: 10, maxHp: 160, fixed: true });
       [[150, 90], [-160, 110]].forEach(function(p, i) {
         var g = stBuildBunker(); g.position.set(B.x + p[0], B.y, B.z + p[1]); g.rotation.y = i ? 2.4 : -0.8;
-        stAddTarget({ kind: 'bunker', label: 'BUNKER', group: g, hitR: 8.5, maxHp: 2, fixed: true });
+        stAddTarget({ kind: 'bunker', label: 'BUNKER', group: g, hitR: 8.5, maxHp: 220, fixed: true });
       });
       strikeTargets.forEach(function(t) { if (t.fixed) t.center.copy(t.group.position).add(new THREE.Vector3(0, 3, 0)); });
       for (var f = 0; f < 40; f++) {
@@ -17976,28 +18001,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       droneCamYaw = yaw; droneCamPitch = pitch;
     }
 
-    /* ---------- guided-missile support (called from updateMissiles) ---------- */
-    function strikeGuideMissile(m, dt) {
-      // semi-active laser homing: follow the live spot while the sensor keeps lasing it
-      if (droneCamActive && strikeLaser.valid) m.aim.copy(strikeLaser.point);
-      _stTmp.copy(m.aim).sub(m.pos);
-      var dist = _stTmp.length();
-      if (dist < 1e-3) return;
-      _stTmp.divideScalar(dist);
-      var dir = _stTmp2.copy(m.vel).normalize();
-      var ang = Math.acos(THREE.MathUtils.clamp(dir.dot(_stTmp), -1, 1));
-      var maxTurn = 1.9 * dt;
-      if (ang > 1e-4) dir.lerp(_stTmp, Math.min(1, maxTurn / ang)).normalize();
-      m.vel.copy(dir).multiplyScalar(MISSILE_SPEED);
-    }
-    function strikeMissileHit(p) {
-      for (var i = 0; i < strikeTargets.length; i++) {
-        var t = strikeTargets[i];
-        if (t.alive && t.center.distanceTo(p) < t.hitR) return true;
-      }
-      return false;
-    }
-
     /* ---------- damage + effects ---------- */
     function stIgniteFire(pos, size, secs) {
       for (var i = 0; i < strikeFires.length; i++) {
@@ -18068,19 +18071,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
     }
     function strikeOnBlast(pos, radius) {
-      strikeTargets.forEach(function(t) {
-        if (!t.alive) return;
-        var d = t.center.distanceTo(pos);
-        // hardened bunkers need a near-direct hit; soft targets die to anything close
-        var lethal = t.kind === 'bunker' ? Math.min(radius, 9) : radius * 0.7 + t.hitR * 0.5;
-        if (d > lethal) return;
-        t.hp--;
-        if (t.hp <= 0) stKill(t);
-        else { stInfoFlash(t.label + ' DAMAGED — HIT AGAIN'); samEmitSmoke(t.center, new THREE.Vector3(0, 3, 0), 8, 4, 0.6, 0.25); }
-      });
+      // everything that isn't an arsenal weapon (air-wing strikes, B-2 bombs) goes through the damage model too
+      arsDamage(pos, radius, radius * 12);
     }
     function stRepair(t) {
-      t.alive = true; t.hp = t.maxHp;
+      t.alive = true; t.hp = t.maxHp; t.dmgState = 0;
       t.origMats.forEach(function(e) { e[0].material = e[1]; });
       t.group.scale.y = 1; t.group.rotation.x = 0; t.group.rotation.z = 0;
     }
@@ -18132,10 +18127,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       stDrawOverlay();
       stLrfEl.textContent = strikeLaser.valid ? 'LRF ' + String(Math.round(strikeLaser.range)).padStart(4, '0') + ' m' + (strikeLaser.target ? ' · ' + strikeLaser.target.label : '') : 'LRF ----';
       var tof = null;
-      for (var i = 0; i < missiles.length; i++) {
-        var m = missiles[i];
-        if (!m.active || !m.guided) continue;
-        var t = m.pos.distanceTo(m.aim) / MISSILE_SPEED;
+      for (var i = 0; i < ARS.proj.length; i++) {
+        var m = ARS.proj[i];
+        if (!m.laser) continue;
+        var t = m.pos.distanceTo(m.aim) / Math.max(60, m.vel.length());
         if (tof === null || t < tof) tof = t;
       }
       stTofEl.textContent = tof === null ? '' : 'LASING · TOF ' + tof.toFixed(1) + 's';
@@ -18176,6 +18171,972 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     stBuildTargets();
     stUpdateConvoy(0);
+
+    /* ============================================================
+       ARSENAL — loadouts, lock-on, guided weapons, a target damage model and AA guns
+       Every combat aircraft carries a loadout picked in the hangar, hung on real pylons (the
+       stores disappear as you fire them, and come back when you rearm at the airfield):
+         · AGM-65 MAVERICK  lock-on missile: point the nose at a target, the seeker growls,
+                            then a steady tone — fire and forget
+         · AGM-114 HELLFIRE light lock-on missile; locks up to four targets in turn and a volley
+                            sends one at each (in the drone's sensor view it rides the laser)
+         · GBU-12 PAVEWAY   laser-guided bomb: the targeting pod designates a target ahead and
+                            below; the bomb glides onto it as long as you keep it designated
+         · CBU-97 CLUSTER   opens over the target and scatters three dozen bomblets
+         · B61 (Nighthawk)  the nuke, as before
+       Keys: 1-5 pick a weapon, M / X / B fire, T cycles the lock. Touch: WPN and FIRE.
+       The HUD draws the seeker circle, every target in range, the lock box with the target's
+       health, a CCIP pipper for free-fall bombs, and hit markers.
+       Targets take damage instead of dying to any nearby hit: hit points, a DAMAGED state that
+       smokes, a CRITICAL state that burns, then destroyed; heavy armour shrugs off near misses.
+       AA guns ring the SAM base: heavy flak that bursts around you (close bursts throw the
+       aircraft about, very close ones damage it and can take a wing off) and tracer streams at
+       low level. Flying low hides you in ground clutter; the Nighthawk is spotted late.
+       ============================================================ */
+    var ARS_W = {
+      agm:      { name: 'AGM-65 MAVERICK', short: 'MAVERICK', kind: 'missile', seek: 'nose', cone: 14, hold: 40, range: 4200, lockT: 1.1, speed: 250, turn: 2.4, dmg: 150, rad: 13, cd: 0.7 },
+      hellfire: { name: 'AGM-114 HELLFIRE', short: 'HELLFIRE', kind: 'missile', seek: 'nose', cone: 20, hold: 48, range: 3200, lockT: 0.55, multi: 4, speed: 210, turn: 3.2, dmg: 95, rad: 8, cd: 0.25 },
+      lgb:      { name: 'GBU-12 PAVEWAY', short: 'PAVEWAY', kind: 'bomb', seek: 'pod', cone: 26, hold: 105, range: 6500, lockT: 1.0, steer: 26, dmg: 280, rad: 20, cd: 0.6 },
+      cluster:  { name: 'CBU-97 CLUSTER', short: 'CLUSTER', kind: 'cluster', dmg: 48, rad: 10, bomblets: 36, cd: 0.8 },
+      nuke:     { name: 'B61 NUCLEAR', short: 'NUKE', kind: 'nuke', cd: 1 }
+    };
+    // loadout presets per airframe; station lists run left wingtip to right wingtip
+    var ARS_PRESETS = {
+      jet: [
+        { id: 'strike', name: 'Precision strike', desc: 'Two Mavericks for point targets, two Paveways for the hard ones', st: ['agm', 'lgb', 'lgb', 'agm'] },
+        { id: 'hunter', name: 'Convoy hunter', desc: 'Eight Hellfires on two racks plus two Mavericks', st: ['hellfire', 'agm', 'agm', 'hellfire'] },
+        { id: 'area', name: 'Area denial', desc: 'Two cluster bombs to blanket a site, two Mavericks for what is left', st: ['agm', 'cluster', 'cluster', 'agm'] },
+        { id: 'heavy', name: 'Heavy bomber', desc: 'Two Paveways and two cluster bombs', st: ['lgb', 'cluster', 'cluster', 'lgb'] }
+      ],
+      drone: [
+        { id: 'hf', name: 'Hellfire', desc: 'Eight Hellfires — the Reaper classic', st: ['hellfire', 'hellfire'] },
+        { id: 'pw', name: 'Paveway', desc: 'Two laser-guided bombs for hardened targets', st: ['lgb', 'lgb'] },
+        { id: 'mix', name: 'Mixed', desc: 'Four Hellfires and a Paveway', st: ['hellfire', 'lgb'] }
+      ],
+      stealth: [
+        { id: 'nuke', name: 'Nuclear', desc: 'One B61. Get clear after release', bay: ['nuke'] },
+        { id: 'precision', name: 'Precision', desc: 'Eight Paveways in the bays', bay: ['lgb', 'lgb', 'lgb', 'lgb', 'lgb', 'lgb', 'lgb', 'lgb'] },
+        { id: 'carpet', name: 'Carpet', desc: 'Six cluster bombs', bay: ['cluster', 'cluster', 'cluster', 'cluster', 'cluster', 'cluster'] },
+        { id: 'mixed', name: 'Mixed', desc: 'Four Paveways and three cluster bombs', bay: ['lgb', 'lgb', 'lgb', 'lgb', 'cluster', 'cluster', 'cluster'] }
+      ],
+      sea: [
+        { id: 'patrol', name: 'Patrol', desc: 'Two Hellfire racks and two Mavericks', st: ['hellfire', 'agm', 'agm', 'hellfire'] },
+        { id: 'bomber', name: 'Bomber', desc: 'Two Paveways and two cluster bombs', st: ['cluster', 'lgb', 'lgb', 'cluster'] }
+      ],
+      heli: [
+        { id: 'at', name: 'Anti-tank', desc: 'Eight Hellfires on two racks', st: ['hellfire', 'hellfire'] },
+        { id: 'mix', name: 'Mixed', desc: 'Four Hellfires and a Maverick', st: ['hellfire', 'agm'] }
+      ]
+    };
+    var ARS_STATIONS = {      // (x, z) under each wing, searched for the skin from below
+      jet: [[-3.0, 0.6], [-1.75, 0.4], [1.75, 0.4], [3.0, 0.6]],
+      drone: [[-1.7, -0.9], [1.7, -0.9]],
+      sea: [[-3.3, 0.0], [-2.2, 0.0], [2.2, 0.0], [3.3, 0.0]],
+      heli: [[-1.2, 0.0], [1.2, 0.0]]
+    };
+    function arsFrame() {
+      if (isCarMode) return null;
+      if (isHelicopterMode) return 'heli';
+      if (isDroneMode) return 'drone';
+      if (isStealthMode) return 'stealth';
+      if (isSeaplaneMode) return 'sea';
+      return 'jet';
+    }
+    function arsFrameFor(type) {
+      var p = PLANE_TYPES[type] || {};
+      return p.isCar ? null : p.isHelicopter ? 'heli' : p.isDrone ? 'drone' : p.isStealth ? 'stealth' : p.isSeaplane ? 'sea' : 'jet';
+    }
+    var ARS_LOADOUT_KEY = 'gp-loadouts-v1';
+    var arsChoice = (function() { try { return JSON.parse(localStorage.getItem(ARS_LOADOUT_KEY) || '{}') || {}; } catch (e) { return {}; } })();
+    function arsPresetFor(type) {
+      var fr = arsFrameFor(type), list = fr && ARS_PRESETS[fr];
+      if (!list) return null;
+      var id = arsChoice[type];
+      for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+      return list[0];
+    }
+    function arsSetPreset(type, id) { arsChoice[type] = id; try { localStorage.setItem(ARS_LOADOUT_KEY, JSON.stringify(arsChoice)); } catch (e) {} }
+
+    /* ---------- store models (nose toward -z) ---------- */
+    function arsMat(hex, r, m) { return new THREE.MeshStandardMaterial({ color: new THREE.Color(hex).convertSRGBToLinear(), roughness: r, metalness: m || 0.15 }); }
+    var ARS_M = {
+      white: arsMat(0xd7dad4, 0.5, 0.2), grey: arsMat(0x8b9094, 0.5, 0.35), olive: arsMat(0x4d5434, 0.7, 0.15), dark: arsMat(0x26292c, 0.6, 0.3),
+      glass: arsMat(0x1a2a32, 0.1, 0.7), band: arsMat(0xd8b01a, 0.55), pylon: arsMat(0x8a9095, 0.45, 0.4), brown: arsMat(0x6a573a, 0.7)
+    };
+    function arsLathe(prof, mat, seg) {
+      var g = new THREE.LatheGeometry(prof.map(function(p) { return new THREE.Vector2(p[0], p[1]); }), seg || 16);
+      g.rotateX(-Math.PI / 2);      // lathe axis y -> -z (nose forward)
+      return new THREE.Mesh(g, mat);
+    }
+    function arsFins(g, n, r, w, h, z, mat, offset) {
+      for (var i = 0; i < n; i++) {
+        var a = (i / n) * Math.PI * 2 + (offset || Math.PI / 4), f = new THREE.Mesh(new THREE.BoxGeometry(0.018, h, w), mat);
+        f.position.set(Math.cos(a) * (r + h / 2), Math.sin(a) * (r + h / 2), z); f.rotation.z = a - Math.PI / 2; g.add(f);
+      }
+    }
+    function arsBuildStore(type) {
+      var g = new THREE.Group(), flame = null;
+      if (type === 'agm') {
+        g.add(arsLathe([[0, -0.85], [0.07, -0.8], [0.1, -0.7], [0.105, -0.6], [0.105, 0.65], [0.09, 0.7], [0, 0.7]], ARS_M.white));
+        var dome = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), ARS_M.glass); dome.rotation.x = -Math.PI / 2; dome.position.z = -0.82; g.add(dome);
+        var band = new THREE.Mesh(new THREE.CylinderGeometry(0.107, 0.107, 0.05, 16, 1, true), ARS_M.band); band.rotation.x = Math.PI / 2; band.position.z = -0.45; g.add(band);
+        arsFins(g, 4, 0.1, 0.62, 0.16, 0.0, ARS_M.grey);
+        arsFins(g, 4, 0.1, 0.2, 0.15, 0.6, ARS_M.grey);
+      } else if (type === 'hellfire') {
+        g.add(arsLathe([[0, -0.47], [0.04, -0.44], [0.062, -0.38], [0.062, 0.42], [0, 0.42]], ARS_M.olive, 12));
+        var cap = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), ARS_M.glass); cap.rotation.x = -Math.PI / 2; cap.position.z = -0.46; g.add(cap);
+        arsFins(g, 4, 0.06, 0.1, 0.06, -0.1, ARS_M.dark);
+        arsFins(g, 4, 0.06, 0.12, 0.07, 0.36, ARS_M.dark);
+      } else if (type === 'lgb') {
+        g.add(arsLathe([[0, -0.68], [0.06, -0.66], [0.06, -0.48], [0.1, -0.46], [0.14, -0.3], [0.145, 0.25], [0.12, 0.55], [0.07, 0.72], [0, 0.72]], ARS_M.olive));
+        g.add(arsLathe([[0, -0.98], [0.045, -0.96], [0.055, -0.86], [0.06, -0.68], [0, -0.68]], ARS_M.grey, 12));
+        var sk = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), ARS_M.glass); sk.rotation.x = -Math.PI / 2; sk.position.z = -0.97; g.add(sk);
+        var b2 = new THREE.Mesh(new THREE.CylinderGeometry(0.147, 0.147, 0.05, 16, 1, true), ARS_M.band); b2.rotation.x = Math.PI / 2; b2.position.z = -0.2; g.add(b2);
+        arsFins(g, 4, 0.06, 0.12, 0.09, -0.62, ARS_M.grey);
+        arsFins(g, 4, 0.1, 0.34, 0.28, 0.6, ARS_M.grey);
+      } else if (type === 'cluster') {
+        g.add(arsLathe([[0, -0.85], [0.08, -0.8], [0.15, -0.66], [0.17, -0.5], [0.17, 0.5], [0.13, 0.75], [0.08, 0.86], [0, 0.86]], ARS_M.white));
+        [-0.55, 0.35].forEach(function(z) { var b = new THREE.Mesh(new THREE.CylinderGeometry(0.172, 0.172, 0.05, 16, 1, true), ARS_M.band); b.rotation.x = Math.PI / 2; b.position.z = z; g.add(b); });
+        arsFins(g, 4, 0.12, 0.3, 0.2, 0.72, ARS_M.grey, 0);
+        var ring = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.012, 6, 20), ARS_M.grey); ring.position.z = 0.78; g.add(ring);
+      }
+      if (type === 'agm' || type === 'hellfire') {
+        flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+        flame.position.z = type === 'agm' ? 0.85 : 0.5; flame.scale.set(0.7, 0.7, 1); flame.visible = false; g.add(flame);
+      }
+      arsBake(g);
+      return { group: g, flame: flame };
+    }
+    // a store is a dozen little parts: fold them into one vertex-coloured mesh (one draw, not twelve)
+    var ARS_VC = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.25 });
+    function arsBake(g) {
+      var P = [], N = [], C = [];
+      g.children.slice().forEach(function(c) {
+        if (!c.isMesh) return;
+        c.updateMatrix();
+        var geo = c.geometry.index ? c.geometry.toNonIndexed() : c.geometry.clone();
+        geo.applyMatrix4(c.matrix);
+        var pa = geo.attributes.position.array, na = geo.attributes.normal.array, col = c.material.color;
+        for (var i = 0; i < pa.length; i += 3) { P.push(pa[i], pa[i + 1], pa[i + 2]); N.push(na[i], na[i + 1], na[i + 2]); C.push(col.r, col.g, col.b); }
+        g.remove(c);
+      });
+      if (!P.length) return;
+      var out = new THREE.BufferGeometry();
+      out.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+      out.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+      out.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+      out.computeBoundingSphere();
+      g.add(new THREE.Mesh(out, ARS_VC));     // too small to be worth a shadow pass
+    }
+
+    /* ---------- hardpoints + loadout ---------- */
+    var ARS = {
+      stores: [], weapons: [], sel: 0, lock: { cand: null, prog: 0, locked: [] }, cd: {}, queue: [], proj: [], lastSide: 1,
+      markers: [], hullHits: 0, ccip: null, ccipT: 0, tone: null, toneGain: null, frameKey: null, preset: null
+    };
+    var ARS_BODY = { jet: jetBody, drone: droneBody, sea: seaBody, heli: heliBody, stealth: stealthBody };
+    var _arsRay = new THREE.Raycaster(), _arsV = new THREE.Vector3(), _arsV2 = new THREE.Vector3(), _arsQ = new THREE.Quaternion();
+    var ARS_MOUNTS = {};
+    function arsMountsFor(fr) {
+      if (ARS_MOUNTS[fr]) return ARS_MOUNTS[fr];
+      // the helicopter's fuselage is too narrow to search: its stores ride on stub wings at the cabin's waist
+      if (fr === 'heli') return (ARS_MOUNTS[fr] = [new THREE.Vector3(-1.4, 0.12, 0.25), new THREE.Vector3(1.4, 0.12, 0.25)]);
+      var body = ARS_BODY[fr], list = [], meshes = [];
+      plane.updateMatrixWorld(true);
+      body.traverse(function(o) { if (o.isMesh && o.name !== 'gpStores') meshes.push(o); });
+      var inv = new THREE.Matrix4().copy(plane.matrixWorld).invert();
+      (ARS_STATIONS[fr] || []).forEach(function(s) {
+        var found = null;
+        for (var k = 0; k <= 16 && !found; k++) {
+          var dz = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.2, z = s[1] + dz;
+          var o = new THREE.Vector3(s[0], -8, z).applyMatrix4(plane.matrixWorld);
+          _arsRay.set(o, new THREE.Vector3(0, 1, 0));
+          var hits = _arsRay.intersectObjects(meshes, false);
+          if (hits.length) found = hits[0].point.clone().applyMatrix4(inv);
+        }
+        list.push(found || new THREE.Vector3(s[0], -0.45, s[1]));
+      });
+      ARS_MOUNTS[fr] = list;
+      return list;
+    }
+    var arsRoot = {};      // per-airframe group holding pylons + stores
+    function arsClear() {
+      Object.keys(arsRoot).forEach(function(k) { var r = arsRoot[k]; if (r.parent) r.parent.remove(r); });
+      arsRoot = {};
+      ARS.proj.forEach(function(p) { if (p.mesh && p.mesh.parent) p.mesh.parent.remove(p.mesh); });
+      ARS.proj.length = 0; ARS.queue.length = 0;
+      ARS.stores.length = 0; ARS.weapons.length = 0;
+    }
+    function arsApplyLoadout(silent) {
+      arsClear();
+      var fr = arsFrame(), preset = arsPresetFor(selectedPlaneType);
+      ARS.frameKey = fr; ARS.preset = preset;
+      ARS.lock.cand = null; ARS.lock.prog = 0; ARS.lock.locked = [];
+      if (!fr || !preset) { arsRefreshPanel(); return; }
+      // stores hang off the airframe group (plane-local metres); internal bays ride in the body
+      var root = new THREE.Group(); root.name = 'gpStores';
+      (preset.bay ? ARS_BODY[fr] : plane).add(root); arsRoot[fr] = root;
+      if (preset.bay) {
+        // internal carriage: stores ride in the weapon bays, hidden until they drop
+        preset.bay.forEach(function(type, i) {
+          if (type === 'nuke') { ARS.stores.push({ type: type, mesh: null, side: 0, spent: false }); return; }
+          var st = arsBuildStore(type); st.group.visible = false;
+          var side = i % 2 ? 1 : -1;
+          st.group.position.set(side * (0.34 - (Math.floor(i / 2) % 2) * 0.18), -0.32, -0.6 + Math.floor(i / 4) * 0.3);
+          root.add(st.group);
+          ARS.stores.push({ type: type, mesh: st.group, flame: st.flame, side: side, spent: false, internal: true, home: st.group.position.clone(), homeQ: st.group.quaternion.clone(), parent: root });
+        });
+      } else {
+        var mounts = arsMountsFor(fr), scale = fr === 'heli' ? 0.85 : fr === 'drone' ? 0.85 : 1, fix = new THREE.Group();
+        preset.st.forEach(function(type, i) {
+          var m = mounts[i]; if (!m || !type) return;
+          var side = m.x < 0 ? -1 : 1;
+          var pylon = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.16, 0.7 * scale), ARS_M.pylon);
+          pylon.position.set(m.x, m.y - 0.08, m.z); fix.add(pylon);
+          if (fr === 'heli') {    // stub wing out to the pylon
+            var stub = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.07, 0.6), ARS_M.dark);
+            stub.position.set(m.x * 0.78, m.y + 0.03, m.z); stub.rotation.z = -Math.sign(m.x) * 0.08; fix.add(stub);
+          }
+          if (type === 'hellfire') {
+            var rail = new THREE.Mesh(new THREE.BoxGeometry(0.34 * scale, 0.05, 0.9 * scale), ARS_M.dark);
+            rail.position.set(m.x, m.y - 0.19, m.z); fix.add(rail);
+            [[-0.1, -0.29], [0.1, -0.29], [-0.1, -0.43], [0.1, -0.43]].forEach(function(o) {
+              var st2 = arsBuildStore('hellfire'); st2.group.scale.setScalar(scale);
+              st2.group.position.set(m.x + o[0] * scale, m.y + o[1] * scale, m.z);
+              root.add(st2.group);
+              ARS.stores.push({ type: 'hellfire', mesh: st2.group, flame: st2.flame, side: side, spent: false, home: st2.group.position.clone(), homeQ: st2.group.quaternion.clone(), parent: root });
+            });
+          } else {
+            var st3 = arsBuildStore(type), r = type === 'cluster' ? 0.17 : type === 'lgb' ? 0.145 : 0.105;
+            st3.group.scale.setScalar(scale);
+            st3.group.position.set(m.x, m.y - 0.16 - r * scale, m.z);
+            root.add(st3.group);
+            ARS.stores.push({ type: type, mesh: st3.group, flame: st3.flame, side: side, spent: false, home: st3.group.position.clone(), homeQ: st3.group.quaternion.clone(), parent: root });
+          }
+        });
+        arsBake(fix); root.add(fix);
+      }
+      // weapon list in the order the stores appear
+      ARS.stores.forEach(function(s) { if (ARS.weapons.indexOf(s.type) < 0) ARS.weapons.push(s.type); });
+      ARS.sel = Math.min(ARS.sel, Math.max(0, ARS.weapons.length - 1));
+      if (!silent && ARS.weapons.length) samToast('LOADOUT: ' + preset.name.toUpperCase(), '#dfe8f2', 1.6);
+      arsRefreshPanel();
+    }
+    function arsRearm(silent) {
+      var any = false;
+      ARS.stores.forEach(function(s) {
+        if (!s.spent) return;
+        any = true; s.spent = false;
+        if (s.mesh) {
+          if (s.mesh.parent !== s.parent) s.parent.add(s.mesh);
+          s.mesh.position.copy(s.home); s.mesh.quaternion.copy(s.homeQ);
+          s.mesh.visible = !s.internal;
+          if (s.flame) { s.flame.material.opacity = 0; s.flame.visible = false; }
+        }
+      });
+      ARS.proj.forEach(function(p) { if (p.mesh && p.store && p.mesh.parent !== p.store.parent) { p.store.parent.add(p.mesh); p.mesh.visible = false; } });
+      ARS.proj.length = 0;
+      if (any && !silent) samToast('WEAPONS REARMED', '#7dff8a', 1.6);
+      arsRefreshPanel();
+    }
+    function arsAmmo(type) {
+      if (type === 'nuke') return NUKE.state === 'ready' && bombCooldownTimer <= 0 ? 1 : 0;
+      var n = 0; ARS.stores.forEach(function(s) { if (s.type === type && !s.spent) n++; }); return n;
+    }
+    function arsCur() { return ARS.weapons[ARS.sel] || null; }
+    function arsSelect(i) {
+      if (!ARS.weapons.length) return;
+      if (i < 0) i = (ARS.sel + 1) % ARS.weapons.length;
+      if (i >= ARS.weapons.length) return;
+      if (i !== ARS.sel) { ARS.sel = i; ARS.lock.cand = null; ARS.lock.prog = 0; ARS.lock.locked = []; }
+      samToast(ARS_W[arsCur()].name, '#dfe8f2', 1.1);
+      arsRefreshPanel();
+    }
+
+    /* ---------- targets: everything on the ground that can be hit ---------- */
+    var AA = [];
+    var ARS_TGT = null;
+    function arsTargets() {
+      if (!ARS_TGT) {
+        ARS_TGT = [];
+        strikeTargets.forEach(function(t) { ARS_TGT.push(t); });
+        samLaunchers.forEach(function(L) { L.label = 'SAM LAUNCHER'; L.hitR = 6; L.maxHp = 150; L.hp = 150; L.armor = 0.9; ARS_TGT.push(L); });
+        if (samRadar) { samRadar.label = 'SEARCH RADAR'; samRadar.hitR = 7; samRadar.maxHp = 130; samRadar.hp = 130; ARS_TGT.push(samRadar); }
+        AA.forEach(function(g) { ARS_TGT.push(g); });
+      }
+      return ARS_TGT;
+    }
+    function arsPos(t) { return t.center || t.pos; }
+    var ARS_ARMOR = { vehicle: 1, fuel: 1.25, ammo: 1.1, bunker: 0.42 };
+
+    /* ---------- damage model ---------- */
+    function arsDamage(pos, radius, dmg, quiet) {
+      if (!SAM_BASE) return;
+      arsTargets().forEach(function(t) {
+        if (!t.alive) return;
+        var d = Math.max(0, arsPos(t).distanceTo(pos) - (t.hitR || 4) * 0.6);
+        if (d > radius) return;
+        var f = 1 - d / radius;
+        var armor = t.armor || ARS_ARMOR[t.kind] || 1;
+        if (t.kind === 'bunker' && f < 0.6) armor *= 0.35;     // hardened: only a near-direct hit really hurts
+        arsHit(t, dmg * (0.3 + 0.7 * f) * armor, quiet);
+      });
+    }
+    function arsHit(t, amount, quiet) {
+      if (!t.alive || amount <= 0) return;
+      if (t.hp === undefined) t.hp = t.maxHp || 100;
+      t.hp -= amount;
+      var max = t.maxHp || 100;
+      if (t.hp <= 0) {
+        t.hp = 0; t.dmgState = 0;
+        arsMarker(t, 'DESTROYED', '#ff5a3c');
+        if (t.kind && strikeTargets.indexOf(t) >= 0) stKill(t);
+        else if (t === samRadar) samKill(samRadar, true);
+        else if (samLaunchers.indexOf(t) >= 0) samKill(t, false);
+        else if (t.isAA) aaKill(t);
+        return;
+      }
+      var frac = t.hp / max, st = frac < 0.34 ? 2 : frac < 0.67 ? 1 : 0;
+      if (!quiet) arsMarker(t, 'HIT  -' + Math.round(amount), '#ffd27a');
+      if (st > (t.dmgState || 0)) {
+        t.dmgState = st;
+        if (st === 2) {
+          arsMarker(t, 'CRITICAL', '#ff8a3c');
+          stIgniteFire(arsPos(t).clone(), (t.hitR || 4) * 0.9, 600);
+          // scorch part of it
+          var meshes = []; t.group.traverse(function(c) { if (c.isMesh) meshes.push(c); });
+          meshes.forEach(function(c, i) { if (i % 3 === 0) c.material = SAM_M.charred; });
+          if (!quiet) samToast((t.label || 'TARGET') + ' CRITICAL — BURNING', '#ffb46a', 1.8);
+          if (strikeTargets.indexOf(t) >= 0 && t.kind === 'vehicle' && !strikeConvoy.alarmed) { strikeConvoy.alarmed = true; strikeConvoy.speed = 17; }
+        } else if (!quiet) { arsMarker(t, 'DAMAGED', '#ffd27a'); samToast((t.label || 'TARGET') + ' DAMAGED', '#ffd27a', 1.4); }
+      }
+    }
+    function arsResetHealth(t) { t.hp = t.maxHp || 100; t.dmgState = 0; }
+    var _arsSmokeT = 0;
+    function arsDamageFx(dt) {
+      _arsSmokeT += dt;
+      if (_arsSmokeT < 0.12) return;
+      var step = _arsSmokeT; _arsSmokeT = 0;
+      arsTargets().forEach(function(t) {
+        if (!t.alive || !t.dmgState) return;
+        var p = arsPos(t);
+        if (p.distanceTo(position) > 5000) return;
+        if (t.dmgState === 1 && Math.random() < step * 2.2)
+          samEmitSmoke(_arsV.copy(p).add(_arsV2.set(0, (t.hitR || 4) * 0.4, 0)), _arsV2.set((Math.random() - 0.5) * 1.5, 2.5, (Math.random() - 0.5) * 1.5), (t.hitR || 4) * 1.6, 5, 0.32, 0.55);
+        else if (t.dmgState === 2 && Math.random() < step * 7)
+          samEmitSmoke(_arsV.copy(p).add(_arsV2.set(0, (t.hitR || 4) * 0.6, 0)), _arsV2.set((Math.random() - 0.5) * 2, 4 + Math.random() * 2, (Math.random() - 0.5) * 2), (t.hitR || 4) * 2.4, 7, 0.55, 0.12);
+      });
+    }
+    // floating hit markers, drawn by the HUD
+    function arsMarker(t, text, col) {
+      if (arsPos(t).distanceTo(position) > 6000) return;
+      ARS.markers.push({ pos: arsPos(t).clone().add(new THREE.Vector3(0, (t.hitR || 4) + 2, 0)), text: text, col: col, t: 0, dy: ARS.markers.length % 3 });
+      if (ARS.markers.length > 10) ARS.markers.shift();
+    }
+
+    /* ---------- seeker / lock ---------- */
+    var _arsDir = new THREE.Vector3(), _arsOrg = new THREE.Vector3();
+    function arsSeekerDir(w, out) {
+      if (isDroneMode && droneCamActive) return out.copy(droneCamLookDir);
+      out.copy(forwardVec);
+      if (w.seek === 'pod') { var a = THREE.MathUtils.degToRad(38); out.multiplyScalar(Math.cos(a)); out.y -= Math.sin(a); out.normalize(); }
+      return out;
+    }
+    function arsAngleTo(t, org, dir) {
+      _arsV.copy(arsPos(t)).sub(org);
+      var d = _arsV.length();
+      return { a: Math.acos(THREE.MathUtils.clamp(_arsV.dot(dir) / Math.max(d, 1e-3), -1, 1)), d: d };
+    }
+    function arsUpdateLock(dt) {
+      var L = ARS.lock, type = arsCur(), w = type && ARS_W[type];
+      var empty = arsAmmo(type) <= 0, guiding = ARS.proj.some(function(p) { return p.type === type && p.target; });
+      if (!w || !w.seek || !started || crashing || ejecting || (empty && !guiding)) { L.cand = null; L.prog = 0; L.locked = []; return; }
+      _arsOrg.copy(isDroneMode && droneCamActive ? droneCamWorldPos : position);
+      arsSeekerDir(w, _arsDir);
+      var cone = THREE.MathUtils.degToRad(w.cone), hold = THREE.MathUtils.degToRad(w.hold);
+      // keep what's locked while it stays inside the gimbal limits
+      L.locked = L.locked.filter(function(t) {
+        if (!t.alive) return false;
+        var r = arsAngleTo(t, _arsOrg, _arsDir);
+        if (r.a > hold || r.d > w.range * 1.25) { samToast('LOCK LOST', '#ffb46a', 1); return false; }
+        return true;
+      });
+      var maxLocks = w.multi || 1;
+      if (empty || L.locked.length >= maxLocks) { L.cand = null; L.prog = 0; return; }    // keep designating for what's in the air
+      var best = null, bestA = Infinity, tg = arsTargets();
+      for (var i = 0; i < tg.length; i++) {
+        var t = tg[i];
+        if (!t.alive || L.locked.indexOf(t) >= 0 || t === L.skip) continue;
+        var r = arsAngleTo(t, _arsOrg, _arsDir);
+        if (r.d > w.range || r.a > cone) continue;
+        if (r.a < bestA) { bestA = r.a; best = t; }
+      }
+      if (L.forced && L.forced.alive && arsAngleTo(L.forced, _arsOrg, _arsDir).a <= cone) best = L.forced;
+      if (best !== L.cand) { L.cand = best; L.prog = 0; }
+      if (L.cand) {
+        L.prog += dt / w.lockT;
+        if (L.prog >= 1) {
+          L.locked.push(L.cand); L.cand = null; L.prog = 0; L.forced = null;
+          samBeep(1750, 0.07, 0.05);
+        }
+      }
+    }
+    function arsCycleLock() {
+      var L = ARS.lock;
+      if (L.locked.length) { L.locked = []; L.cand = null; L.prog = 0; samToast('LOCK BROKEN', '#dfe8f2', 0.9); return; }
+      // skip the current candidate: the seeker moves on to the next one in the cone
+      L.skip = L.cand; L.cand = null; L.prog = 0;
+      setTimeout(function() { L.skip = null; }, 1500);
+    }
+    function arsTone() {
+      if (!audioCtx || !soundEnabled) return;
+      if (!ARS.tone) {
+        ARS.tone = audioCtx.createOscillator(); ARS.tone.type = 'triangle';
+        ARS.toneGain = audioCtx.createGain(); ARS.toneGain.gain.value = 0;
+        ARS.tone.connect(ARS.toneGain).connect(audioCtx.destination); ARS.tone.start();
+      }
+      var now = audioCtx.currentTime, type = arsCur(), w = type && ARS_W[type], L = ARS.lock;
+      var missile = w && w.kind === 'missile' && !(isDroneMode && droneCamActive);
+      var g = 0, f = 900;
+      if (missile && L.locked.length) { g = 0.035; f = 1650; }
+      else if (missile && L.cand) { g = 0.03; f = 620 + 160 * Math.sin(now * 38); }
+      ARS.tone.frequency.setTargetAtTime(f, now, 0.01);
+      ARS.toneGain.gain.setTargetAtTime(g, now, 0.03);
+    }
+
+    /* ---------- firing ---------- */
+    function arsPickStore(type) {
+      var cands = ARS.stores.filter(function(s) { return s.type === type && !s.spent; });
+      if (!cands.length) return null;
+      var other = cands.filter(function(s) { return s.side === -ARS.lastSide; });
+      var s = other.length ? other[0] : cands[0];
+      ARS.lastSide = s.side || -ARS.lastSide;
+      return s;
+    }
+    function arsFire() {
+      if (!started || crashing || ejecting) return;
+      var type = arsCur();
+      if (!type) { samToast(isCarMode ? 'NO WEAPONS ON THE CAR' : 'NO WEAPONS LOADED — PICK A LOADOUT IN THE HANGAR', '#ffb46a', 1.6); return; }
+      if (type === 'nuke') { dropBombs(); arsRefreshPanel(); return; }
+      if (wasGrounded) { samToast('RELEASE INHIBITED — WEIGHT ON WHEELS', '#ffcc33', 1.6); return; }
+      if ((ARS.cd[type] || 0) > 0) return;
+      if (arsAmmo(type) <= 0) { samToast(ARS_W[type].short + ' — WINCHESTER (EMPTY)', '#ffb46a', 1.3); return; }
+      var w = ARS_W[type];
+      ARS.cd[type] = w.cd;
+      var laser = isDroneMode && droneCamActive && strikeLaser.valid;
+      if (type === 'hellfire' && !laser && ARS.lock.locked.length > 1) {
+        // volley: one missile per locked target, rippled
+        ARS.lock.locked.slice(0, arsAmmo(type)).forEach(function(t, i) { ARS.queue.push({ t: i * 0.22, type: type, target: t }); });
+        ARS.cd[type] = 0.22 * ARS.lock.locked.length + 0.3;
+        return;
+      }
+      arsLaunch(type, ARS.lock.locked[0] || null, laser);
+    }
+    function arsLaunch(type, target, laser) {
+      var s = arsPickStore(type);
+      if (!s) return;
+      var w = ARS_W[type];
+      s.spent = true;
+      var p = { type: type, w: w, store: s, mesh: s.mesh, flame: s.flame, target: target, laser: !!laser, aim: new THREE.Vector3(), life: 0, smokeT: 0,
+                pos: new THREE.Vector3(), vel: new THREE.Vector3(), tPrev: null, opened: false };
+      if (s.mesh) {
+        s.mesh.visible = true;
+        scene.attach(s.mesh);
+        p.pos.copy(s.mesh.position);
+      } else p.pos.copy(position).add(_arsV.set(0, -2, 0));
+      p.vel.copy(velocityVec.lengthSq() > 1 ? velocityVec : _arsV.copy(forwardVec).multiplyScalar(speed));
+      if (w.kind === 'missile') { p.vel.y -= 3; playMissileLaunchSound(); }
+      else { p.vel.y -= 1.5; if (typeof esShot === 'function' && ES.brown) esShot(ES.brown, 'lowpass', 420, 120, 0.25, 0.25); }
+      if (s.internal) nhBayOpen();
+      if (laser) p.aim.copy(strikeLaser.point);
+      else if (target) p.aim.copy(arsPos(target));
+      ARS.proj.push(p);
+      arsRefreshPanel();
+    }
+    function arsQueueTick(dt) {
+      for (var i = ARS.queue.length - 1; i >= 0; i--) {
+        var q = ARS.queue[i];
+        if ((q.t -= dt) <= 0) { ARS.queue.splice(i, 1); if (!crashing && arsAmmo(q.type) > 0) arsLaunch(q.type, q.target && q.target.alive ? q.target : null, false); }
+      }
+    }
+
+    /* ---------- projectiles ---------- */
+    var ARS_BOMBLETS = [], ARS_MINI = [];
+    (function() {
+      var tex = makeRadialGlowTexture('60,58,52', '20,20,18');
+      for (var i = 0; i < 80; i++) {
+        var s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.95 }));
+        s.scale.set(0.45, 0.45, 1); s.visible = false; scene.add(s);
+        ARS_BOMBLETS.push({ s: s, pos: new THREE.Vector3(), vel: new THREE.Vector3(), active: false, w: null });
+      }
+      for (var j = 0; j < 40; j++) {
+        var f = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+        f.visible = false; scene.add(f);
+        ARS_MINI.push({ s: f, life: 1, max: 1, size: 1 });
+      }
+    })();
+    var _arsMiniCur = 0;
+    function arsMiniBlast(pos, size) {
+      var m = ARS_MINI[_arsMiniCur]; _arsMiniCur = (_arsMiniCur + 1) % ARS_MINI.length;
+      m.s.position.copy(pos); m.life = 0; m.max = 0.35 + Math.random() * 0.2; m.size = size; m.s.visible = true;
+      samEmitSmoke(pos, _arsV.set((Math.random() - 0.5) * 2, 2 + Math.random() * 2, (Math.random() - 0.5) * 2), size * 2.2, 3.5, 0.45, 0.35);
+    }
+    function arsGroundY(p) { return Math.max(getEffectiveGroundHeight(p.x, p.z), WATER_LEVEL); }
+    function arsDetonate(p, at) {
+      var gy = arsGroundY(at);
+      if (at.y < gy + 0.3) at.y = gy + 0.3;
+      triggerMissileBlast(at.clone());
+      if (p.w.kind === 'bomb') triggerMissileBlast(at.clone().add(_arsV.set(2, 2, -1)));
+      if (at.distanceTo(position) < 2500) playMissileImpactSound();
+      if (at.distanceTo(position) < 160) fxShake = Math.max(fxShake, 0.6 * (1 - at.distanceTo(position) / 160));
+      netEmit('boom', { p: [Math.round(at.x), Math.round(at.y), Math.round(at.z)] });
+      arsDamage(at, p.w.rad, p.w.dmg);
+    }
+    function arsRetire(p) {
+      if (p.mesh) {
+        p.mesh.visible = false;
+        if (p.flame) { p.flame.material.opacity = 0; p.flame.visible = false; }
+        p.store.parent.add(p.mesh);
+        p.mesh.position.copy(p.store.home); p.mesh.quaternion.copy(p.store.homeQ);
+      }
+    }
+    var _arsFwd = new THREE.Vector3(0, 0, -1);
+    function arsUpdateProjectiles(dt) {
+      for (var i = ARS.proj.length - 1; i >= 0; i--) {
+        var p = ARS.proj[i], w = p.w;
+        p.life += dt;
+        // live aim point: the laser spot, or the target (led by its own motion)
+        if (p.laser && droneCamActive && strikeLaser.valid) p.aim.copy(strikeLaser.point);
+        else if (p.target && p.target.alive && (w.kind === 'missile' || ARS.lock.locked.indexOf(p.target) >= 0 || p.life < 0.4)) {
+          var tp = arsPos(p.target);
+          if (p.tPrev && dt > 0) {
+            var tv = _arsV2.copy(tp).sub(p.tPrev).divideScalar(dt), tgo = tp.distanceTo(p.pos) / Math.max(60, p.vel.length());
+            p.aim.copy(tp).addScaledVector(tv, Math.min(tgo, 6));
+          } else p.aim.copy(tp);
+          p.tPrev = (p.tPrev || new THREE.Vector3()).copy(tp);
+        } else if (w.kind === 'bomb' && p.target) { p.target = null; p.coast = true; }    // designation lost: it flies on to the last designated spot
+        var guided = p.laser || (p.target && p.target.alive) || p.coast;
+        if (w.kind === 'missile') {
+          if (p.life > 0.12) {
+            var spd = p.vel.length(); spd += (w.speed - spd) * Math.min(1, 2.2 * dt);
+            var dir = _arsV.copy(p.vel).normalize();
+            if (guided) {
+              var want = _arsV2.copy(p.aim).sub(p.pos).normalize();
+              var ang = Math.acos(THREE.MathUtils.clamp(dir.dot(want), -1, 1));
+              if (ang > 1e-4) dir.lerp(want, Math.min(1, w.turn * dt / ang)).normalize();
+            } else dir.y -= 0.02 * dt;
+            p.vel.copy(dir.normalize()).multiplyScalar(spd);
+            if (p.flame) { p.flame.visible = true; p.flame.material.opacity = 0.9 + Math.random() * 0.1; }
+            if ((p.smokeT -= dt) <= 0) { p.smokeT = 0.035; samEmitSmoke(p.pos, _arsV2.set(0, 0.6, 0), 2.2, 2.2, 0.38, 0.85); }
+          } else p.vel.y -= 9.8 * dt;
+        } else {
+          p.vel.y -= 9.8 * dt;
+          p.vel.multiplyScalar(1 - 0.015 * dt);
+          if (w.kind === 'bomb' && guided && p.life > 0.5) {
+            // tail kit steering: pull the velocity toward the aim point within its lift limit
+            var spd2 = p.vel.length(), want2 = _arsV2.copy(p.aim).sub(p.pos).normalize().multiplyScalar(spd2);
+            var acc = want2.sub(p.vel).multiplyScalar(2.6), al = acc.length();
+            if (al > w.steer) acc.multiplyScalar(w.steer / al);
+            p.vel.addScaledVector(acc, dt);
+          }
+          if (w.kind === 'cluster' && !p.opened && p.life > 1.1 && (p.pos.y - arsGroundY(p.pos) < 320 || p.life > 7)) {
+            p.opened = true;
+            arsOpenCluster(p);
+            arsRetire(p); ARS.proj.splice(i, 1);
+            continue;
+          }
+        }
+        p.pos.addScaledVector(p.vel, dt);
+        if (p.mesh) { p.mesh.position.copy(p.pos); if (p.vel.lengthSq() > 1) p.mesh.quaternion.setFromUnitVectors(_arsFwd, _arsV.copy(p.vel).normalize()); }
+        var hitT = p.target && p.target.alive && arsPos(p.target).distanceTo(p.pos) < (p.target.hitR || 4) * 0.8;
+        var gy = arsGroundY(p.pos);
+        if (hitT || p.pos.y <= gy + 0.2 || p.life > 30) {
+          if (p.life <= 30) arsDetonate(p, p.pos.clone());
+          arsRetire(p); ARS.proj.splice(i, 1);
+        }
+      }
+    }
+    function arsOpenCluster(p) {
+      // the canister splits: a puff, a crack, and the bomblets spread into an ellipse
+      samEmitSmoke(p.pos, _arsV.set(0, 0, 0), 8, 3, 0.6, 0.85);
+      if (p.pos.distanceTo(position) < 1500) samBeep(180, 0.12, 0.06);
+      var n = p.w.bomblets, fwd = _arsV2.copy(p.vel).setY(0);
+      if (fwd.lengthSq() < 1) fwd.set(0, 0, -1);
+      fwd.normalize();
+      for (var k = 0, used = 0; k < ARS_BOMBLETS.length && used < n; k++) {
+        var b = ARS_BOMBLETS[k];
+        if (b.active) continue;
+        used++;
+        var a = Math.random() * Math.PI * 2, r = 6 + Math.random() * 16;
+        b.active = true; b.w = p.w; b.s.visible = true;
+        b.pos.copy(p.pos);
+        b.vel.copy(p.vel).multiplyScalar(0.85);
+        b.vel.x += Math.cos(a) * r + fwd.x * (Math.random() - 0.5) * 12; b.vel.z += Math.sin(a) * r * 0.6 + fwd.z * (Math.random() - 0.5) * 12;
+        b.vel.y += -2 - Math.random() * 6;
+      }
+    }
+    function arsUpdateBomblets(dt) {
+      var pops = 0;
+      for (var i = 0; i < ARS_BOMBLETS.length; i++) {
+        var b = ARS_BOMBLETS[i];
+        if (!b.active) continue;
+        b.vel.y -= 9.8 * dt; b.vel.multiplyScalar(1 - 0.35 * dt);
+        b.pos.addScaledVector(b.vel, dt); b.s.position.copy(b.pos);
+        var gy = arsGroundY(b.pos);
+        if (b.pos.y <= gy + 0.2) {
+          b.active = false; b.s.visible = false;
+          b.pos.y = gy + 0.4;
+          arsMiniBlast(b.pos, 4 + Math.random() * 3);
+          arsDamage(b.pos, b.w.rad, b.w.dmg, true);
+          pops++;
+        }
+      }
+      if (pops && audioCtx && soundEnabled && typeof esShot === 'function' && ES.white) for (var k = 0; k < Math.min(pops, 3); k++) esShot(ES.white, 'bandpass', 700 + Math.random() * 500, 200, 0.18, 0.12, k * 0.04);
+      for (var j = 0; j < ARS_MINI.length; j++) {
+        var m = ARS_MINI[j];
+        if (m.life >= m.max) continue;
+        m.life += dt;
+        var t = m.life / m.max;
+        if (t >= 1) { m.s.visible = false; continue; }
+        m.s.scale.setScalar(m.size * (0.4 + t));
+        m.s.material.opacity = 1 - t;
+      }
+    }
+
+    /* ---------- AA guns ---------- */
+    var AA_TRACERS = [];
+    function aaBuild(x, z) {
+      var gy = getTerrainHeight(x, z);
+      var root = new THREE.Group(); root.position.set(x, gy, z);
+      var parts = [
+        { geo: new THREE.CylinderGeometry(3.2, 3.4, 0.4, 16), pos: [0, 0.2, 0] }
+      ];
+      root.add(new THREE.Mesh(nhMerge(parts), SAM_M.concrete));
+      var bag = new THREE.Mesh(new THREE.TorusGeometry(3.6, 0.7, 6, 20, Math.PI * 1.75), SAM_M.tan);
+      bag.rotation.x = -Math.PI / 2; bag.position.y = 0.55; bag.scale.z = 0.8; root.add(bag);
+      var yaw = new THREE.Group(); yaw.position.y = 0.4; root.add(yaw);
+      yaw.add(new THREE.Mesh(nhMerge([
+        { geo: new THREE.CylinderGeometry(1.25, 1.4, 0.6, 14), pos: [0, 0.3, 0] },
+        { geo: new THREE.BoxGeometry(1.5, 1.3, 1.6), pos: [0, 1.15, 0.1] },
+        { geo: new THREE.BoxGeometry(0.08, 1.3, 1.5), pos: [-0.95, 1.2, -0.2], rot: [0, 0, -0.12] },
+        { geo: new THREE.BoxGeometry(0.08, 1.3, 1.5), pos: [0.95, 1.2, -0.2], rot: [0, 0, 0.12] },
+        { geo: new THREE.BoxGeometry(0.6, 0.5, 0.6), pos: [-0.55, 0.9, 0.95] }
+      ]), SAM_M.olive));
+      var pitch = new THREE.Group(); pitch.position.set(0, 1.55, -0.2); yaw.add(pitch);
+      pitch.add(new THREE.Mesh(nhMerge([
+        { geo: new THREE.CylinderGeometry(0.09, 0.11, 4.4, 8), pos: [-0.3, 0, -2.0], rot: [Math.PI / 2, 0, 0] },
+        { geo: new THREE.CylinderGeometry(0.09, 0.11, 4.4, 8), pos: [0.3, 0, -2.0], rot: [Math.PI / 2, 0, 0] },
+        { geo: new THREE.CylinderGeometry(0.15, 0.15, 0.4, 8), pos: [-0.3, 0, -4.2], rot: [Math.PI / 2, 0, 0] },
+        { geo: new THREE.CylinderGeometry(0.15, 0.15, 0.4, 8), pos: [0.3, 0, -4.2], rot: [Math.PI / 2, 0, 0] },
+        { geo: new THREE.BoxGeometry(0.9, 0.5, 1.2), pos: [0, 0, 0.1] }
+      ]), SAM_M.oliveDark));
+      var flashes = [-0.3, 0.3].map(function(bx) {
+        var f = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+        f.position.set(bx, 0, -4.6); f.scale.set(2.2, 2.2, 1); f.visible = false; pitch.add(f); return f;
+      });
+      samShadow(root);
+      scene.add(root);
+      var g = { group: root, yaw: yaw, pitch: pitch, flashes: flashes, pos: new THREE.Vector3(x, gy + 2, z), alive: true, deadTimer: 0, isAA: true,
+                label: 'AA GUN', hitR: 4, maxHp: 90, hp: 90, aimYaw: Math.random() * 6, aimPitch: 0.4, fireT: Math.random() * 2, tracerT: Math.random() * 2, tracerN: 0, track: 0, barrel: 0, bursts: [] };
+      g.origMats = []; root.traverse(function(c) { if (c.isMesh) g.origMats.push([c, c.material]); });
+      AA.push(g);
+      return g;
+    }
+    function aaBuildAll() {
+      if (!SAM_BASE) return;
+      var B = SAM_BASE;
+      for (var i = 0; i < 8; i++) {
+        var a = i / 8 * Math.PI * 2 + 0.39, r = 300 + (i % 2) * 70;
+        var x = B.x + Math.cos(a) * r, z = B.z + Math.sin(a) * r;
+        if (getTerrainHeight(x, z) < WATER_LEVEL + 1) continue;
+        aaBuild(x, z);
+      }
+      [[440, 230], [-330, 400], [-470, -260]].forEach(function(o) {
+        var x = B.x + o[0], z = B.z + o[1];
+        if (getTerrainHeight(x, z) > WATER_LEVEL + 1) aaBuild(x, z);
+      });
+      var tTex = makeRadialGlowTexture('255,230,150', '255,120,30');
+      for (var k = 0; k < 90; k++) {
+        var s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+        s.scale.set(1.1, 1.1, 1); s.visible = false; scene.add(s);
+        AA_TRACERS.push({ s: s, pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, max: 0, active: false });
+      }
+    }
+    function aaKill(g) {
+      g.alive = false; g.deadTimer = STRIKE_REPAIR_TIME; g.hp = 0; g.dmgState = 0;
+      g.group.traverse(function(c) { if (c.isMesh) c.material = SAM_M.charred; });
+      g.pitch.rotation.x = -0.25; g.yaw.rotation.z = 0.12;
+      triggerMissileBlast(g.pos.clone());
+      stIgniteFire(g.pos.clone(), 5, 60);
+      var left = AA.filter(function(a) { return a.alive; }).length;
+      samToast(left ? 'AA GUN DESTROYED — ' + left + ' LEFT' : 'ALL AA GUNS SILENCED', '#7dff8a', 2.4);
+    }
+    function aaRepair(g) {
+      g.alive = true; arsResetHealth(g);
+      g.origMats.forEach(function(e) { e[0].material = e[1]; });
+      g.yaw.rotation.z = 0;
+    }
+    var _aaAim = new THREE.Vector3(), _aaD = new THREE.Vector3();
+    function aaFlakEffect(at, fromGun) {
+      samEmitSmoke(at, _aaD.set(0, 0.4, 0), 10 + Math.random() * 4, 6, 0.85, 0.07);
+      arsMiniBlast(at, 5);
+      var d = at.distanceTo(position);
+      if (d < 3000) {
+        if (audioCtx && soundEnabled && typeof esShot === 'function' && ES.brown) esShot(ES.brown, 'lowpass', d < 300 ? 1600 : 700, 90, Math.min(0.5, 30 / Math.max(30, d)), d < 300 ? 0.5 : 0.9);
+      }
+      if (!started || crashing || ejecting || wasGrounded) return;
+      if (d >= 65 && d < 150) fxShake = Math.max(fxShake, 0.22 * (1 - (d - 65) / 85));    // a thump through the airframe
+      if (d < 65) {
+        // the blast wave throws the aircraft about
+        var k = 1 - d / 65;
+        fxShake = Math.max(fxShake, 0.35 + k * 0.9);
+        if (isHelicopterMode) heliVel.add(_aaD.set((Math.random() - 0.5) * 8 * k, (Math.random() - 0.3) * 5 * k, (Math.random() - 0.5) * 8 * k));
+        else {
+          rollRate += (Math.random() < 0.5 ? -1 : 1) * (0.6 + Math.random() * 0.8) * k * 1.6;
+          pitchRate += (Math.random() - 0.5) * 1.1 * k;
+          heading += (Math.random() - 0.5) * 0.05 * k;
+        }
+        if (d < 24) {
+          var hurt = 1 - d / 24;
+          if (typeof kjWear === 'function') kjWear(0.03 + 0.06 * hurt, 'flak');
+          ARS.hullHits++;
+          samToast(d < 10 ? '💥 DIRECT FLAK HIT' : 'FLAK HIT', '#ff8a5a', 1.2);
+          if (d < 9 || (ARS.hullHits >= 5 && Math.random() < 0.4)) { ARS.hullHits = 0; wreckDamage('flak'); }
+        }
+      }
+    }
+    function aaUpdate(dt) {
+      var i;
+      // flak shells in the air: burst on their timers
+      AA.forEach(function(g) {
+        for (var b = g.bursts.length - 1; b >= 0; b--) {
+          var e = g.bursts[b];
+          if ((e.t -= dt) <= 0) { g.bursts.splice(b, 1); aaFlakEffect(e.pos, g); }
+        }
+        g.flashes.forEach(function(f) { f.material.opacity = Math.max(0, f.material.opacity - dt * 9); f.visible = f.material.opacity > 0.01; });
+        if (!g.alive) { if ((g.deadTimer -= dt) <= 0) aaRepair(g); return; }
+        var engage = started && !crashing && !ejecting && !wasGrounded && !isCarMode;
+        var d = g.pos.distanceTo(position);
+        var range = 2800 * (isStealthMode ? 0.4 : 1) * (isHelicopterMode ? 0.85 : 1);
+        var agl = typeof kjAgl === 'function' ? kjAgl() : 100;
+        if (engage && (d > range || agl < 28)) engage = false;      // out of range, or lost in the ground clutter
+        if (engage) {
+          // lead the target: where it will be when a shell gets there
+          var tof = d / 820;
+          _aaAim.copy(position).addScaledVector(samPlayerVel, tof);
+          _aaD.copy(_aaAim).sub(g.pos);
+          var wantYaw = Math.atan2(-_aaD.x, -_aaD.z), wantPitch = Math.atan2(_aaD.y, Math.hypot(_aaD.x, _aaD.z));
+          var dy = Math.atan2(Math.sin(wantYaw - g.aimYaw), Math.cos(wantYaw - g.aimYaw));
+          g.aimYaw += THREE.MathUtils.clamp(dy, -1.3 * dt, 1.3 * dt);
+          g.aimPitch += THREE.MathUtils.clamp(wantPitch - g.aimPitch, -0.9 * dt, 0.9 * dt);
+          var onTarget = Math.abs(dy) < 0.06 && Math.abs(wantPitch - g.aimPitch) < 0.06;
+          g.track = onTarget ? Math.min(1, g.track + dt / 4) : Math.max(0, g.track - dt / 2);
+          var slow = g.dmgState === 2 ? 1.8 : 1;
+          if (onTarget && d > 220 && (g.fireT -= dt) <= 0) {
+            g.fireT = (1.7 + Math.random() * 0.9) * slow;
+            g.barrel ^= 1; g.flashes[g.barrel].material.opacity = 1;
+            // dispersion shrinks the longer it tracks you flying straight
+            var sig = (40 + d * 0.022) * (1.35 - 0.35 * g.track) * (g.dmgState === 2 ? 1.4 : 1);
+            g.bursts.push({ t: tof, pos: _aaAim.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2 * sig, (Math.random() - 0.5) * 2 * sig, (Math.random() - 0.5) * 2 * sig)) });
+            if (d < 2200 && audioCtx && soundEnabled && typeof esShot === 'function' && ES.brown) esShot(ES.brown, 'lowpass', 500, 80, Math.min(0.2, 40 / d), 0.35);
+          }
+          // light gun: tracer streams when you come in low and close
+          if (d < 1300 && agl < 600 && (g.tracerT -= dt) <= 0) {
+            // short bursts, then a pause
+            if (++g.tracerN >= 8) { g.tracerN = 0; g.tracerT = (1.1 + Math.random()) * slow; } else g.tracerT = 0.1 * slow;
+            aaTracer(g, _aaAim, d);
+          }
+        } else {
+          g.aimYaw += dt * 0.15; g.aimPitch += (0.35 - g.aimPitch) * Math.min(1, dt);
+          g.track = 0;
+        }
+        g.yaw.rotation.y = g.aimYaw;
+        g.pitch.rotation.x = THREE.MathUtils.clamp(g.aimPitch, -0.05, 1.45);
+      });
+      for (i = 0; i < AA_TRACERS.length; i++) {
+        var t = AA_TRACERS[i];
+        if (!t.active) continue;
+        t.life += dt;
+        var prev = _aaD.copy(t.pos);
+        t.pos.addScaledVector(t.vel, dt); t.vel.y -= 4 * dt;
+        t.s.position.copy(t.pos);
+        if (t.life >= t.max) { t.active = false; t.s.visible = false; continue; }
+        // passing through the aircraft?
+        if (started && !crashing && !wasGrounded) {
+          var seg = _aaAim.copy(t.pos).sub(prev), L2 = seg.lengthSq();
+          var u = L2 > 0 ? THREE.MathUtils.clamp(_aaD.copy(position).sub(prev).dot(seg) / L2, 0, 1) : 0;
+          var closest = prev.clone().addScaledVector(seg, u);
+          if (closest.distanceTo(position) < 3.2) {
+            t.active = false; t.s.visible = false;
+            fxShake = Math.max(fxShake, 0.45);
+            if (typeof kjWear === 'function') kjWear(0.012, 'gunfire');
+            ARS.hullHits += 0.25;
+            if (Math.random() < 0.3) samToast('TAKING HITS', '#ff8a5a', 0.8);
+            if (ARS.hullHits >= 6 && Math.random() < 0.15) { ARS.hullHits = 0; wreckDamage('gunfire'); }
+          }
+        }
+      }
+    }
+    function aaTracer(g, aim, d) {
+      for (var i = 0; i < AA_TRACERS.length; i++) {
+        var t = AA_TRACERS[i];
+        if (t.active) continue;
+        var muzzle = g.flashes[g.barrel].getWorldPosition(new THREE.Vector3());
+        var spread = 0.012 + (1 - g.track) * 0.02;
+        var dir = aim.clone().sub(muzzle).normalize();
+        dir.x += (Math.random() - 0.5) * spread * 2; dir.y += (Math.random() - 0.5) * spread * 2; dir.z += (Math.random() - 0.5) * spread * 2;
+        dir.normalize();
+        t.pos.copy(muzzle); t.vel.copy(dir).multiplyScalar(900); t.life = 0; t.max = d / 900 + 0.4; t.active = true; t.s.visible = true;
+        g.flashes[g.barrel].material.opacity = Math.max(g.flashes[g.barrel].material.opacity, 0.7);
+        g.barrel ^= 1;
+        return;
+      }
+    }
+
+    /* ---------- HUD: seeker, targets, lock box, CCIP, hit markers ---------- */
+    var arsHudCv = document.createElement('canvas');
+    arsHudCv.id = 'arsHud';
+    arsHudCv.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:9;pointer-events:none';
+    document.body.appendChild(arsHudCv);
+    var arsHudCtx = arsHudCv.getContext('2d'), _arsP = new THREE.Vector3();
+    function arsProject(v, W, H) {
+      _arsP.copy(v).project(camera);
+      if (_arsP.z > 1 || _arsP.z < -1) return null;
+      return [(_arsP.x * 0.5 + 0.5) * W, (-_arsP.y * 0.5 + 0.5) * H];
+    }
+    function arsCcip() {
+      var p = position.clone(), v = (velocityVec.lengthSq() > 1 ? velocityVec : forwardVec.clone().multiplyScalar(speed)).clone(), t = 0;
+      v.y -= 1.5;
+      while (t < 30) {
+        v.y -= 9.8 * 0.1; v.multiplyScalar(1 - 0.0015); p.addScaledVector(v, 0.1); t += 0.1;
+        if (p.y <= arsGroundY(p)) return { p: p, t: t };
+      }
+      return null;
+    }
+    function arsDrawHud(dt) {
+      var dpr = Math.min(window.devicePixelRatio || 1, 2), W = window.innerWidth, H = window.innerHeight;
+      if (arsHudCv.width !== Math.round(W * dpr) || arsHudCv.height !== Math.round(H * dpr)) { arsHudCv.width = Math.round(W * dpr); arsHudCv.height = Math.round(H * dpr); }
+      var c = arsHudCtx;
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, W, H);
+      var type = arsCur(), w = type && ARS_W[type];
+      var show = started && !crashing && !ejecting && w && !(isDroneMode && droneCamActive) && !document.body.classList.contains('gp-nohud') && !(typeof kj !== 'undefined' && kj.photoOn);
+      camera.updateMatrixWorld();
+      c.font = '700 11px ui-monospace, Menlo, Consolas, monospace'; c.textAlign = 'center'; c.lineWidth = 1.6;
+      if (show && w.seek) {
+        // seeker field of view
+        arsSeekerDir(w, _arsDir);
+        var sp = arsProject(_arsV.copy(position).addScaledVector(_arsDir, 600), W, H);
+        if (sp) {
+          var r = Math.tan(THREE.MathUtils.degToRad(w.cone)) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * H / 2;
+          c.strokeStyle = 'rgba(160,255,170,0.35)'; c.setLineDash([6, 6]);
+          c.beginPath(); c.arc(sp[0], sp[1], Math.min(r, H * 0.45), 0, Math.PI * 2); c.stroke(); c.setLineDash([]);
+        }
+        // every target in range
+        var L = ARS.lock;
+        arsTargets().forEach(function(t) {
+          if (!t.alive) return;
+          var d = arsPos(t).distanceTo(position);
+          if (d > w.range * 1.3) return;
+          var s = arsProject(arsPos(t), W, H);
+          if (!s || s[0] < -20 || s[0] > W + 20 || s[1] < -20 || s[1] > H + 20) return;
+          var locked = L.locked.indexOf(t) >= 0, cand = L.cand === t;
+          if (locked && L.locked.indexOf(t) > 0) {
+            // secondary locks of a Hellfire volley: box + number
+            c.strokeStyle = '#ff4a3a'; c.fillStyle = '#ff4a3a';
+            c.strokeRect(s[0] - 12, s[1] - 12, 24, 24);
+            c.fillText(String(L.locked.indexOf(t) + 1), s[0], s[1] - 16);
+          } else if (locked) {
+            c.strokeStyle = '#ff4a3a'; c.fillStyle = '#ff4a3a';
+            c.strokeRect(s[0] - 16, s[1] - 16, 32, 32);
+            c.beginPath(); c.moveTo(s[0] - 22, s[1]); c.lineTo(s[0] - 16, s[1]); c.moveTo(s[0] + 16, s[1]); c.lineTo(s[0] + 22, s[1]); c.stroke();
+            c.fillText('LOCK  ' + (d / 1000).toFixed(1) + 'km', s[0], s[1] - 22);
+            c.fillText(t.label || 'TARGET', s[0], s[1] + 30);
+            var hp = THREE.MathUtils.clamp((t.hp === undefined ? 1 : t.hp / (t.maxHp || 100)), 0, 1);
+            c.fillStyle = 'rgba(0,0,0,0.55)'; c.fillRect(s[0] - 18, s[1] + 35, 36, 5);
+            c.fillStyle = hp > 0.66 ? '#7dff8a' : hp > 0.33 ? '#ffd24a' : '#ff5a3c'; c.fillRect(s[0] - 18, s[1] + 35, 36 * hp, 5);
+          } else if (cand) {
+            c.strokeStyle = '#ffffff';
+            c.beginPath(); c.arc(s[0], s[1], 14, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * L.prog); c.stroke();
+            c.strokeStyle = 'rgba(255,255,255,0.6)'; c.strokeRect(s[0] - 9, s[1] - 9, 18, 18);
+          } else {
+            c.strokeStyle = t.dmgState ? 'rgba(255,190,90,0.75)' : 'rgba(160,255,170,0.6)';
+            c.beginPath(); c.moveTo(s[0], s[1] - 6); c.lineTo(s[0] + 6, s[1]); c.lineTo(s[0], s[1] + 6); c.lineTo(s[0] - 6, s[1]); c.closePath(); c.stroke();
+          }
+        });
+      }
+      // free-fall bombs: continuously computed impact point
+      if (show && (type === 'cluster' || (type === 'lgb' && !ARS.lock.locked.length) || type === 'nuke')) {
+        if ((ARS.ccipT -= dt) <= 0) { ARS.ccipT = 0.08; ARS.ccip = arsCcip(); }
+        if (ARS.ccip) {
+          var s2 = arsProject(ARS.ccip.p, W, H), fpm = arsProject(_arsV.copy(position).addScaledVector(forwardVec, 400), W, H);
+          if (s2) {
+            c.strokeStyle = '#9dffb0'; c.fillStyle = '#9dffb0';
+            if (fpm) { c.setLineDash([3, 5]); c.beginPath(); c.moveTo(fpm[0], fpm[1]); c.lineTo(s2[0], s2[1]); c.stroke(); c.setLineDash([]); }
+            c.beginPath(); c.arc(s2[0], s2[1], 11, 0, Math.PI * 2); c.stroke();
+            c.beginPath(); c.arc(s2[0], s2[1], 1.8, 0, Math.PI * 2); c.fill();
+            c.fillText('CCIP  ' + ARS.ccip.t.toFixed(1) + 's', s2[0], s2[1] - 16);
+          }
+        }
+      }
+      // hit markers
+      for (var i = ARS.markers.length - 1; i >= 0; i--) {
+        var m = ARS.markers[i];
+        m.t += dt;
+        if (m.t > 1.6) { ARS.markers.splice(i, 1); continue; }
+        if (!started) continue;
+        var s3 = arsProject(m.pos, W, H);
+        if (!s3) continue;
+        c.globalAlpha = Math.min(1, (1.6 - m.t) * 1.5);
+        c.font = '800 12px ui-monospace, Menlo, Consolas, monospace';
+        c.fillStyle = 'rgba(0,0,0,0.6)'; c.fillText(m.text, s3[0] + 1, s3[1] - m.t * 18 - m.dy * 14 + 1);
+        c.fillStyle = m.col; c.fillText(m.text, s3[0], s3[1] - m.t * 18 - m.dy * 14);
+        c.globalAlpha = 1;
+      }
+    }
+
+    /* ---------- weapons panel ---------- */
+    var arsPanel = document.createElement('div');
+    arsPanel.id = 'arsPanel'; arsPanel.className = 'hidden';
+    document.body.appendChild(arsPanel);
+    var arsWpnBtn = document.createElement('div');
+    arsWpnBtn.id = 'wpnBtn'; arsWpnBtn.className = 'hidden'; arsWpnBtn.textContent = 'WPN ▸';
+    document.body.appendChild(arsWpnBtn);
+    ['touchstart', 'mousedown'].forEach(function(ev) { arsWpnBtn.addEventListener(ev, function(e) { e.preventDefault(); e.stopPropagation(); arsSelect(-1); }, { passive: false }); });
+    var _arsPanelSig = '';
+    function arsRefreshPanel() {
+      var has = started && ARS.weapons.length > 0;
+      arsPanel.classList.toggle('hidden', !has);
+      arsWpnBtn.classList.toggle('hidden', !has || ARS.weapons.length < 2);
+      var fb = document.getElementById('fireBtn');
+      if (fb) fb.classList.toggle('hidden', !has);
+      if (!has) return;
+      var L = ARS.lock, rows = ARS.weapons.map(function(type, i) {
+        var n = arsAmmo(type), w = ARS_W[type];
+        var stat = type === 'nuke' ? (NUKE.state === 'falling' ? 'AWAY' : bombCooldownTimer > 0 ? 'ARM ' + Math.ceil(bombCooldownTimer) + 's' : 'READY') : '×' + n;
+        return '<div class="ar' + (i === ARS.sel ? ' on' : '') + (n ? '' : ' empty') + '"><kbd>' + (i + 1) + '</kbd><span>' + w.short + '</span><b>' + stat + '</b></div>';
+      }).join('');
+      var cur = ARS_W[arsCur()], lk = '';
+      if (cur && cur.seek) lk = L.locked.length ? 'LOCKED ' + L.locked.length + (cur.multi ? '/' + cur.multi : '') : L.cand ? 'ACQUIRING…' : (isDroneMode && droneCamActive ? 'LASER' : 'SEARCHING');
+      else if (cur) lk = cur.kind === 'nuke' ? 'BAY' : 'CCIP';
+      var html = '<div class="ah">' + (ARS.preset ? ARS.preset.name.toUpperCase() : 'WEAPONS') + '<i>' + lk + '</i></div>' + rows;
+      if (html !== _arsPanelSig) { arsPanel.innerHTML = html; _arsPanelSig = html; }
+    }
+
+    /* ---------- per frame ---------- */
+    var _arsPanelT = 0;
+    function arsUpdate(dt) {
+      Object.keys(ARS.cd).forEach(function(k) { if (ARS.cd[k] > 0) ARS.cd[k] -= dt; });
+      arsQueueTick(dt);
+      arsUpdateLock(dt);
+      arsTone();
+      arsUpdateProjectiles(dt);
+      arsUpdateBomblets(dt);
+      arsDamageFx(dt);
+      aaUpdate(dt);
+      if ((_arsPanelT -= dt) <= 0) { _arsPanelT = 0.15; arsRefreshPanel(); }
+    }
+    aaBuildAll();
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
@@ -19182,6 +20143,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function animate() {
       requestAnimationFrame(animate);
       var dt = Math.min(clock.getDelta(), 0.05);
+      if (HG.open) { hgFrame(dt); return; }
       if (gpPaused) {
         // the pause menu freezes the world; only redraw when a setting changed behind it
         if (gpDirty > 0) { gpDirty--; update(0); renderWithPost(renderer, scene, camera, elapsedSeconds); }
@@ -19196,6 +20158,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       planePreview.tick(dt);
       renderWithPost(renderer, scene, camera, elapsedSeconds);
+      arsDrawHud(started && !kj.paused ? sdt : 0);
       kjAfterRender();
       gpFpsTick();
     }
@@ -22262,15 +23225,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var heliDpadEl = document.getElementById('heliDpad');
       if (heliDpadEl) heliDpadEl.classList.toggle('hidden', !isHelicopterMode);
       if (!isHelicopterMode) { keys.up = keys.down = keys.left = keys.right = false; }
-      var fireBtnEl = document.getElementById('fireBtn');
-      if (fireBtnEl) fireBtnEl.classList.toggle('hidden', !isDroneMode);
-      if (isDroneMode) missileCooldownTimer = 0;
       var droneCamBtnEl = document.getElementById('droneCamBtn');
       if (droneCamBtnEl) droneCamBtnEl.classList.toggle('hidden', !isDroneMode);
       if (!isDroneMode) setDroneCam(false);
-      var bombBtnEl = document.getElementById('bombBtn');
-      if (bombBtnEl) bombBtnEl.classList.toggle('hidden', !isStealthMode);
       if (isStealthMode) nukeResetForVehicle();
+      arsApplyLoadout(true);
       // jet afterburner glow/flame don't apply to the rotor-driven heli, the car, the drone
       // (a turboprop, not a jet), or the stealth bomber (its own dim buried-engine glow is
       // handled separately below) — keep the fighter-style flame effects fully doused
@@ -22290,14 +23249,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var controlHintEl = document.getElementById('controlHint');
       if (controlHintEl) {
         controlHintEl.textContent = isHelicopterMode
-          ? 'Drag / W S Q E: cyclic • A D or ◀▶: yaw • Space ▲ / Z ▼ or lever: collective • C: hover assist'
+          ? 'Drag / W S Q E: cyclic • A D: yaw • Space / Z: collective • C: hover • M fire • T next target'
           : isCarMode
           ? 'Drag to steer • Slider/±/Shift for speed • pull throttle below 0 to reverse'
           : isDroneMode
-          ? 'Drag to steer • Slider/±/Shift for speed • M or FIRE to launch missiles • V or CAM for sensor view (drag aims the ball, autopilot flies)'
+          ? 'Drag to steer • 1-5 weapon • M or FIRE to fire • T next target • V or CAM for sensor view (laser-guides the Hellfires)'
           : isSeaplaneMode
           ? 'Drag to steer • Slider/±/Shift for speed • land on the sea wings-level and gently • F for flaps'
-          : 'Drag to steer • Slider/±/Shift for speed • Q/E to roll • F for flaps • C for cruise control';
+          : 'Drag to steer • Slider/±/Shift for speed • Q/E to roll • 1-5 weapon • M fire • T next target';
       }
     }
 
@@ -22586,6 +23545,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       else if (a === 'back') gpBack();
       else if (a.indexOf('page:') === 0) { var pg = a.slice(5); if (pg === 'settings') gpShowTab(gpTab); gpShow(pg); }
       else if (a === 'respawn') { gpClose(); wreckRespawn(); }
+      else if (a === 'hangar') { if (ejecting) return; gpClose(); hgOpen('flight'); }
       else if (a === 'reset') {
         (GP_TABS[gpTab] || []).forEach(function(k) { if (k !== 'mute') gpSet[k] = GP_SET_DEF[k]; });
         if (gpTab === 'audio') gpSetMute(false);
@@ -22609,6 +23569,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     // Returns 1 = handled (stop + preventDefault), 2 = menu owns the key but the browser may use it
     // (Tab, arrows and Enter/Space on the focused control), 0 = not ours
     function gpMenuKey(e, down) {
+      if (HG.open) {      // the hangar owns the keyboard: Esc backs out, Enter takes off
+        if (down && !e.repeat && e.code === 'Escape') hgClose(false);
+        else if (down && !e.repeat && e.code === 'Enter') hgClose(true);
+        e.stopImmediatePropagation();
+        return 1;
+      }
       if (gpPaused) {
         if (down && e.code === 'Escape') { gpBack(); return 1; }
         e.stopImmediatePropagation();
@@ -22668,7 +23634,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var K = [
         ['Flying', [['Pitch', 'W', 'S'], ['Turn / bank', 'A', 'D'], ['Barrel roll', 'Q', 'E'], ['Throttle', '+', '−'], ['Afterburner', 'Shift'], ['Flaps', 'F'], ['Cruise control', 'C'], ['Cockpit view', 'P']]],
         ['Helicopter', [['Cyclic', 'W', 'A', 'S', 'D'], ['Strafe', 'Q', 'E'], ['Collective up', 'Space'], ['Collective down', 'Z']]],
-        ['Weapons & defence', [['Missile', 'M'], ['Nuke (Nighthawk)', 'B'], ['Flares (hold)', 'G'], ['Auto flares', 'H'], ['Track strike target', 'T'], ['Gun (multiplayer)', 'J'], ['Fox-2 (multiplayer)', 'K']]],
+        ['Weapons & defence', [['Fire selected weapon', 'M', 'X'], ['Pick weapon', '1', '2', '3', '4'], ['Next target / break lock', 'T'], ['Flares (hold)', 'G'], ['Auto flares', 'H'], ['Track target (sensor view)', 'T'], ['Gun (multiplayer)', 'J'], ['Fox-2 (multiplayer)', 'K']]],
         ['Systems', [['Drone sensor camera', 'V'], ['Recenter sensor', 'R'], ['Carrier catapult', 'L'], ['Drop cargo', 'N'], ['Cardboard box', 'U']]],
         ['Radio, music, photos', [['Codec radio', 'I'], ['Walkman: next tape', 'Y'], ['Photo mode', 'O']]],
         ['Game', [['Pause / back', 'Esc'], ['Respawn', 'Backspace']]],
@@ -22704,6 +23670,480 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     gpShowTab('graphics');
     gpSyncAll();
 
+
+    /* ============================================================
+       HANGAR — a walk-around hangar in the War Thunder mould, for picking the aircraft and its loadout
+       A Quonset hangar with the doors rolled back: daylight pours in through the opening and lays a
+       shaft of light and drifting dust across the concrete, work lamps hang from the ribs, and the
+       aircraft sits on its parking circle with the loadout you pick hung on its pylons (the
+       Nighthawk opens its bays to show what's inside). A munitions trolley beside it carries a round
+       of each weapon. Drag to walk the camera round, scroll or pinch to zoom.
+       Panels: aircraft cards on the left; on the right the aircraft's class, performance bars and
+       the loadout presets with what each weapon does. TAKE OFF starts the flight on the runway.
+       Open it from the title screen, or from the pause menu mid-flight (that returns you to the
+       airfield in whatever you pick).
+       ============================================================ */
+    var HG = { open: false, from: 'title', built: false, scene: null, cam: null, target: new THREE.Vector3(0, 1.4, 0),
+               yaw: Math.PI + 0.75, pitch: 0.2, dist: 20, distT: 16, idle: 0, ptrs: {}, pinch: 0, t: 0, dust: null, trolley: null, lamps: [] };
+    var HG_R = 17, HG_L = 60;            // arch radius and hangar length (door at z = -30)
+    var HG_CLASS = { interceptor: 'FIGHTER', voyager: 'TOURER', rocket: 'EXPERIMENTAL', helicopter: 'ROTARY WING', car: 'GROUND VEHICLE', drone: 'UAV', stealth: 'STEALTH BOMBER', seaplane: 'AMPHIBIAN' };
+    var HG_GUIDE = { agm: 'Lock-on · fire & forget', hellfire: 'Lock-on ×4 · laser in sensor view', lgb: 'Laser-guided glide bomb', cluster: 'Free-fall · 36 bomblets', nuke: 'Free-fall · nuclear' };
+    var hgEl = document.getElementById('hangar'), hgLeftEl = hgEl.querySelector('.hg-left'), hgRightEl = hgEl.querySelector('.hg-right');
+
+    function hgTex(w, h, draw) {
+      var c = document.createElement('canvas'); c.width = w; c.height = h;
+      draw(c.getContext('2d'), w, h);
+      var t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; t.anisotropy = 4;
+      return t;
+    }
+    function hgMat(hex, r, m, extra) {
+      var o = { color: new THREE.Color(hex), roughness: r, metalness: m || 0 };
+      if (extra) Object.keys(extra).forEach(function(k) { o[k] = extra[k]; });
+      return new THREE.MeshStandardMaterial(o);
+    }
+    function hgMesh(geo, mat, x, y, z, ry, parent) {
+      var m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); if (ry) m.rotation.y = ry;
+      m.castShadow = true; m.receiveShadow = true; (parent || HG.scene).add(m); return m;
+    }
+
+    /* ---------- the building ---------- */
+    function hgFloorTex() {
+      // 1024 px = 64 m, canvas top = the door (-z), canvas x = world x
+      return hgTex(1024, 1024, function(c, w, h) {
+        var i, x, y, r, g;
+        c.fillStyle = '#8b8c88'; c.fillRect(0, 0, w, h);
+        for (i = 0; i < 70; i++) {
+          x = Math.random() * w; y = Math.random() * h; r = 20 + Math.random() * 110;
+          g = c.createRadialGradient(x, y, 0, x, y, r);
+          g.addColorStop(0, Math.random() < 0.55 ? 'rgba(58,56,50,.13)' : 'rgba(255,255,248,.07)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+          c.fillStyle = g; c.fillRect(x - r, y - r, r * 2, r * 2);
+        }
+        for (i = 0; i < 14000; i++) {
+          var v = 95 + Math.random() * 90 | 0; c.fillStyle = 'rgba(' + v + ',' + v + ',' + (v - 5) + ',' + (0.05 + Math.random() * 0.12) + ')';
+          var s = 1 + Math.random() * 2.5; c.fillRect(Math.random() * w, Math.random() * h, s, s);
+        }
+        for (i = 0; i < 9; i++) {     // oil and tyre stains around the parking spot
+          x = 512 + (Math.random() - 0.5) * 260; y = 512 + (Math.random() - 0.5) * 300; r = 10 + Math.random() * 30;
+          g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, 'rgba(22,20,16,.38)'); g.addColorStop(1, 'rgba(22,20,16,0)');
+          c.fillStyle = g; c.beginPath(); c.ellipse(x, y, r, r * (0.6 + Math.random() * 0.5), Math.random() * 3, 0, Math.PI * 2); c.fill();
+        }
+        c.strokeStyle = 'rgba(38,38,36,.55)'; c.lineWidth = 2;     // expansion joints every 6 m
+        for (var p = 512 % 96; p < w; p += 96) { c.beginPath(); c.moveTo(p, 0); c.lineTo(p, h); c.stroke(); c.beginPath(); c.moveTo(0, p); c.lineTo(w, p); c.stroke(); }
+        c.strokeStyle = 'rgba(226,178,36,.92)'; c.lineWidth = 8;   // lead-in line and parking circle
+        c.beginPath(); c.moveTo(512, 0); c.lineTo(512, 512 - 152); c.stroke();
+        c.beginPath(); c.arc(512, 512, 152, 0, Math.PI * 2); c.stroke();
+        c.lineWidth = 5; c.beginPath(); c.arc(512, 512, 162, 0, Math.PI * 2); c.stroke();
+        c.lineWidth = 10; c.beginPath(); c.moveTo(470, 512 - 110); c.lineTo(554, 512 - 110); c.stroke();
+        for (x = 0; x < w; x += 40) {   // hazard stripes along the door sill
+          c.fillStyle = '#e2b224'; c.beginPath(); c.moveTo(x, 32); c.lineTo(x + 20, 32); c.lineTo(x + 40, 56); c.lineTo(x + 20, 56); c.fill();
+          c.fillStyle = '#1d1d1b'; c.beginPath(); c.moveTo(x + 20, 32); c.lineTo(x + 40, 32); c.lineTo(x + 60, 56); c.lineTo(x + 40, 56); c.fill();
+        }
+        c.save(); c.globalAlpha = 0.5; c.fillStyle = '#ecebe4'; c.font = '900 84px Impact, "Arial Black", sans-serif'; c.textAlign = 'center';
+        c.translate(512, 790); c.fillText('BAY 3', 0, 0); c.restore();
+        c.save(); c.globalAlpha = 0.45; c.fillStyle = '#d23a2a'; c.font = '800 30px "Arial Black", sans-serif'; c.textAlign = 'center';
+        c.translate(300, 260); c.rotate(-Math.PI / 2); c.fillText('NO SMOKING · FOD CHECK', 0, 0); c.restore();
+      });
+    }
+    function hgBuild() {
+      if (HG.built) return;
+      HG.built = true;
+      var S = HG.scene = new THREE.Scene();
+      S.background = new THREE.Color(0x0d0f12);
+      HG.cam = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.1, 600);
+      var R = HG_R, L = HG_L, door = -L / 2;
+
+      // floor + apron outside the door
+      var floor = new THREE.Mesh(new THREE.PlaneGeometry(64, 64), hgMat(0xffffff, 0.86, 0, { map: hgFloorTex() }));
+      floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; S.add(floor);
+      var apron = new THREE.Mesh(new THREE.PlaneGeometry(220, 120), hgMat(0xc4c0b4, 0.95));
+      apron.rotation.x = -Math.PI / 2; apron.position.set(0, -0.01, door - 60); apron.receiveShadow = true; S.add(apron);
+      // daylight backdrop: sky, haze, far hills, the runway edge lights
+      var sky = new THREE.Mesh(new THREE.PlaneGeometry(520, 190), new THREE.MeshBasicMaterial({ fog: false, map: hgTex(1024, 384, function(c, w, h) {
+        var g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#5f8fc4'); g.addColorStop(0.55, '#b9d2e6'); g.addColorStop(0.72, '#e9eef0'); g.addColorStop(1, '#cfc9b8');
+        c.fillStyle = g; c.fillRect(0, 0, w, h);
+        c.fillStyle = 'rgba(126,146,150,.75)'; c.beginPath(); c.moveTo(0, h * 0.74);
+        for (var x = 0; x <= w; x += 16) c.lineTo(x, h * (0.70 - 0.05 * Math.sin(x * 0.011) - 0.03 * Math.sin(x * 0.037 + 1)));
+        c.lineTo(w, h); c.lineTo(0, h); c.fill();
+        c.fillStyle = 'rgba(96,116,104,.9)'; c.beginPath(); c.moveTo(0, h * 0.8);
+        for (x = 0; x <= w; x += 12) c.lineTo(x, h * (0.77 - 0.025 * Math.sin(x * 0.02 + 2)));
+        c.lineTo(w, h); c.lineTo(0, h); c.fill();
+        var sun = c.createRadialGradient(w * 0.64, h * 0.3, 0, w * 0.64, h * 0.3, 160); sun.addColorStop(0, 'rgba(255,250,232,.95)'); sun.addColorStop(1, 'rgba(255,250,232,0)');
+        c.fillStyle = sun; c.fillRect(0, 0, w, h);
+      }) }));
+      sky.position.set(0, 60, door - 150); S.add(sky);
+
+      // the arch: corrugated skin, ribs, skylights
+      var skinTex = hgTex(128, 64, function(c, w, h) {
+        for (var x = 0; x < w; x++) { var v = 0.5 + 0.5 * Math.sin(x / w * Math.PI * 2 * 4); var k = 70 + v * 46 | 0; c.fillStyle = 'rgb(' + k + ',' + (k + 4) + ',' + (k + 2) + ')'; c.fillRect(x, 0, 1, h); }
+        for (var i = 0; i < 40; i++) { c.fillStyle = 'rgba(70,50,30,' + Math.random() * 0.12 + ')'; c.fillRect(Math.random() * w, Math.random() * h, 2 + Math.random() * 10, 2 + Math.random() * 30); }
+      });
+      skinTex.wrapS = skinTex.wrapT = THREE.RepeatWrapping; skinTex.repeat.set(64, 8);
+      var arch = new THREE.Mesh(new THREE.CylinderGeometry(R, R, L, 64, 1, true, Math.PI / 2, Math.PI), hgMat(0xffffff, 0.62, 0.45, { map: skinTex, side: THREE.BackSide }));
+      arch.geometry.rotateX(Math.PI / 2); arch.receiveShadow = true; S.add(arch);
+      var ribs = [];
+      for (var z = -27; z <= 27; z += 6) ribs.push({ geo: new THREE.TorusGeometry(R - 0.3, 0.22, 6, 40, Math.PI), pos: [0, 0, z] });
+      for (var zz = -27; zz <= 27; zz += 6) ribs.push({ geo: new THREE.BoxGeometry(0.5, 0.5, 6), pos: [0, R - 0.45, zz + 3] });
+      S.add(new THREE.Mesh(nhMerge(ribs), hgMat(0x3b3f42, 0.55, 0.6)));
+      [-0.3, 0.3].forEach(function(a) {
+        var g = new THREE.PlaneGeometry(1.6, L - 6); g.rotateX(Math.PI / 2); g.rotateZ(-a);
+        var m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xe6eef4, side: THREE.DoubleSide }));
+        m.position.set((R - 0.12) * Math.sin(a), (R - 0.12) * Math.cos(a), 0); S.add(m);
+      });
+
+      // back wall with the stencil, front wall framing the open doors
+      var backTex = hgTex(1024, 1024, function(c, w, h) {
+        c.fillStyle = '#4d544f'; c.fillRect(0, 0, w, h);
+        for (var x = 0; x < w; x += 64) { c.fillStyle = x % 128 ? 'rgba(0,0,0,.06)' : 'rgba(255,255,255,.035)'; c.fillRect(x, 0, 64, h); }
+        c.fillStyle = 'rgba(0,0,0,.25)'; c.fillRect(0, 440, w, 72);
+        c.fillStyle = '#e2b224'; c.fillRect(0, 446, w, 10);
+        c.textAlign = 'center'; c.fillStyle = 'rgba(236,234,226,.86)';
+        c.font = '900 120px Impact, "Arial Black", sans-serif'; c.fillText('HANGAR 3', 512, 352);
+        c.font = '800 34px "Arial Black", sans-serif'; c.fillStyle = 'rgba(236,234,226,.6)'; c.fillText('GLIDEPATH  AIR  WING  ·  MAINTENANCE', 512, 410);
+        c.strokeStyle = 'rgba(236,234,226,.5)'; c.lineWidth = 8; c.beginPath(); c.arc(512, 170, 52, 0, Math.PI * 2); c.stroke();
+        c.beginPath(); c.moveTo(452, 170); c.lineTo(572, 170); c.moveTo(512, 122); c.lineTo(512, 218); c.stroke();
+        for (var i = 0; i < 120; i++) { c.fillStyle = 'rgba(30,24,16,' + Math.random() * 0.12 + ')'; c.fillRect(Math.random() * w, Math.random() * 512, 2 + Math.random() * 6, 6 + Math.random() * 60); }
+      });
+      var back = new THREE.Mesh(new THREE.CircleGeometry(R, 48, 0, Math.PI), hgMat(0xffffff, 0.8, 0.2, { map: backTex }));
+      back.rotation.y = Math.PI; back.position.z = L / 2; back.receiveShadow = true; S.add(back);
+      var sh = new THREE.Shape(), dw = 13, dh = 11.5;
+      sh.moveTo(-R, 0); sh.lineTo(-dw, 0); sh.lineTo(-dw, dh); sh.lineTo(dw, dh); sh.lineTo(dw, 0); sh.lineTo(R, 0);
+      sh.absarc(0, 0, R, 0, Math.PI, false);
+      var front = new THREE.Mesh(new THREE.ShapeGeometry(sh, 24), hgMat(0x50574f, 0.75, 0.3, { side: THREE.DoubleSide }));
+      front.position.z = door; front.castShadow = true; S.add(front);
+      hgMesh(new THREE.BoxGeometry(2 * dw + 2, 0.7, 0.7), hgMat(0x2c3033, 0.5, 0.7), 0, dh + 0.35, door + 0.2);
+      // the door leaves, rolled back to either side
+      var leafTex = skinTex.clone(); leafTex.needsUpdate = true; leafTex.repeat.set(10, 1);
+      [-1, 1].forEach(function(sd) {
+        for (var k = 0; k < 2; k++) hgMesh(new THREE.BoxGeometry(5.6, dh - 0.2, 0.25), hgMat(0x8a948c, 0.6, 0.4, { map: leafTex }), sd * (dw + 1.2 + k * 2.4), (dh - 0.2) / 2, door - 0.4 - k * 0.35);
+      });
+
+      /* ---------- light ---------- */
+      S.add(new THREE.HemisphereLight(0xc4d6e8, 0x4a463f, 0.75));
+      var sunDir = new THREE.Vector3(0.28, -0.42, 1).normalize();
+      var sun = new THREE.DirectionalLight(0xfff0d8, 4.2);
+      sun.target.position.set(0, 0, -12); sun.position.copy(sun.target.position).addScaledVector(sunDir, -70);
+      sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
+      var sc = sun.shadow.camera; sc.left = -34; sc.right = 34; sc.top = 34; sc.bottom = -34; sc.near = 1; sc.far = 160;
+      S.add(sun); S.add(sun.target);
+      var over = new THREE.SpotLight(0xffe6c4, 1100, 0, 0.62, 0.7, 2);
+      over.position.set(0, 15.5, 1); over.target.position.set(0, 0, 0); over.castShadow = true;
+      over.shadow.mapSize.set(1024, 1024); over.shadow.bias = -0.0005; over.shadow.camera.near = 4; over.shadow.camera.far = 30;
+      S.add(over); S.add(over.target);
+      var rim = new THREE.SpotLight(0xbcd6ff, 650, 0, 0.7, 0.8, 2);
+      rim.position.set(-8, 14, 22); rim.target.position.set(0, 1, 0); S.add(rim); S.add(rim.target);
+      // hanging work lamps
+      var shadeMat = hgMat(0x2f4a3a, 0.5, 0.5, { side: THREE.DoubleSide }), bulbMat = new THREE.MeshBasicMaterial({ color: 0xfff1d0 });
+      [[-7, -10], [7, -10], [-7, 10], [7, 10], [0, 20]].forEach(function(p) {
+        var y0 = Math.sqrt(R * R - p[0] * p[0]) - 0.4, y1 = 11.2;
+        hgMesh(new THREE.CylinderGeometry(0.02, 0.02, y0 - y1, 4), hgMat(0x111111, 0.9), p[0], (y0 + y1) / 2, p[1]);
+        hgMesh(new THREE.ConeGeometry(0.75, 0.6, 18, 1, true), shadeMat, p[0], y1 - 0.25, p[1]);
+        var b = hgMesh(new THREE.SphereGeometry(0.2, 10, 8), bulbMat, p[0], y1 - 0.45, p[1]); b.castShadow = false;
+        HG.lamps.push(b);
+      });
+      // a shaft of daylight through the doors, with dust drifting in it
+      var A = new THREE.Vector3(-dw, dh, door), B = new THREE.Vector3(dw, dh, door), C = new THREE.Vector3(-dw, 0, door), D = new THREE.Vector3(dw, 0, door);
+      var tHit = dh / -sunDir.y, A2 = A.clone().addScaledVector(sunDir, tHit), B2 = B.clone().addScaledVector(sunDir, tHit);
+      var bg = new THREE.BufferGeometry();
+      var vtx = [A, B, B2, A, B2, A2, A, C, A2, B, B2, D], uv = [0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0.35, 0, 1, 0, 0, 0, 1, 0, 0.35];
+      bg.setAttribute('position', new THREE.Float32BufferAttribute([].concat.apply([], vtx.map(function(v) { return [v.x, v.y, v.z]; })), 3));
+      bg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      var beamTex = hgTex(4, 128, function(c, w, h) { var g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.15, 'rgba(255,255,255,.8)'); g.addColorStop(1, 'rgba(255,255,255,.12)'); c.fillStyle = g; c.fillRect(0, 0, w, h); });
+      var beam = new THREE.Mesh(bg, new THREE.MeshBasicMaterial({ map: beamTex, color: 0xffe9c2, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      beam.renderOrder = 5; S.add(beam);
+      var N = 260, dp = new Float32Array(N * 3); HG.dustV = [];
+      for (var i = 0; i < N; i++) {
+        var u = Math.random(), s2 = Math.random() * dh;
+        dp[i * 3] = (Math.random() - 0.5) * 2 * dw + sunDir.x * u * tHit; dp[i * 3 + 1] = 0.8 + s2 * (1 - u * 0.85); dp[i * 3 + 2] = door + sunDir.z * u * tHit;
+        HG.dustV.push(Math.random() * Math.PI * 2);
+      }
+      var dg = new THREE.BufferGeometry(); dg.setAttribute('position', new THREE.BufferAttribute(dp, 3));
+      HG.dust = new THREE.Points(dg, new THREE.PointsMaterial({ size: 0.045, map: makeRadialGlowTexture('255,248,230', '255,240,210'), color: 0xfff3dc, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
+      S.add(HG.dust);
+
+      // reflections: a little room of light for the metal to pick up
+      var env = new THREE.Scene(), envBox = new THREE.Mesh(new THREE.BoxGeometry(40, 20, 40), new THREE.MeshBasicMaterial({ color: 0x3a3f44, side: THREE.BackSide }));
+      env.add(envBox);
+      var pane = function(w, h, col, x, y, z, ry, rx) { var m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide })); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, 0); env.add(m); };
+      pane(30, 12, 0xfff1dc, 0, 3, -19.5); pane(4, 30, 0xe8f0f8, -5, 9.8, 0, 0, Math.PI / 2); pane(4, 30, 0xe8f0f8, 5, 9.8, 0, 0, Math.PI / 2);
+      pane(40, 6, 0x6b6a62, 0, -9.8, 0, 0, Math.PI / 2);
+      var pm = new THREE.PMREMGenerator(renderer);
+      S.environment = pm.fromScene(env, 0.04).texture; pm.dispose();
+
+      hgProps();
+    }
+
+    /* ---------- props ---------- */
+    function hgProps() {
+      var S = HG.scene, i;
+      var wood = hgTex(128, 128, function(c, w, h) {
+        c.fillStyle = '#7a6440'; c.fillRect(0, 0, w, h);
+        for (var y = 0; y < h; y += 21) { c.fillStyle = 'rgba(0,0,0,.25)'; c.fillRect(0, y, w, 2); for (var k = 0; k < 30; k++) { c.fillStyle = 'rgba(40,28,12,' + Math.random() * 0.15 + ')'; c.fillRect(Math.random() * w, y + 2 + Math.random() * 18, 10 + Math.random() * 40, 1); } }
+        c.strokeStyle = '#4b3c24'; c.lineWidth = 10; c.strokeRect(0, 0, w, h);
+        c.fillStyle = 'rgba(20,20,20,.7)'; c.font = '900 20px "Arial Black", sans-serif'; c.textAlign = 'center'; c.fillText('AMMO', 64, 60); c.font = '700 11px monospace'; c.fillText('LOT 07-31', 64, 80);
+      });
+      var crateMat = hgMat(0xffffff, 0.85, 0, { map: wood }), oliveMat = hgMat(0x4c5434, 0.75, 0.1);
+      [[-11.5, 0.6, 17, 0.1, 1.2], [-10.2, 0.6, 17.4, -0.05, 1.2], [-11, 1.8, 17.2, 0.3, 1.2], [-12.4, 0.5, 14.6, 0.5, 1.0], [-9.4, 0.45, 20.5, 0, 0.9]].forEach(function(c) {
+        hgMesh(new THREE.BoxGeometry(c[4] * 1.4, c[4], c[4]), crateMat, c[0], c[1], c[2], c[3]);
+      });
+      hgMesh(new THREE.BoxGeometry(2.4, 0.7, 0.8), oliveMat, -12.2, 0.35, 21.5, 0.2);
+      hgMesh(new THREE.BoxGeometry(2.4, 0.7, 0.8), oliveMat, -12.0, 1.05, 21.4, 0.15);
+      // oil drums
+      var drumR = hgMat(0x9b2a22, 0.55, 0.5), drumB = hgMat(0x2a4d78, 0.55, 0.5);
+      [[11.4, 19.2], [12.3, 18.4], [12.1, 20.3], [10.7, 20.6], [13, 19.5]].forEach(function(p, k) { hgMesh(new THREE.CylinderGeometry(0.42, 0.42, 1.25, 16), k % 2 ? drumB : drumR, p[0], 0.63, p[1]); });
+      var tipped = hgMesh(new THREE.CylinderGeometry(0.42, 0.42, 1.25, 16), drumR, 9.6, 0.42, 18.4); tipped.rotation.z = Math.PI / 2; tipped.rotation.y = 0.6;
+      // workbench + pegboard along the right wall
+      var bench = new THREE.Group(); bench.position.set(13.2, 0, 4); bench.rotation.y = -Math.PI / 2; S.add(bench);
+      hgMesh(new THREE.BoxGeometry(6, 0.1, 1.1), hgMat(0x6d5a3c, 0.8), 0, 0.95, 0, 0, bench);
+      [-2.8, 2.8].forEach(function(x) { [-0.45, 0.45].forEach(function(zz) { hgMesh(new THREE.BoxGeometry(0.08, 0.95, 0.08), hgMat(0x2e3236, 0.5, 0.6), x, 0.47, zz, 0, bench); }); });
+      hgMesh(new THREE.BoxGeometry(6, 0.06, 1), hgMat(0x2e3236, 0.5, 0.6), 0, 0.25, 0, 0, bench);
+      var peg = hgTex(256, 128, function(c, w, h) {
+        c.fillStyle = '#8c7d5c'; c.fillRect(0, 0, w, h); c.fillStyle = 'rgba(0,0,0,.35)';
+        for (var y = 6; y < h; y += 10) for (var x = 6; x < w; x += 10) c.fillRect(x, y, 2, 2);
+        c.strokeStyle = '#2b2b2b'; c.lineWidth = 5; c.lineCap = 'round';
+        [[30, 20, 30, 90], [60, 20, 70, 80], [100, 30, 140, 30], [170, 20, 170, 100], [200, 30, 230, 70]].forEach(function(t) { c.beginPath(); c.moveTo(t[0], t[1]); c.lineTo(t[2], t[3]); c.stroke(); });
+        c.fillStyle = '#b8322a'; c.fillRect(95, 50, 50, 14); c.beginPath(); c.arc(120, 100, 16, 0, Math.PI * 2); c.strokeStyle = '#555'; c.lineWidth = 4; c.stroke();
+      });
+      hgMesh(new THREE.PlaneGeometry(6, 2.2), hgMat(0xffffff, 0.85, 0, { map: peg }), 0, 2.4, -0.62, 0, bench);
+      hgMesh(new THREE.BoxGeometry(0.5, 0.35, 0.4), hgMat(0x2f5a8a, 0.4, 0.6), -1.8, 1.17, 0.1, 0.3, bench);
+      // rolling tool chest
+      var chest = new THREE.Group(); chest.position.set(11.6, 0, 13.5); chest.rotation.y = -0.7; S.add(chest);
+      var chestTex = hgTex(64, 128, function(c, w, h) { c.fillStyle = '#b3241c'; c.fillRect(0, 0, w, h); for (var y = 10; y < h; y += 22) { c.fillStyle = 'rgba(0,0,0,.4)'; c.fillRect(0, y, w, 2); c.fillStyle = '#c9c9c4'; c.fillRect(18, y + 8, 28, 3); } });
+      hgMesh(new THREE.BoxGeometry(1.2, 1.1, 0.6), hgMat(0xffffff, 0.45, 0.4, { map: chestTex }), 0, 0.7, 0, 0, chest);
+      [[-0.5, -0.22], [0.5, -0.22], [-0.5, 0.22], [0.5, 0.22]].forEach(function(p) { var w = hgMesh(new THREE.CylinderGeometry(0.07, 0.07, 0.05, 10), hgMat(0x111111, 0.8), p[0], 0.08, p[1], 0, chest); w.rotation.x = Math.PI / 2; });
+      // step ladder by the cockpit
+      var lad = new THREE.Group(); lad.position.set(-HG_R + 4.2, 0, 11); lad.rotation.y = 0.9; S.add(lad);
+      var ladMat = hgMat(0xd8b42a, 0.5, 0.4);
+      [-0.4, 0.4].forEach(function(x) { var r = hgMesh(new THREE.BoxGeometry(0.07, 2.4, 0.07), ladMat, x, 1.15, 0.25, 0, lad); r.rotation.x = 0.2; var r2 = hgMesh(new THREE.BoxGeometry(0.07, 2.4, 0.07), ladMat, x, 1.15, -0.25, 0, lad); r2.rotation.x = -0.2; });
+      for (i = 0; i < 4; i++) hgMesh(new THREE.BoxGeometry(0.8, 0.05, 0.2), ladMat, 0, 0.4 + i * 0.5, 0.33 - i * 0.09, 0, lad);
+      // fire extinguisher and a sign on the back wall
+      hgMesh(new THREE.CylinderGeometry(0.16, 0.16, 0.7, 12), hgMat(0xc0241c, 0.4, 0.3), 6.5, 0.36, 28.8);
+      var sign = hgTex(256, 128, function(c, w, h) { c.fillStyle = '#f2f0e8'; c.fillRect(0, 0, w, h); c.fillStyle = '#c0241c'; c.fillRect(0, 0, w, 36); c.fillStyle = '#fff'; c.font = '900 24px "Arial Black", sans-serif'; c.textAlign = 'center'; c.fillText('DANGER', 128, 27); c.fillStyle = '#1a1a1a'; c.font = '800 19px Arial, sans-serif'; c.fillText('LIVE ORDNANCE', 128, 70); c.fillText('NO NAKED FLAMES', 128, 100); });
+      hgMesh(new THREE.PlaneGeometry(1.6, 0.8), hgMat(0xffffff, 0.7, 0, { map: sign }), 6.5, 2.2, 29.9, Math.PI);
+      // wheel chocks + a fuel bowser hose reel by the door
+      hgMesh(new THREE.TorusGeometry(0.45, 0.12, 8, 18), hgMat(0x1a1a1a, 0.7), -13.4, 1.3, -24, Math.PI / 2);
+      hgMesh(new THREE.BoxGeometry(0.4, 1.6, 0.5), hgMat(0xd8b42a, 0.5, 0.3), -13.6, 0.8, -24.6);
+    }
+
+    // munitions trolley: one round of each weapon in the current loadout
+    function hgNukeModel() {
+      var g = new THREE.Group();
+      g.add(arsLathe([[0, -1.6], [0.12, -1.5], [0.2, -1.3], [0.22, -0.9], [0.22, 0.9], [0.17, 1.25], [0.08, 1.5], [0, 1.52]], ARS_M.grey));
+      var b = new THREE.Mesh(new THREE.CylinderGeometry(0.223, 0.223, 0.06, 16, 1, true), ARS_M.band); b.rotation.x = Math.PI / 2; b.position.z = -0.6; g.add(b);
+      arsFins(g, 4, 0.12, 0.45, 0.28, 1.3, ARS_M.dark);
+      g.traverse(function(o) { if (o.isMesh) o.castShadow = true; });
+      return g;
+    }
+    function hgTrolley() {
+      if (HG.trolley) HG.scene.remove(HG.trolley);
+      var types = ARS.weapons.slice(0, 3), T = new THREE.Group();
+      HG.trolley = T;
+      if (!types.length) return;
+      // parked beyond the right wing, where the opening camera sees it past the aircraft
+      var a = 0.35, r = Math.min((HG.fitR || 6) + 3.2, 12.5);
+      T.position.set(Math.sin(a) * r, 0, Math.cos(a) * r); T.rotation.y = a + 0.5; HG.scene.add(T);
+      var frame = hgMat(0x56602f, 0.6, 0.3), w = 0.6 + types.length * 0.55;
+      hgMesh(new THREE.BoxGeometry(w, 0.08, 2.8), frame, 0, 0.55, 0, 0, T);
+      [-1, 1].forEach(function(s) { hgMesh(new THREE.BoxGeometry(0.06, 0.18, 2.8), frame, s * w / 2, 0.66, 0, 0, T); });
+      hgMesh(new THREE.BoxGeometry(0.06, 0.06, 1.2), frame, 0, 0.62, -1.9, 0, T).rotation.x = -0.35;
+      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function(p) { var wh = hgMesh(new THREE.CylinderGeometry(0.2, 0.2, 0.12, 14), hgMat(0x161616, 0.8), p[0] * (w / 2 - 0.05), 0.2, p[1] * 1.05, 0, T); wh.rotation.z = Math.PI / 2; });
+      types.forEach(function(type, i) {
+        var m = type === 'nuke' ? hgNukeModel() : arsBuildStore(type).group;
+        var sc = type === 'hellfire' ? 1.25 : type === 'nuke' ? 0.8 : 1.15;
+        m.scale.setScalar(sc);
+        m.position.set((i - (types.length - 1) / 2) * 0.55, 0.62 + (type === 'cluster' ? 0.2 : type === 'lgb' ? 0.17 : type === 'nuke' ? 0.18 : 0.13) * sc, 0);
+        T.add(m);
+      });
+    }
+
+    /* ---------- placing the aircraft ---------- */
+    function hgShowBay(on) {
+      ARS.stores.forEach(function(s) { if (s.internal && s.mesh && !s.spent) s.mesh.visible = on; });
+      if (on) nh.bayT = 99; else { nh.bayT = 0; nh.bay = 0; }
+    }
+    function hgPlace() {
+      HG.scene.add(plane);
+      plane.visible = true; plane.scale.setScalar(1); plane.rotation.set(0, 0, 0);
+      plane.position.set(0, PLANE_GROUND_OFFSET, 0);
+      if (isStealthMode) { nhReset(true); hgShowBay(true); for (var i = 0; i < 40; i++) nhAnimate(1 / 30); }
+      plane.updateMatrixWorld(true);
+      var box = new THREE.Box3();
+      plane.traverseVisible(function(o) { if (o.isMesh) box.expandByObject(o); });
+      if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(0, 1.5, 0), new THREE.Vector3(10, 3, 10));
+      var size = box.getSize(new THREE.Vector3());
+      HG.fitR = Math.max(size.x, size.z) * 0.5;
+      HG.target.set(0, Math.max(1, box.getCenter(new THREE.Vector3()).y), 0);
+      HG.distT = THREE.MathUtils.clamp(HG.fitR * 2.2 + 3, 9, 26);
+    }
+
+    /* ---------- panels ---------- */
+    var HG_ORDER = ['interceptor', 'voyager', 'rocket', 'drone', 'stealth', 'seaplane', 'helicopter', 'car'];
+    function hgCount(preset) {
+      var n = {};
+      (preset.bay || preset.st || []).forEach(function(t) { n[t] = (n[t] || 0) + (t === 'hellfire' && !preset.bay ? 4 : 1); });
+      return n;
+    }
+    function hgChips(preset) {
+      var n = hgCount(preset);
+      return Object.keys(n).map(function(t) { return '<i class="hg-chip w-' + t + '">' + n[t] + '× ' + ARS_W[t].short + '</i>'; }).join('');
+    }
+    function hgStatRow(label, val, frac) {
+      frac = THREE.MathUtils.clamp(frac, 0.03, 1);
+      return '<div class="hg-stat"><span>' + label + '</span><b>' + val + '</b><div class="hg-bar"><i style="width:' + Math.round(frac * 100) + '%"></i></div></div>';
+    }
+    function hgUi() {
+      var type = selectedPlaneType, P = PLANE_TYPES[type], h = P.handling || {};
+      document.getElementById('hgList').innerHTML = HG_ORDER.filter(function(t) { return PLANE_TYPES[t]; }).map(function(t) {
+        var p = PLANE_TYPES[t], fr = arsFrameFor(t), pre = fr && ARS_PRESETS[fr];
+        return '<button type="button" class="hg-card' + (t === type ? ' on' : '') + '" data-plane="' + t + '"><i>' + HG_CLASS[t] + '</i><b>' + p.name + '</b><span>' + p.maxSpeedKmh + ' km/h · ' + (pre ? pre.length + ' loadouts' : 'unarmed') + '</span></button>';
+      }).join('');
+      document.getElementById('hgClass').textContent = HG_CLASS[type] || '';
+      document.getElementById('hgName').textContent = P.name;
+      document.getElementById('hgTag').textContent = P.tagline || '';
+      var lowTo = P.takeoffSpeedKmh > 0;
+      document.getElementById('hgStats').innerHTML =
+        hgStatRow('Top speed', P.maxSpeedKmh + ' km/h', Math.sqrt(P.maxSpeedKmh / 1900)) +
+        hgStatRow('Acceleration', Math.round(P.engineAccel + P.boostAccel * 0.5) + '', Math.sqrt((P.engineAccel + P.boostAccel * 0.5) / 160)) +
+        hgStatRow('Agility', h.turnRate ? h.turnRate.toFixed(2) : '—', (h.turnRate || 0) / 2.1) +
+        hgStatRow('Take-off', P.isCar ? '—' : lowTo ? P.takeoffSpeedKmh + ' km/h' : 'vertical', P.isCar ? 0 : lowTo ? 1 - P.takeoffSpeedKmh / 300 : 1) +
+        hgStatRow('G limit', h.gTolerance && h.gTolerance < 50 ? h.gTolerance + ' G' : '—', h.gTolerance && h.gTolerance < 50 ? h.gTolerance / 9 : 0.05);
+      var fr = arsFrameFor(type), list = fr && ARS_PRESETS[fr], cur = arsPresetFor(type);
+      document.getElementById('hgPresets').innerHTML = list ? list.map(function(p) {
+        return '<button type="button" class="hg-pre' + (cur && p.id === cur.id ? ' on' : '') + '" data-id="' + p.id + '"><b>' + p.name + '</b><span>' + p.desc + '</span><em>' + hgChips(p) + '</em></button>';
+      }).join('') : '<div class="hg-none">No hardpoints. It\'s a car.</div>';
+      var n = cur ? hgCount(cur) : {};
+      document.getElementById('hgWeapons').innerHTML = Object.keys(n).map(function(t) {
+        var w = ARS_W[t];
+        var facts = [HG_GUIDE[t]];
+        if (w.range) facts.push((w.range / 1000).toFixed(1) + ' km');
+        if (w.dmg) facts.push((w.bomblets ? w.bomblets + '×' : '') + w.dmg + ' dmg');
+        return '<div class="hg-w w-' + t + '"><b>' + w.name + '</b><span>×' + n[t] + '</span><small>' + facts.join(' · ') + '</small></div>';
+      }).join('');
+      document.getElementById('hgCoins').textContent = '◆ ' + Math.round(coins).toLocaleString();
+      document.getElementById('hgGo').textContent = HG.from === 'flight' ? 'Take off ▸' : 'Take off ▸';
+      document.getElementById('hgBack').lastChild.textContent = HG.from === 'flight' ? ' Back to the airfield' : ' Back';
+    }
+
+    /* ---------- open / close ---------- */
+    function hgOpen(from) {
+      if (HG.open) return;
+      hgBuild();
+      HG.open = true; HG.from = from;
+      if (from === 'title') {
+        planePreview.hide();
+        document.getElementById('startScreen').classList.add('hidden');
+      } else {
+        Object.keys(keys).forEach(function(k) { keys[k] = false; });
+        touchEnd(); flarePress(false); pvpGun(false);
+        if (audioCtx && audioCtx.state === 'running') audioCtx.suspend();
+        if (typeof wreckClearDamage === 'function' && !crashing) wreckClearDamage();
+      }
+      document.body.classList.add('hg-open');
+      hgEl.classList.remove('hidden');
+      arsApplyLoadout(true); arsRearm(true);
+      hgPlace(); hgUi(); hgTrolley();
+      HG.yaw = Math.PI + 0.75; HG.pitch = 0.2; HG.dist = HG.distT + 7; HG.idle = 2;
+    }
+    function hgClose(go, carrier) {
+      if (!HG.open) return;
+      HG.open = false;
+      hgEl.classList.add('hidden');
+      document.body.classList.remove('hg-open');
+      if (isStealthMode) hgShowBay(false);
+      scene.add(plane);
+      if (HG.from === 'title') {
+        if (go) { window.__startOnCarrier = !!carrier; document.getElementById('startBtn').click(); }
+        else { document.getElementById('startScreen').classList.remove('hidden'); planePreview.show(); }
+      } else {
+        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+        applySelectedPlaneType();
+        // the hangar is back at base: whatever you were doing, you start again from the airfield
+        if (typeof csar !== 'undefined' && csar.active) csarAbort();
+        if (crashing) resetAfterCrash();
+        wreckClearDamage(); wreckClearDebris();
+        if (carrier) carrierSpawn(); else spawnAt(RUNWAY_CENTER_X, RUNWAY_CENTER_Z + RUNWAY_HALF_LENGTH - 15);
+        samOnPlayerReset();
+        clock.getDelta();
+      }
+    }
+
+    /* ---------- per frame ---------- */
+    var _hgV = new THREE.Vector3();
+    function hgFrame(dt) {
+      HG.t += dt;
+      HG.idle += dt;
+      if (HG.idle > 3) HG.yaw += dt * 0.09 * Math.min(1, HG.idle - 3);
+      HG.dist += (HG.distT - HG.dist) * Math.min(1, dt * 4);
+      var cp = Math.cos(HG.pitch);
+      _hgV.set(Math.sin(HG.yaw) * cp, Math.sin(HG.pitch), Math.cos(HG.yaw) * cp).multiplyScalar(HG.dist).add(HG.target);
+      _hgV.x = THREE.MathUtils.clamp(_hgV.x, -HG_R + 2.5, HG_R - 2.5);
+      _hgV.y = THREE.MathUtils.clamp(_hgV.y, 0.5, Math.sqrt(Math.max(1, (HG_R - 1.5) * (HG_R - 1.5) - _hgV.x * _hgV.x)));
+      _hgV.z = THREE.MathUtils.clamp(_hgV.z, -HG_L / 2 - 14, HG_L / 2 - 1.5);
+      HG.cam.position.copy(_hgV);
+      HG.cam.lookAt(HG.target);
+      // a wider lens on a tall phone screen so the whole aircraft still fits, and the picture
+      // shifted so the aircraft sits in the middle of the space the panels leave free
+      var W = window.innerWidth, H = window.innerHeight, asp = W / H;
+      HG.cam.aspect = asp; HG.cam.fov = asp < 1 ? 58 : 38;
+      var lr = hgLeftEl.getBoundingClientRect(), rr = hgRightEl.getBoundingClientRect(), cx = W / 2, cy = H / 2;
+      if (asp < 1) cy = (lr.bottom + rr.top) / 2;
+      else cx = (lr.right + rr.left) / 2;
+      HG.cam.setViewOffset(W, H, W / 2 - cx, H / 2 - cy, W, H);
+      // dust drifting in the light
+      var pos = HG.dust.geometry.attributes.position, arr = pos.array;
+      for (var i = 0; i < HG.dustV.length; i++) {
+        var ph = HG.dustV[i] += dt * 0.3;
+        arr[i * 3] += Math.sin(ph) * dt * 0.08; arr[i * 3 + 1] += (Math.cos(ph * 0.7) * 0.05 - 0.012) * dt; arr[i * 3 + 2] += Math.cos(ph * 1.3) * dt * 0.06;
+        if (arr[i * 3 + 1] < 0.6) arr[i * 3 + 1] = 6 + Math.random() * 4;
+      }
+      pos.needsUpdate = true;
+      // the heli's rotor idles, the bay doors hold open
+      if (isStealthMode) nhAnimate(dt);
+      // the hangar is metered for its own light, not the outdoor exposure
+      var ex = renderer.toneMappingExposure;
+      renderer.toneMappingExposure = 0.78;
+      renderer.setRenderTarget(null);
+      renderer.render(HG.scene, HG.cam);
+      renderer.toneMappingExposure = ex;
+    }
+
+    /* ---------- input ---------- */
+    (function() {
+      var drag = document.getElementById('hgDrag');
+      function pinchDist() { var p = Object.keys(HG.ptrs).map(function(k) { return HG.ptrs[k]; }); return p.length < 2 ? 0 : Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); }
+      drag.addEventListener('pointerdown', function(e) { HG.ptrs[e.pointerId] = { x: e.clientX, y: e.clientY }; HG.pinch = pinchDist(); HG.idle = 0; try { drag.setPointerCapture(e.pointerId); } catch (x) {} });
+      drag.addEventListener('pointermove', function(e) {
+        var p = HG.ptrs[e.pointerId]; if (!p) return;
+        var n = Object.keys(HG.ptrs).length;
+        if (n === 1) {
+          HG.yaw -= (e.clientX - p.x) * 0.006;
+          HG.pitch = THREE.MathUtils.clamp(HG.pitch + (e.clientY - p.y) * 0.004, 0.02, 0.9);
+        }
+        p.x = e.clientX; p.y = e.clientY;
+        if (n === 2) { var d = pinchDist(); if (HG.pinch > 0 && d > 0) HG.distT = THREE.MathUtils.clamp(HG.distT * HG.pinch / d, 7, 30); HG.pinch = d; }
+        HG.idle = 0;
+      });
+      function up(e) { delete HG.ptrs[e.pointerId]; HG.pinch = pinchDist(); }
+      drag.addEventListener('pointerup', up); drag.addEventListener('pointercancel', up);
+      drag.addEventListener('wheel', function(e) { e.preventDefault(); HG.distT = THREE.MathUtils.clamp(HG.distT * (1 + e.deltaY * 0.001), 7, 30); HG.idle = 0; }, { passive: false });
+      document.getElementById('hgList').addEventListener('click', function(e) {
+        var b = e.target.closest('[data-plane]'); if (!b || b.dataset.plane === selectedPlaneType) return;
+        if (isStealthMode) hgShowBay(false);
+        selectPlaneType(b.dataset.plane);
+        hgPlace(); hgUi(); hgTrolley(); HG.idle = 0;
+      });
+      document.getElementById('hgPresets').addEventListener('click', function(e) {
+        var b = e.target.closest('[data-id]'); if (!b) return;
+        arsSetPreset(selectedPlaneType, b.dataset.id);
+        arsApplyLoadout(true);
+        if (isStealthMode) hgShowBay(true);
+        hgUi(); hgTrolley();
+      });
+      document.getElementById('hgBack').addEventListener('click', function() { hgClose(false); });
+      document.getElementById('hgGo').addEventListener('click', function() { hgClose(true); });
+      document.getElementById('hgCarrier').addEventListener('click', function() { hgClose(true, true); });
+      document.getElementById('hangarBtn').addEventListener('click', function() { hgOpen('title'); });
+    })();
+
     document.getElementById('startBtn').addEventListener('click', function() {
       if (gpIsPhone() && gpFsSupported() && !gpIsFs()) gpEnterFs();
       if (gpFsSupported()) fsToggleEl.classList.remove('hidden');
@@ -22732,6 +24172,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       initAudio();
       clock.getDelta();
       started = true;
+      arsRefreshPanel();
       setTimeout(function() {
         document.getElementById('controlHint').classList.add('faded');
       }, 5000);
