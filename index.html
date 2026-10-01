@@ -10094,7 +10094,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           m.active = false; m.group.visible = false;
           triggerMissileBlast(m.pos.clone());
           if (m.pos.distanceTo(position) < 1500 && typeof playMissileImpactSound === 'function') playMissileImpactSound();
-          if (!m.hostile) { if (m.tObj && m.tObj.isBandit) raHit(m.tObj, 220, 'aw'); else samOnGroundBlast(m.pos.clone(), 14); }
+          if (!m.hostile) { if (m.tObj && m.tObj.isBandit) raHit(m.tObj, 220, 'aw', m.owner); else samOnGroundBlast(m.pos.clone(), 14); }
           else if (!m.decoy && m.tObj && m.tObj.alive && m.life <= 18) awShotDown(m.tObj);
         }
       });
@@ -10124,6 +10124,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     function awShotDown(a) {
       if (!a.alive || a.state === 'down') return;
+      if (WAR.on) crRoster(a.name, 'lost');
       a.state = 'down'; a.fallV = 0;
       triggerMissileBlast(a.pos.clone());
       awRadio(a.name + ' is hit! ' + (a.kind === 'drone' ? 'Lost the drone.' : 'Pilot ejecting.'), '#ff7a5a');
@@ -13712,6 +13713,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function triggerCrash(intoWater, viaEject) {
       if (crashing) return;
       crashing = true;
+      if (WAR.on) crOnLoss(viaEject ? 'eject' : 'crash');
       kjOnCrash(intoWater, viaEject);
       csarOnCrash();
       pvpOnCrash();
@@ -14262,6 +14264,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function triggerEject() {
       kjOnEject();
       if (ejecting || crashing) return;
+      if (WAR.on) crOnLoss('eject');
       csarOnEject();
       ejecting = true;
       ejectTimer = 0;
@@ -15592,6 +15595,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
              isOverCarrierDeck(position.x, position.z) || warRearmAt(position.x, position.z))) {
           isRefueling = fuel < FUEL_MAX;
           if (!nearGasStation) samRearmAtBase();
+          if (WAR.on && !nearGasStation) crOnLanded();
           if (isRefueling) {
             fuel = Math.min(FUEL_MAX, fuel + FUEL_REFILL_RATE * dt);
             if (fuel >= FUEL_MAX) outOfFuel = false;
@@ -18314,7 +18318,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     /* ---------- reset hooks ---------- */
     function samOnPlayerReset() {
       samEngineKilled = false; samLock = 0; samLaunchWarn = 0; samGrace = 8;
-      flareCount = FLARE_MAX;
+      flareCount = FLARE_MAX + crFlareBonus();
       samMissiles.forEach(function(m) { m.active = false; m.group.visible = false; });
       flareHideAll();
       samHavePrev = false;
@@ -18323,7 +18327,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function samRearmAtBase() {
       pvpRearm();
       arsRearm();
-      if (flareCount < FLARE_MAX) { flareCount = FLARE_MAX; samToast('FLARES REARMED', '#7dff8a', 1.6); }
+      if (flareCount < FLARE_MAX + crFlareBonus()) { flareCount = FLARE_MAX + crFlareBonus(); samToast('FLARES REARMED', '#7dff8a', 1.6); }
       if (samEngineKilled) { samEngineKilled = false; samToast('ENGINE REPAIRED', '#7dff8a', 2); }
     }
 
@@ -19192,7 +19196,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var max = t.maxHp || 100;
       if (t.hp <= 0) {
         t.hp = 0; t.dmgState = 0;
-        var bounty = pay ? arsBounty(t) : 0;
+        var bounty = pay ? Math.round(arsBounty(t) * crBountyMul()) : 0;
+        if (pay && WAR.on) crGroundKill(t);
         arsMarker(t, bounty ? 'DESTROYED  +◆' + bounty : 'DESTROYED', '#ff5a3c');
         if (bounty) { coins += bounty; lastCoinSaveAt = -999; maybeSaveCoins(elapsedSeconds); }
         if (t.kind && strikeTargets.indexOf(t) >= 0) stKill(t);
@@ -20291,6 +20296,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       warSetFlag(s);
       WAR.terrDirty = true; WAR.dirty = true;
       if (!quiet) {
+        crStat('sectors'); if (s === WAR.iron) crStat('ironhold');
         var big = s.type === 'capital', pay = big ? 2500 : s.type === 'fortress' || s.type === 'airbase' ? 700 : s.type === 'outpost' ? 150 : 350;
         WAR.score += big ? 5000 : s.type === 'outpost' ? 200 : 600;
         coins += pay; lastCoinSaveAt = -999; maybeSaveCoins(elapsedSeconds);
@@ -20306,6 +20312,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (WAR.won) return;
       WAR.won = true;
       if (quiet) return;
+      crVictory();
       setTimeout(function() {
         warBanner('VICTORY', 'KASTOR HAS FALLEN — THE ISLAND IS OURS', '#f3c454', 7);
         awRadio('OVERLORD: All units, Kastor has fallen. Outstanding work, ' + kjCallsign() + '.', '#f3c454');
@@ -20592,6 +20599,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var mo = WAR.objective;
         html += '<span class="wo" style="color:#ffd25a">' + mt + (mo ? ' <i>' + mapFmtDist(Math.hypot(mo.x - position.x, mo.z - position.z)) + '</i>' : '') + '</span>';
       } else if (WAR.won) html += '<span class="wo" style="color:#f3c454">ISLAND LIBERATED</span>';
+      else if (WAR.lost) html += '<span class="wo" style="color:#ff4a3a">THE ISLAND HAS FALLEN</span>';
       else if (RA.raid && RA.raid.target) html += '<span class="wo" style="color:#ff7a5a">⚠ RAID → ' + RA.raid.target.name + '</span>';
       else if (o) {
         var dx = o.x - position.x, dz = o.z - position.z;
@@ -20652,6 +20660,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       WAR.counterT = 480; MS.refreshT = 25;
       warSpawn();
       warApplySave(save);
+      _crLastScore = WAR.score;
       warPickObjective();
       warSave();
       var h = warHeld();
@@ -20688,6 +20697,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var step = _warSlowT; _warSlowT = 0;
         warSpot(step);
         warCounterUpdate(step);
+        crTick();
         WAR.sectors.forEach(function(s) { if (s.dmg > 0) s.dmg = Math.max(0, s.dmg - step / 15); });
         warPickObjective();
         warHud();
@@ -20751,7 +20761,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       ov.innerHTML = '<div class="ss-warCard"><div class="ss-setupHead"><h3>Campaign · Operation Glidepath</h3><button type="button" id="ssWarClose" aria-label="Close">✕</button></div>' +
         '<div class="ss-warGrid"><canvas id="ssWarMap" width="440" height="330"></canvas><div>' +
         '<p class="ss-warLead">The enemy holds the hills, a SAM fortress and its capital, <b>Kastor Airbase</b>. Knock out a sector\'s defences to capture it and push the front line out. Take Kastor to win.</p>' +
-        '<div id="ssWarStats"></div><div class="ss-warBtns"><button type="button" id="ssWarGo" class="go">Continue</button><button type="button" id="ssWarNew">New campaign</button></div></div></div></div>';
+        '<div id="ssWarRank"></div><div id="ssWarStats"></div><div class="ss-warBtns"><button type="button" id="ssWarGo" class="go">Continue</button><button type="button" id="ssWarNew">New campaign</button><button type="button" id="ssWarRec">Service record</button></div></div></div></div>';
       var ss = document.getElementById('startScreen'); if (ss) ss.appendChild(ov);
       function stats() {
         var o = warReadSave(), OWN = { b: 'blue', r: 'red', n: 'neutral' }, held = 0, total = 0;
@@ -20813,6 +20823,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         document.getElementById('ssWarStats').innerHTML =
           '<div>SECTORS<b>' + st.held + ' / ' + st.total + '</b></div><div>SCORE<b>' + (o ? o.score : 0).toLocaleString() + '</b></div>' +
           '<div>KILLS<b>' + (o ? o.kills : 0) + '</b></div><div>FLIGHT TIME<b>' + (o ? Math.floor(o.t / 60) + ' min' : '—') + '</b></div>';
+        document.getElementById('ssWarRank').innerHTML = crRankBar();
         var go = document.getElementById('ssWarGo'), nw = document.getElementById('ssWarNew');
         go.textContent = o ? (o.won ? 'Fly the liberated island' : 'Continue campaign') : 'Begin campaign';
         nw.style.display = o ? '' : 'none'; nw.textContent = 'New campaign'; nw.classList.remove('warn'); nw._arm = false;
@@ -20833,8 +20844,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (!this._arm) { this._arm = true; this.textContent = 'Tap again to wipe progress'; this.classList.add('warn'); return; }
         launch(true);
       });
+      document.getElementById('ssWarRec').addEventListener('click', function() { crRecordOpen(); });
       window.__warOpen = open;
       refresh();
+      // "New campaign" from the defeat screen comes back here
+      try { if (sessionStorage.getItem('gp-war-autostart')) { sessionStorage.removeItem('gp-war-autostart'); setTimeout(open, 900); } } catch (e) {}
     })();
 
 
@@ -20850,7 +20864,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
        work on all of them, and your own air wing joins in when bandits come near.
        Kills pay out; parked fighters you destroy on the ground are fighters that never launch.
        ============================================================ */
-    var RA = { list: [], seq: 1, t: 0, capT: 25, raidT: 210, awacsT: 60, tankerT: 120, scramble: {}, lock: 0, search: false,
+    var RA = { list: [], seq: 1, t: 0, capT: 25, raidT: 300, awacsT: 60, tankerT: 120, scramble: {}, lock: 0, search: false,
                emitters: [], bombs: [], raid: null };
     var RA_KIND = {
       fighter: { label: 'FIGHTER', cruise: 150, turn: 0.52, bank: 1.15, hp: 100, bounty: 250, score: 300 },
@@ -21291,7 +21305,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     /* ---------- taking hits ---------- */
-    function raHit(b, dmg, by) {
+    function raHit(b, dmg, by, shooter) {
       if (!b.alive || b.state === 'down') return;
       b.hp -= dmg;
       if (by === 'gun' || by === 'aam') { b.target = b.target || 'player'; b.hitBy = by; }
@@ -21305,14 +21319,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (b.pos.distanceTo(position) < 2500) playMissileImpactSound();
       var K = RA_KIND[b.kind];
       if (by === 'gun' || by === 'aam') {
-        coins += K.bounty; lastCoinSaveAt = -999; maybeSaveCoins(elapsedSeconds);
+        coins += Math.round(K.bounty * crBountyMul()); lastCoinSaveAt = -999; maybeSaveCoins(elapsedSeconds);
+        crAirKill(b);
         WAR.kills++; WAR.airKills = (WAR.airKills || 0) + 1; WAR.score += K.score; WAR.dirty = true;
         samToast((b.kind === 'fighter' ? 'SPLASH ONE — ' : '') + K.label + ' DOWN  +◆' + K.bounty, '#7dff8a', 2.6);
         if (typeof pvpFeed === 'function') pvpFeed('<b style="color:#7dff8a">' + pvpEsc(net.name || 'YOU') + '</b> splashed <b style="color:#ff6a4a">' + K.label + '</b>');
         if (b.kind === 'awacs' || b.kind === 'tanker') warBanner(K.label + ' DOWN', 'High-value target destroyed  ·  +◆' + K.bounty, '#7dff8a', 4);
       } else {
         WAR.score += Math.round(K.score / 3); WAR.dirty = true;
-        awRadio('Splash one ' + K.label.toLowerCase() + '! Good kill.', '#9fd0ff');
+        if (shooter) crRoster(shooter.name, 'kills');
+        awRadio((shooter ? shooter.name + ': s' : 'S') + 'plash one ' + K.label.toLowerCase() + '! Good kill.', '#9fd0ff');
       }
       if (RA.raid && RA.raid.bombers.indexOf(b) >= 0 && !RA.raid.bombers.some(function(x) { return x.alive && x.state !== 'down'; })) {
         awRadio('OVERLORD: Raid broken up — ' + RA.raid.target.name + ' is safe. Nice work.', '#9fd0ff');
@@ -21465,6 +21481,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function warConvoyDestroyed(conv) {
       if (WAR.convoy === conv) WAR.convoy = null;
       WAR.score += 400; WAR.dirty = true;
+      crStat('convoys');
       warBanner('CONVOY DESTROYED', conv.to.name + ' is safe', '#7dff8a', 3.5);
       awRadio('OVERLORD: Convoy destroyed. Good hunting.', '#9fd0ff');
       msCheck(true);
@@ -21642,12 +21659,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (MS.active !== m) return;
       MS.active = null; m.state = ok ? 'done' : 'failed';
       if (ok) {
+        crStat('missions'); if (m.type === 'csar') crStat('rescues'); if (m.type === 'carrier') crStat('carrier');
         MS.done++; coins += m.reward; lastCoinSaveAt = -999; maybeSaveCoins(elapsedSeconds);
         WAR.score += m.score;
         if (typeof playCoinChime === 'function') playCoinChime(3);
         warBanner('MISSION COMPLETE', m.title + '  ·  +◆' + m.reward, '#7dff8a', 4.5);
         awRadio('HART: ' + (why || 'Good work, ' + kjCallsign() + '.'), '#9dffb8');
       } else {
+        crStat('missionsFailed');
         MS.failed++;
         warBanner('MISSION FAILED', why || m.title, '#ff6a4a', 4);
         awRadio('HART: ' + (why || 'That one got away from us.') + ' Regroup.', '#9dffb8');
@@ -21821,12 +21840,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
       if (!cards.length) cards.push('<div class="wc"><b>No tasking right now</b><p>Check back in a few minutes.</p></div>');
       var h = warHeld();
-      msBoardEl.innerHTML = '<div class="wb"><div class="wbh"><h3>Col. Hart · Tasking</h3><span>' + h.held + '/' + h.total + ' SECTORS · ' + MS.done + ' DONE · ' + MS.failed + ' FAILED</span><button class="wbx" aria-label="Close">✕</button></div>' +
+      var rk = crRank();
+      msBoardEl.innerHTML = '<div class="wb"><div class="wbh"><h3>Col. Hart · Tasking</h3><span><b style="color:' + rk.col + '">' + rk.pip + ' ' + rk.abbr + '</b> · ' + h.held + '/' + h.total + ' SECTORS · ' + MS.done + ' DONE · ' + MS.failed + ' FAILED · <a href="#" class="wrec" style="color:#f3c454">RECORD</a></span><button class="wbx" aria-label="Close">✕</button></div>' +
         '<div class="wbl">' + cards.join('') + '</div><div class="wf">Tab / ⚑ opens this board · one mission at a time · the game is paused while it\'s open</div></div>';
     }
     msBoardEl.addEventListener('click', function(e) {
       var t = e.target;
       if (t === msBoardEl || t.classList.contains('wbx')) { msBoardClose(); return; }
+      if (t.classList.contains('wrec')) { e.preventDefault(); crRecordOpen(); return; }
       if (t.dataset && t.dataset.id) msAccept(+t.dataset.id);
       else if (t.dataset && t.dataset.ab) { msAbandon(); msBoardRender(); }
     });
@@ -21849,6 +21870,299 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       e.preventDefault(); e.stopImmediatePropagation();
       if (MS.boardOpen) msBoardClose(); else msBoardOpen();
     }, { capture: true });
+
+
+    /* ============================================================
+       CAMPAIGN — the pilot's career
+       Everything you do in a campaign earns experience (the campaign score), and experience
+       earns rank, from second lieutenant to brigadier general. Each rank brings a perk: more
+       flares, more AIM-9s, an armoured cockpit, bigger bounties. Medals are awarded for
+       milestones (first kill, ace, liberating sectors, rescues, the campaign itself), and the
+       service record keeps a kill board by aircraft and a squadron roster with your wingmen's
+       kills and losses. The career outlives any one campaign.
+       Every sortie ends in a debrief card: back on the ground at a friendly field, or after
+       losing the aircraft. Taking Kastor ends the war in victory; let the home airfield or the
+       port city be bombed flat and the island falls.
+       ============================================================ */
+    var CR_KEY = 'gp-career-v1';
+    var CR_RANKS = [
+      { abbr: '2LT', name: 'Second Lieutenant', xp: 0, pip: '▮', col: '#d9a441', perk: '' },
+      { abbr: '1LT', name: 'First Lieutenant', xp: 2000, pip: '▮', col: '#c8d0d8', perk: '+8 flares' },
+      { abbr: 'CPT', name: 'Captain', xp: 6000, pip: '▮▮', col: '#c8d0d8', perk: '6 AIM-9s' },
+      { abbr: 'MAJ', name: 'Major', xp: 14000, pip: '✦', col: '#d9a441', perk: 'armoured cockpit: −25% damage' },
+      { abbr: 'LTC', name: 'Lieutenant Colonel', xp: 26000, pip: '✦', col: '#c8d0d8', perk: '+10% bounties' },
+      { abbr: 'COL', name: 'Colonel', xp: 45000, pip: '🦅', col: '#c8d0d8', perk: '8 AIM-9s, +16 flares' },
+      { abbr: 'BG', name: 'Brigadier General', xp: 75000, pip: '★', col: '#f3c454', perk: 'the island salutes you' }
+    ];
+    var CR_MEDALS = [
+      { id: 'wings', name: 'Combat Wings', desc: 'Fly your first campaign sortie', rib: ['#3b5c8f', '#e8e2c8', '#3b5c8f'], ok: function(s) { return s.sorties >= 1; } },
+      { id: 'airmedal', name: 'Air Medal', desc: 'Shoot down an enemy aircraft', rib: ['#1f3f7a', '#f2b632', '#1f3f7a'], ok: function(s) { return s.airKills >= 1; } },
+      { id: 'ace', name: 'Ace', desc: 'Five air-to-air kills', rib: ['#b3261e', '#f2f2f2', '#b3261e'], ok: function(s) { return s.airKills >= 5; } },
+      { id: 'dace', name: 'Double Ace', desc: 'Ten air-to-air kills', rib: ['#7a1410', '#f3c454', '#7a1410'], ok: function(s) { return s.airKills >= 10; } },
+      { id: 'weasel', name: 'Wild Weasel', desc: 'Destroy five SAM launchers or radars', rib: ['#2c4a2a', '#d9a441', '#2c4a2a'], ok: function(s) { return s.samKills >= 5; } },
+      { id: 'mud', name: 'Mud Mover', desc: 'Destroy fifty ground targets', rib: ['#5a4630', '#c9b18a', '#5a4630'], ok: function(s) { return s.groundKills >= 50; } },
+      { id: 'liberator', name: 'Liberation Medal', desc: 'Capture five sectors', rib: ['#2f6fd0', '#ffffff', '#2f6fd0'], ok: function(s) { return s.sectors >= 5; } },
+      { id: 'ironhold', name: 'Ironhold Cross', desc: 'Take the SAM fortress', rib: ['#2a2a2a', '#c8d0d8', '#2a2a2a'], ok: function(s) { return s.ironhold >= 1; } },
+      { id: 'angel', name: 'Guardian Angel', desc: 'Complete a CSAR mission', rib: ['#e07a1f', '#ffffff', '#e07a1f'], ok: function(s) { return s.rescues >= 1; } },
+      { id: 'roadblock', name: 'Road Block', desc: 'Destroy an enemy convoy', rib: ['#6a5a2a', '#f2b632', '#6a5a2a'], ok: function(s) { return s.convoys >= 1; } },
+      { id: 'navy', name: 'Navy Cross', desc: 'Defend the carrier', rib: ['#13294b', '#ffffff', '#13294b'], ok: function(s) { return s.carrier >= 1; } },
+      { id: 'hunter', name: 'High-Value Hunter', desc: 'Shoot down the enemy AWACS or tanker', rib: ['#4a1f6a', '#e8e2c8', '#4a1f6a'], ok: function(s) { return s.hvt >= 1; } },
+      { id: 'veteran', name: 'Campaign Veteran', desc: 'Complete ten missions', rib: ['#355f3a', '#e8e2c8', '#b3261e'], ok: function(s) { return s.missions >= 10; } },
+      { id: 'dfc', name: 'Distinguished Flying Cross', desc: 'Win the campaign', rib: ['#1f3f7a', '#ffffff', '#b3261e'], ok: function(s) { return s.wins >= 1; } }
+    ];
+    var CR_STAT0 = { sorties: 0, airKills: 0, groundKills: 0, samKills: 0, sectors: 0, ironhold: 0, missions: 0, missionsFailed: 0, rescues: 0, convoys: 0, carrier: 0, hvt: 0, losses: 0, wins: 0, defeats: 0, flightT: 0 };
+    var CR = (function() {
+      var c = null;
+      try { c = JSON.parse(localStorage.getItem(CR_KEY) || 'null'); } catch (e) {}
+      c = c || {};
+      c.xp = c.xp || 0; c.stats = Object.assign({}, CR_STAT0, c.stats || {}); c.medals = c.medals || {}; c.kills = c.kills || {}; c.roster = c.roster || {};
+      return c;
+    })();
+    function crSave() { try { localStorage.setItem(CR_KEY, JSON.stringify(CR)); } catch (e) {} }
+    function crRankIdx(xp) { var i = 0; while (i + 1 < CR_RANKS.length && xp >= CR_RANKS[i + 1].xp) i++; return i; }
+    function crRank() { return CR_RANKS[crRankIdx(CR.xp)]; }
+    function crPerkLevel() { return WAR && WAR.on ? crRankIdx(CR.xp) : -1; }
+    function crFlareBonus() { var r = crPerkLevel(); return r >= 5 ? 16 : r >= 1 ? 8 : 0; }
+    function crAamCount() { var r = crPerkLevel(); return r >= 5 ? 8 : r >= 2 ? 6 : PVP_AAM_COUNT; }
+    function crArmour() { return crPerkLevel() >= 3 ? 0.75 : 1; }
+    function crBountyMul() { return crPerkLevel() >= 4 ? 1.1 : 1; }
+    function crAddXp(n) {
+      if (n <= 0) return;
+      var before = crRankIdx(CR.xp);
+      CR.xp += n;
+      SORTIE.xp += n;
+      var after = crRankIdx(CR.xp);
+      if (after > before) {
+        var R = CR_RANKS[after];
+        setTimeout(function() {
+          warBanner('PROMOTED', R.name.toUpperCase() + (R.perk ? '  ·  ' + R.perk : ''), '#f3c454', 5);
+          awRadio('HART: Congratulations, ' + R.name + '. You\'ve earned it.', '#9dffb8');
+          if (typeof playCoinChime === 'function') playCoinChime(5);
+        }, 1500);
+        SORTIE.promoted = R.name;
+      }
+      CR.dirty = true;
+    }
+    function crStat(k, n) {
+      CR.stats[k] = (CR.stats[k] || 0) + (n === undefined ? 1 : n);
+      if (SORTIE.on && SORTIE[k] !== undefined) SORTIE[k] += (n === undefined ? 1 : n);
+      crCheckMedals();
+      CR.dirty = true;
+    }
+    function crCheckMedals() {
+      CR_MEDALS.forEach(function(m) {
+        if (CR.medals[m.id] || !m.ok(CR.stats)) return;
+        CR.medals[m.id] = Date.now();
+        SORTIE.medals.push(m.id);
+        setTimeout(function() { warBanner('MEDAL AWARDED', m.name.toUpperCase() + '  ·  ' + m.desc, '#f3c454', 4.5); }, 600 + SORTIE.medals.length * 2500);
+      });
+    }
+    function crRoster(call, what) {
+      if (!call) return;
+      call = String(call).split(' ')[0];
+      var r = CR.roster[call] || (CR.roster[call] = { kills: 0, lost: 0, sorties: 0 });
+      r[what] = (r[what] || 0) + 1;
+      CR.dirty = true;
+    }
+    // hooks the rest of the war calls into
+    function crAirKill(b) {
+      if (!WAR.on) return;
+      crStat('airKills');
+      CR.kills[selectedPlaneType] = (CR.kills[selectedPlaneType] || 0) + 1;
+      if (b.kind === 'awacs' || b.kind === 'tanker') crStat('hvt');
+    }
+    function crGroundKill(t) {
+      if (!WAR.on) return;
+      crStat('groundKills');
+      if (t.onKill || t === samRadar || samLaunchers.indexOf(t) >= 0) crStat('samKills');
+    }
+
+    /* ---------- sorties and the debrief ---------- */
+    var SORTIE = { on: false, medals: [], xp: 0 };
+    function crSortieStart() {
+      SORTIE = { on: true, t0: WAR.playT, coins0: coins, xp: 0, airKills: 0, groundKills: 0, samKills: 0, sectors: 0, missions: 0, missionsFailed: 0,
+                 rescues: 0, convoys: 0, carrier: 0, hvt: 0, ironhold: 0, wins: 0, medals: [], lost: false, promoted: null, type: selectedPlaneType };
+      crStat('sorties');
+      crRoster('YOU', 'sorties');
+    }
+    function crSortieTick() {
+      if (!WAR.on || !started) return;
+      var airborne = !wasGrounded && !crashing && !ejecting && !isCarMode;
+      if (!SORTIE.on && airborne && position.y - getEffectiveGroundHeight(position.x, position.z) > 20) crSortieStart();
+    }
+    function crOnLoss(how) {
+      if (!WAR.on || !SORTIE.on || SORTIE.lost) return;
+      SORTIE.lost = how;
+      crStat('losses');
+      setTimeout(function() { crDebrief(); }, 3200);
+    }
+    function crOnLanded() {
+      if (!SORTIE.on || SORTIE.lost || WAR.playT - SORTIE.t0 < 25 || crDebriefEl.classList.contains('on')) return;
+      crDebrief();
+    }
+    var crDebriefEl = document.createElement('div');
+    crDebriefEl.id = 'crDebrief';
+    document.body.appendChild(crDebriefEl);
+    function crRibbon(m, big) {
+      return '<i class="rb' + (big ? ' big' : '') + '" title="' + m.name + ' — ' + m.desc + '" style="background:linear-gradient(90deg,' + m.rib[0] + ' 0 34%,' + m.rib[1] + ' 34% 66%,' + m.rib[2] + ' 66%)"></i>';
+    }
+    function crRankBar() {
+      var i = crRankIdx(CR.xp), R = CR_RANKS[i], N = CR_RANKS[i + 1];
+      var f = N ? (CR.xp - R.xp) / (N.xp - R.xp) : 1;
+      return '<div class="crk"><b style="color:' + R.col + '">' + R.pip + '</b><span>' + R.name.toUpperCase() + '<em>' + CR.xp.toLocaleString() + ' XP' + (N ? ' · ' + (N.xp - CR.xp).toLocaleString() + ' to ' + N.abbr : '') + '</em></span></div>' +
+        '<div class="crbar"><i style="width:' + (f * 100).toFixed(1) + '%"></i></div>';
+    }
+    function crDebrief() {
+      if (!SORTIE.on || !WAR.on) return;
+      var S = SORTIE; SORTIE = { on: false, medals: [], xp: 0 };
+      var mins = Math.max(0, WAR.playT - S.t0), earned = coins - S.coins0;
+      CR.stats.flightT += mins;
+      crSave();
+      var rows = [['FLIGHT TIME', Math.floor(mins / 60) + ':' + String(Math.floor(mins % 60)).padStart(2, '0')], ['AIR KILLS', S.airKills], ['GROUND KILLS', S.groundKills],
+                  ['SECTORS TAKEN', S.sectors], ['MISSIONS', S.missions + (S.missionsFailed ? ' · ' + S.missionsFailed + ' failed' : '')], ['EARNED', '◆' + Math.max(0, earned).toLocaleString()], ['EXPERIENCE', '+' + S.xp.toLocaleString() + ' XP']];
+      var medals = S.medals.map(function(id) { var m = CR_MEDALS.filter(function(x) { return x.id === id; })[0]; return '<div class="crm">' + crRibbon(m, true) + '<span><b>' + m.name + '</b>' + m.desc + '</span></div>'; }).join('');
+      crDebriefEl.innerHTML = '<div class="crc ' + (S.lost ? 'lost' : 'ok') + '"><h4>' + (S.lost ? 'AIRCRAFT LOST' : 'SORTIE COMPLETE') + '</h4><h2>DEBRIEF</h2>' +
+        '<p>' + (S.lost ? (S.lost === 'eject' ? 'You punched out. The squadron will have another airframe ready.' : 'You went down with the aircraft. The squadron will have another one ready.') : 'Back on the ground at a friendly field. Refuelled and rearmed.') + '</p>' +
+        '<div class="crg">' + rows.map(function(r) { return '<div><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div>' +
+        (S.promoted ? '<div class="crp">PROMOTED TO ' + S.promoted.toUpperCase() + '</div>' : '') +
+        (medals ? '<div class="crms">' + medals + '</div>' : '') + crRankBar() +
+        '<button type="button" class="crgo">Continue</button></div>';
+      crDebriefEl.classList.add('on');
+      kj.paused = true;
+      Object.keys(keys).forEach(function(k) { keys[k] = false; });
+    }
+    crDebriefEl.addEventListener('click', function(e) {
+      if (!e.target.classList.contains('crgo')) return;
+      crDebriefEl.classList.remove('on');
+      kj.paused = kj.codecOpen || kj.photoOn || MS.boardOpen;
+    });
+
+    /* ---------- the end of the war ---------- */
+    var crEndEl = document.createElement('div');
+    crEndEl.id = 'crEnd';
+    document.body.appendChild(crEndEl);
+    function crEndScreen(win) {
+      var st = CR.stats, h = warHeld();
+      var rows = [['CAMPAIGN TIME', Math.floor(WAR.playT / 60) + ' min'], ['SECTORS LIBERATED', h.held + ' / ' + h.total], ['AIR KILLS', WAR.airKills || 0], ['TOTAL KILLS', WAR.kills],
+                  ['MISSIONS', MS.done + ' done · ' + MS.failed + ' failed'], ['SCORE', WAR.score.toLocaleString()]];
+      var medals = CR_MEDALS.filter(function(m) { return CR.medals[m.id]; }).map(function(m) { return crRibbon(m); }).join('');
+      crEndEl.className = 'on ' + (win ? 'win' : 'lose');
+      crEndEl.innerHTML = '<div class="cre"><h4>OPERATION GLIDEPATH</h4><h1>' + (win ? 'VICTORY' : 'DEFEAT') + '</h1>' +
+        '<p>' + (win ? 'Kastor Airbase has fallen and the last of their air force is grounded. The island is free.' : 'The enemy bombed ' + (WAR.fallen || 'the home airfield') + ' flat and their armour is rolling in. The island has fallen.') + '</p>' +
+        '<div class="crg">' + rows.map(function(r) { return '<div><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div>' +
+        crRankBar() + (medals ? '<div class="crrib">' + medals + '</div>' : '') +
+        '<div class="crbtns">' + (win ? '<button type="button" data-a="fly" class="go">Keep flying</button>' : '<button type="button" data-a="retry" class="go">New campaign</button>') +
+        '<button type="button" data-a="menu">Main menu</button></div></div>';
+      kj.paused = true;
+      Object.keys(keys).forEach(function(k) { keys[k] = false; });
+    }
+    crEndEl.addEventListener('click', function(e) {
+      var a = e.target.dataset && e.target.dataset.a;
+      if (!a) return;
+      if (a === 'fly') { crEndEl.className = ''; kj.paused = false; return; }
+      if (a === 'retry') { try { localStorage.removeItem(WAR_KEY); } catch (er) {} try { sessionStorage.setItem('gp-war-autostart', '1'); } catch (er) {} }
+      warSave(); crSave();
+      location.reload();
+    });
+    function crVictory() {
+      crStat('wins');
+      crSave();
+      setTimeout(function() { crEndScreen(true); }, 5200);
+    }
+    function crDefeatCheck() {
+      if (WAR.won || WAR.lost) return;
+      ['HOME', 'PORT CITY'].forEach(function(n) {
+        var s = warSector(n);
+        if (!s || WAR.lost) return;
+        var d = s.dmg || 0;
+        if (d >= 60 && !s.warned60) { s.warned60 = true; awRadio('OVERLORD: ' + n + ' is at ' + Math.round(d) + '% damage. One more raid could finish it — keep those bombers away!', '#ff9a7a'); }
+        if (d < 40) s.warned60 = false;
+        if (d >= 100) {
+          WAR.lost = true; WAR.fallen = n === 'HOME' ? 'the home airfield' : 'the port city';
+          crStat('defeats'); crSave(); WAR.dirty = true; warSave();
+          warBanner('THE ISLAND HAS FALLEN', n + ' destroyed', '#ff4a3a', 5);
+          setTimeout(function() { crEndScreen(false); }, 4000);
+        }
+      });
+    }
+
+    /* ---------- the service record (title screen + mission board) ---------- */
+    function crRecordHtml() {
+      var st = CR.stats;
+      var medals = CR_MEDALS.map(function(m) {
+        var got = !!CR.medals[m.id];
+        return '<div class="crm' + (got ? '' : ' no') + '">' + crRibbon(m, true) + '<span><b>' + m.name + '</b>' + m.desc + '</span></div>';
+      }).join('');
+      var kb = Object.keys(CR.kills).sort(function(a, b) { return CR.kills[b] - CR.kills[a]; }).map(function(t) {
+        return '<div><span>' + ((PLANE_TYPES[t] && PLANE_TYPES[t].name) || t).toUpperCase() + '</span><b>' + CR.kills[t] + '</b></div>';
+      }).join('') || '<div><span>NO AIR KILLS YET</span><b>—</b></div>';
+      var ro = Object.keys(CR.roster).filter(function(k) { return k !== 'YOU'; }).sort(function(a, b) { return CR.roster[b].kills - CR.roster[a].kills; }).map(function(k) {
+        var r = CR.roster[k];
+        return '<div><span>' + k.toUpperCase() + '</span><b>' + (r.kills || 0) + ' K · ' + (r.lost || 0) + ' L</b></div>';
+      }).join('') || '<div><span>WINGMEN APPEAR AS THEY FLY</span><b>—</b></div>';
+      var stats = [['SORTIES', st.sorties], ['AIR KILLS', st.airKills], ['GROUND KILLS', st.groundKills], ['SAM KILLS', st.samKills], ['SECTORS TAKEN', st.sectors],
+                   ['MISSIONS', st.missions + ' / ' + (st.missions + st.missionsFailed)], ['RESCUES', st.rescues], ['AIRCRAFT LOST', st.losses], ['CAMPAIGNS WON', st.wins], ['HOURS', (st.flightT / 3600).toFixed(1)]];
+      return crRankBar() + '<div class="crcols"><div><h5>Statistics</h5><div class="crg two">' + stats.map(function(r) { return '<div><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div>' +
+        '<h5>Kill board</h5><div class="crg two">' + kb + '</div><h5>Squadron roster</h5><div class="crg two">' + ro + '</div></div>' +
+        '<div><h5>Medals · ' + Object.keys(CR.medals).length + ' / ' + CR_MEDALS.length + '</h5><div class="crms list">' + medals + '</div>' +
+        '<h5>Rank perks</h5><div class="crperks">' + CR_RANKS.slice(1).map(function(R, i) { return '<div class="' + (crRankIdx(CR.xp) >= i + 1 ? 'got' : '') + '"><b>' + R.abbr + '</b>' + R.perk + '</div>'; }).join('') + '</div></div></div>';
+    }
+    var crRecEl = document.createElement('div');
+    crRecEl.id = 'crRecord'; crRecEl.className = 'hidden';
+    document.body.appendChild(crRecEl);
+    function crRecordOpen() {
+      crRecEl.innerHTML = '<div class="crc"><div class="crh"><h3>Service record · ' + (net.name || kjCallsign()) + '</h3><button type="button" class="crx" aria-label="Close">✕</button></div>' + crRecordHtml() + '</div>';
+      crRecEl.classList.remove('hidden');
+    }
+    crRecEl.addEventListener('click', function(e) { if (e.target === crRecEl || e.target.classList.contains('crx')) crRecEl.classList.add('hidden'); });
+
+    (function() {
+      var css = document.createElement('style');
+      css.textContent =
+        '#crDebrief,#crEnd,#crRecord{position:fixed;inset:0;z-index:45;display:none;align-items:center;justify-content:center;padding:14px;background:rgba(3,6,10,.62);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);font-family:-apple-system,system-ui,sans-serif;color:#e9eef2}' +
+        '#crDebrief.on,#crEnd.on{display:flex}#crRecord{display:flex;z-index:46}#crRecord.hidden{display:none}' +
+        '#crDebrief .crc,#crRecord .crc{width:min(560px,100%);max-height:100%;overflow:auto;background:rgba(10,13,18,.96);border:1px solid rgba(255,255,255,.1);border-top:3px solid #7dff8a;border-radius:4px;padding:16px 20px}' +
+        '#crRecord .crc{width:min(820px,100%);border-top-color:#f3c454}' +
+        '#crDebrief .crc.lost{border-top-color:#ff6a4a}' +
+        '#crDebrief h4,#crEnd h4{margin:0;font:800 10px ui-monospace,Menlo,monospace;letter-spacing:.3em;color:#8d99a3}' +
+        '#crDebrief h2{margin:4px 0 6px;font-size:24px;font-weight:900;letter-spacing:.18em}' +
+        '#crDebrief p,#crEnd p{margin:0 0 12px;font-size:12.5px;line-height:1.5;color:#aeb9c1}' +
+        '.crg{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 12px;margin:0 0 12px;font:700 9.5px/1.3 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#8d99a3}' +
+        '.crg.two{grid-template-columns:1fr 1fr}.crg b{display:block;font-size:14px;color:#fff;letter-spacing:.02em}' +
+        '.crp{margin:0 0 10px;padding:8px 10px;border:1px solid rgba(243,196,84,.5);background:rgba(243,196,84,.12);color:#f3c454;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.16em}' +
+        '.crms{display:flex;flex-direction:column;gap:6px;margin:0 0 12px}.crms.list{max-height:300px;overflow:auto}' +
+        '.crm{display:flex;align-items:center;gap:10px;font-size:11.5px;color:#aeb9c1}.crm b{display:block;color:#fff;font-size:12.5px}.crm.no{opacity:.35}' +
+        '.rb{display:inline-block;width:26px;height:9px;border-radius:1px;box-shadow:0 0 0 1px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.25)}.rb.big{width:38px;height:13px;flex:0 0 38px}' +
+        '.crk{display:flex;align-items:center;gap:10px;margin-top:4px}.crk b{font-size:22px;min-width:30px;text-align:center}.crk span{font:800 12px -apple-system,system-ui,sans-serif;letter-spacing:.14em}.crk em{display:block;font:700 10px ui-monospace,Menlo,monospace;color:#8d99a3;letter-spacing:.06em;font-style:normal}' +
+        '.crbar{height:4px;margin:8px 0 12px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden}.crbar i{display:block;height:100%;background:linear-gradient(90deg,#d9a441,#f3c454)}' +
+        '#crDebrief .crgo,.crbtns button{appearance:none;cursor:pointer;width:100%;padding:11px;border-radius:2px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.07);color:#fff;font:800 12px -apple-system,system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase}' +
+        '#crDebrief .crgo{background:linear-gradient(100deg,#2f7fe0,#1b4fa0);border-color:rgba(140,196,255,.5)}' +
+        '#crEnd{background:rgba(3,6,10,.82)}#crEnd .cre{width:min(620px,100%);max-height:100%;overflow:auto;text-align:center}' +
+        '#crEnd h1{margin:6px 0 10px;font-size:clamp(44px,9vw,88px);font-weight:900;letter-spacing:.2em;line-height:1}' +
+        '#crEnd.win h1{background:linear-gradient(180deg,#fff3c4,#f3c454 60%,#b07a1a);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 24px rgba(243,196,84,.35))}' +
+        '#crEnd.lose h1{color:#ff4a3a;filter:drop-shadow(0 4px 24px rgba(255,60,40,.35))}' +
+        '#crEnd .crg{text-align:left;grid-template-columns:repeat(3,1fr)}#crEnd .crk{justify-content:center}' +
+        '.crrib{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin:0 auto 14px;max-width:300px}' +
+        '.crbtns{display:flex;gap:8px}.crbtns .go{background:linear-gradient(100deg,#f0521f,#c42a0e);border-color:rgba(255,160,110,.6)}' +
+        '#crEnd.win .crbtns .go{background:linear-gradient(100deg,#d9a441,#9a6a14);border-color:rgba(243,196,84,.6)}' +
+        '#crRecord .crh{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}#crRecord h3{margin:0;font-size:10.5px;letter-spacing:.3em;text-transform:uppercase;color:#f3c454}' +
+        '#crRecord .crx{appearance:none;cursor:pointer;border:0;background:rgba(255,255,255,.08);color:#e9eef2;width:30px;height:30px;border-radius:50%}' +
+        '#crRecord h5{margin:4px 0 8px;font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:#ff8a4a}' +
+        '.crcols{display:grid;grid-template-columns:1fr 1fr;gap:18px}' +
+        '.crperks{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:#7f8b94}.crperks b{display:inline-block;width:38px;font:800 10px ui-monospace,Menlo,monospace;color:#8d99a3}.crperks .got{color:#e9eef2}.crperks .got b{color:#f3c454}' +
+        '@media (max-width:640px){.crcols{grid-template-columns:1fr}.crg{grid-template-columns:1fr 1fr}#crEnd .crg{grid-template-columns:1fr 1fr}}';
+      document.head.appendChild(css);
+    })();
+    // per frame (from warUpdate's slow tick)
+    var _crLastScore = 0;
+    function crTick() {
+      if (!WAR.on) return;
+      if (WAR.score > _crLastScore) { crAddXp(WAR.score - _crLastScore); }
+      _crLastScore = WAR.score;
+      crSortieTick();
+      crDefeatCheck();
+      if (CR.dirty) { CR.dirty = false; crSave(); }
+    }
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
@@ -22694,6 +23008,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function pvpDamage(amount, attackerId) {
       if (!started || crashing || ejecting) return;
       if (pvp.shield > 0 || pvpInSafeZone(position.x, position.z)) return;
+      amount *= crArmour();
       pvp.hull = Math.max(0, pvp.hull - amount);
       if (attackerId) { pvp.lastAttacker = attackerId; pvp.lastAttackT = pvp.clock; }
       var cf = document.getElementById('crashFlash');
@@ -22714,12 +23029,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       pvp.lastAttacker = null;
     }
     function pvpOnReset() {
-      pvp.hull = 100; pvp.ammo = PVP_GUN_AMMO; pvp.aam = isHelicopterMode ? 2 : PVP_AAM_COUNT;
+      pvp.hull = 100; pvp.ammo = PVP_GUN_AMMO; pvp.aam = isHelicopterMode ? 2 : crAamCount();
       pvp.shield = PVP_SPAWN_SHIELD; pvp.lastAttacker = null; pvp.lockTgt = null; pvp.lockT = 0; pvp.locked = false;
     }
     function pvpRearm() {
-      if (pvp.hull < 100 || pvp.ammo < PVP_GUN_AMMO || pvp.aam < (isHelicopterMode ? 2 : PVP_AAM_COUNT)) {
-        pvp.hull = 100; pvp.ammo = PVP_GUN_AMMO; pvp.aam = isHelicopterMode ? 2 : PVP_AAM_COUNT;
+      if (pvp.hull < 100 || pvp.ammo < PVP_GUN_AMMO || pvp.aam < (isHelicopterMode ? 2 : crAamCount())) {
+        pvp.hull = 100; pvp.ammo = PVP_GUN_AMMO; pvp.aam = isHelicopterMode ? 2 : crAamCount();
         samToast('REARMED & REPAIRED', '#7dff8a', 1.6);
       }
     }
