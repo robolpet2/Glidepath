@@ -10690,6 +10690,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function cmdAimPoints(task, from, c) {
       var pts = [];
       if (c && c.sector) return warSectorPoints(c.sector, from);
+      if (task === 'marker' && CMD.marker && !(c && c.cap)) {
+        var ships = NAVY.ships.filter(function(t) { return t.alive && Math.hypot(t.center.x - CMD.marker.x, t.center.z - CMD.marker.z) < 1500; });
+        if (ships.length) return ships.map(function(t) { return t.center.clone(); }).sort(function(a, b) { return a.distanceTo(from) - b.distanceTo(from); });
+      }
       if (task === 'marker' && CMD.marker && WAR.on && !(c && c.cap)) {
         // a mark on (or near) an enemy sector means the whole sector: every key target still standing
         var ws = warSectorAt(CMD.marker.x, CMD.marker.z, 700);
@@ -15134,6 +15138,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
       nukeMinimap(ctx, toS, scale);
       cmdMinimap(ctx, toS, exp);
+      navyMap(ctx, toS, exp, inView, label, rot);
       warMapOver(ctx, toS, exp, inView, label, scale, rot);
       var hel = window.__airwingHelo;
       if (hel) { var hq = toS(hel.pos.x, hel.pos.z); ctx.fillStyle = '#7dff8a'; ctx.beginPath(); ctx.arc(hq.x, hq.y, 3, 0, Math.PI * 2); ctx.fill(); }
@@ -15937,6 +15942,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       cmdUpdate(dt);
       warUpdate(dt);
       regUpdate(dt);
+      navyUpdate(dt);
       updateStrike(dt);
       updateStrikePostCamera(dt);
       updateCSAR(dt);
@@ -18056,7 +18062,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       [1, 0.5].forEach(function(f) { rwrCtx.beginPath(); rwrCtx.arc(cx, cy, R * f, 0, Math.PI * 2); rwrCtx.stroke(); });
       rwrCtx.beginPath(); rwrCtx.moveTo(cx, cy - R); rwrCtx.lineTo(cx, cy + R); rwrCtx.moveTo(cx - R, cy); rwrCtx.lineTo(cx + R, cy); rwrCtx.stroke();
       rwrCtx.fillStyle = 'rgba(120,255,140,0.9)'; rwrCtx.fillRect(cx - 2, cy - 2, 4, 4);
-      WAR.emitters.forEach(function(em) {
+      (WAR.on ? WAR.emitters : []).concat(NAVY.emitters).forEach(function(em) {
         var eb = samBearingTo(em.x, em.z), er = R * (em.lethal ? 0.55 : 0.85);
         rwrCtx.font = 'bold 13px monospace'; rwrCtx.textAlign = 'center'; rwrCtx.textBaseline = 'middle';
         rwrCtx.fillStyle = em.lethal ? '#ff3b30' : '#ffcc33';
@@ -18577,9 +18583,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       else if (eligible && samRadar.alive && dist < detectR * 1.35 && !masked) state = 'search';
       samBaseEmitting = state !== null && samRadar.alive && dist < detectR * 1.35;
       var lockShown = samLock, lockName = 'SAM LOCK ';
-      if (WAR.on && state !== 'launch') {
-        if (WAR.lock > 0.02 && (state !== 'lock' || WAR.lock > samLock)) { state = 'lock'; lockShown = Math.max(samLock, WAR.lock); if (WAR.lockBandit) lockName = 'BANDIT LOCK '; }
-        else if (!state && WAR.search) state = 'search';
+      var wLock = WAR.on ? WAR.lock : 0, extLock = Math.max(wLock, NAVY.lock), extSearch = (WAR.on && WAR.search) || NAVY.search;
+      if (eligible && state !== 'launch') {
+        if (extLock > 0.02 && (state !== 'lock' || extLock > samLock)) {
+          state = 'lock'; lockShown = Math.max(samLock, extLock);
+          if (NAVY.lock > wLock) lockName = 'SHIP LOCK '; else if (WAR.lockBandit) lockName = 'BANDIT LOCK ';
+        } else if (!state && extSearch) state = 'search';
       }
 
       if (state === 'search' && samRadar.alive) {
@@ -18894,8 +18903,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       } else if (t.kind === 'truck') {
         t.group.rotation.z = (Math.random() - 0.5) * 0.35;
         if (fx) stIgniteFire(p, 5.5, 45);
-      }
+      } else if (t.kind === 'ship') navyOnSunk(t, fx);
       if (strikeTrack === t) strikeTrack = null;
+      if (t.navy) { navyKillMsg(t, quiet); return; }
       if (t.war && WAR.on) { warOnKill(t, quiet); return; }
       var left = strikeTargets.filter(function(x) { return x.alive; }).length;
       var total = strikeTargets.length;
@@ -18986,7 +18996,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (stMsgTimer > 0 && (stMsgTimer -= dt) <= 0) stMsgEl.classList.remove('show');
       strikeTargets.forEach(function(t) {
         if (t.alive) return;
-        if ((t.deadTimer -= dt) <= 0 && !t.war) {
+        if ((t.deadTimer -= dt) <= 0 && !t.war && !t.navy) {
           // the convoy is replaced as a unit, so wrecks don't snap back onto the moving road
           if (t.kind === 'vehicle') {
             var anyVehicleTimerLeft = strikeTargets.some(function(v) { return v.kind === 'vehicle' && !v.alive && v.deadTimer > 0; });
@@ -19305,7 +19315,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       return ARS_TGT;
     }
     function arsPos(t) { return t.center || t.pos; }
-    var ARS_ARMOR = { vehicle: 1, fuel: 1.25, ammo: 1.1, bunker: 0.42, truck: 1, hangar: 0.8, jet: 1.2, tower: 0.9 };
+    var ARS_ARMOR = { vehicle: 1, fuel: 1.25, ammo: 1.1, bunker: 0.42, truck: 1, hangar: 0.8, jet: 1.2, tower: 0.9, ship: 0.7 };
 
     /* ---------- damage model ---------- */
     function arsDamage(pos, radius, dmg, quiet, pay) {
@@ -21561,8 +21571,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
        garrison digs in. Bomb a captured sector to 100% and it's overrun on the spot.
        ============================================================ */
     var MS = { offers: [], active: null, seq: 1, done: 0, failed: 0, refreshT: 0, boardOpen: false, checkT: 0 };
-    var MS_ICON = { strike: '✶', sead: '▲', recon: '◎', cap: '⛨', escort: '✈', csar: '✚', interdict: '⛟', carrier: '⚓' };
-    var MS_TYPE = { strike: 'STRIKE', sead: 'SEAD', recon: 'RECON', cap: 'CAP', escort: 'ESCORT', csar: 'CSAR', interdict: 'INTERDICTION', carrier: 'CARRIER DEFENCE' };
+    var MS_ICON = { strike: '✶', sead: '▲', recon: '◎', cap: '⛨', escort: '✈', csar: '✚', interdict: '⛟', carrier: '⚓', naval: '⛴' };
+    var MS_TYPE = { strike: 'STRIKE', sead: 'SEAD', recon: 'RECON', cap: 'CAP', escort: 'ESCORT', csar: 'CSAR', interdict: 'INTERDICTION', carrier: 'CARRIER DEFENCE', naval: 'NAVAL STRIKE' };
 
     /* ---------- ground convoys: counterattacks and resupply ---------- */
     function warLaunchConvoy(from, to, kind) {
@@ -21707,6 +21717,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (pz < oceanCoastZ(px) - 200 && getTerrainHeight(px, pz) > WATER_LEVEL + 2)
           c.push(msNew('csar', { x: px, z: pz, name: 'PILOT' }, 'CSAR — SABER 2 IS DOWN', 'Saber 2 punched out near ' + sv.name + '. Take a helicopter, find the smoke and bring the pilot home.', 500, 600, { near: sv }));
       }
+      var fleet = NAVY.ships.filter(function(t) { return t.alive; });
+      if (fleet.length >= 2) c.push(msNew('naval', { x: fleet[0].center.x, z: fleet[0].center.z, name: 'ENEMY FLEET' }, 'NAVAL STRIKE — SINK THE FLEET', 'An enemy surface group is loose south of the coast: a destroyer, frigates and a supply ship. Sink every one.', 750, 900));
       if (CARRIER_READY && window.__carrierOutlineWorld && WAR.sectors.some(function(s) { return s.type === 'capital' && s.owner === 'red'; }))
         c.push(msNew('carrier', { x: CARRIER.x, z: CARRIER.z, name: 'THE CARRIER' }, 'DEFEND THE CARRIER', 'Bombers are being readied for a strike on the carrier. Break the raid up before it gets there.', 550, 420));
       return c;
@@ -21727,6 +21739,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (o.type === 'strike' || o.type === 'sead' || o.type === 'escort') return o.where.owner === 'red';
       if (o.type === 'recon') return o.targets.some(function(s) { return !s.known; });
       if (o.type === 'interdict') return !!WAR.convoy;
+      if (o.type === 'naval') return NAVY.ships.some(function(t) { return t.alive; });
       return true;
     }
     function msOfferInterdict() {
@@ -21750,6 +21763,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         escort: function() { return [['H', 'Nighthawk 7 is rolling for ' + w + '. Their fighters will try to stop it. Don\'t let them.'], ['Y', 'I\'ll stay on its wing.'], ['H', 'It\'s slow and it\'s alone. Bombs on target, that\'s the job. ' + R + '.']]; },
         csar: function() { return [['H', 'Saber 2 is down near ' + m.near.name + '. The pilot\'s alive and popping smoke.'], ['Y', 'I\'ll take the helo.'], ['H', 'Find the orange smoke, hover low, hold it while we winch, then land back at base. There may be flak nearby. ' + R + '.']]; },
         interdict: function() { return [['H', 'That convoy is heading for ' + w + '. If it gets there we\'ll have to take the sector all over again.'], ['Y', 'Moving targets. Fine.'], ['H', 'Hellfires and Mavericks lock on to vehicles. Every truck. ' + R + '.']]; },
+        naval: function() { return [['H', 'Their surface group is between us and Kaela, ' + cs + '. A destroyer and two frigates, all with SAMs, and a supply ship.'], ['Y', 'Ships shoot back.'], ['H', 'Come in on the deck under their radar, pop up and hit them. The destroyer\'s gatling will try to shoot your missiles down. ' + R + '.']]; },
         carrier: function() { return [['H', 'Kastor is sending bombers at the carrier. She can\'t defend herself against a stick of iron bombs.'], ['Y', 'On my way out to sea.'], ['H', 'Kill the bombers before they reach her. Escort if they bring one. ' + R + '.']]; }
       };
       return L[m.type]();
@@ -21837,6 +21851,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           var any = m.convoy.vehicles.some(function(t) { return t.surrendered; });
           msFinish(m, !any, any ? 'The convoy got through.' : 'Convoy destroyed. ' + w.name + ' holds.');
         }
+      } else if (m.type === 'naval') {
+        if (!NAVY.ships.some(function(t) { return t.alive; })) msFinish(m, true, 'The surface group is on the bottom. Bravo Zulu.');
       } else if (m.type === 'carrier') {
         var R = m.raid;
         if (!R || !R.bombers.some(function(b) { return b.alive && b.state !== 'down'; })) {
@@ -21897,6 +21913,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (m.type === 'recon') { var u = m.targets.filter(function(s) { return !s.known; })[0]; if (u) return { x: u.x, z: u.z, name: 'RECON GRID', mission: true }; }
       if (m.type === 'carrier' && m.raid) { var bb = m.raid.bombers.filter(function(b) { return b.alive && b.state !== 'down'; })[0]; if (bb) return { x: bb.pos.x, z: bb.pos.z, name: 'BOMBERS', mission: true }; }
       if (m.type === 'csar') return null;     // the CSAR panel and marker take over
+      if (m.type === 'naval') { var sh = NAVY.ships.filter(function(t) { return t.alive; })[0]; if (sh) return { x: sh.center.x, z: sh.center.z, name: 'ENEMY FLEET', mission: true }; }
       return { x: m.where.x, z: m.where.z, name: m.where.name, mission: true };
     }
     function msHudText() {
@@ -21909,6 +21926,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       else if (m.type === 'cap') p = m.wave ? m.wave.filter(function(b) { return b.alive && b.state !== 'down'; }).length + ' LEFT' : 'WAIT ' + Math.ceil(m.waveAt) + 's';
       else if (m.type === 'escort') p = m.bomber.bombs === 6 ? 'INBOUND' : 'BOMBING';
       else if (m.type === 'interdict') p = m.convoy.vehicles.filter(function(t) { return t.alive; }).length + ' LEFT';
+      else if (m.type === 'naval') p = NAVY.ships.filter(function(t) { return t.alive; }).length + ' SHIPS';
       else if (m.type === 'carrier') p = m.raid ? m.raid.bombers.filter(function(b) { return b.alive && b.state !== 'down'; }).length + ' BOMBER' : '';
       var left = m.limit < 9000 ? ' ' + Math.max(0, Math.floor((m.limit - m.t) / 60)) + ':' + String(Math.max(0, Math.floor((m.limit - m.t) % 60))).padStart(2, '0') : '';
       return MS_ICON[m.type] + ' ' + MS_TYPE[m.type] + ' · ' + p + left;
@@ -22509,6 +22527,307 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       REG_STRIPS.forEach(function(st) { WAYPOINTS.push({ name: st.kind === 'arctic' ? 'NORTHREACH' : 'DUST SEA', x: st.x, z: st.z, color: st.kind === 'arctic' ? '#cfe6ff' : '#f0c88a', icon: 'field' }); });
       WAYPOINTS.push({ name: 'MT. KAELA', x: REG_VOLC.x, z: REG_VOLC.z, color: '#ff8a4a', icon: 'volcano' });
     })();
+
+
+    /* ============================================================
+       THE ENEMY FLEET — a surface action group that shoots back
+       A destroyer leads two frigates and a replenishment ship in a column around a long loop
+       of sea between the coast and Mount Kaela. Their radars reach further than the land SAMs
+       (skim the waves under 12 m and they won't see you until you're close), and they defend
+       themselves in layers:
+         · ship-launched SAMs that pop vertically out of the deck cells and turn onto you
+         · a radar-laid main gun that throws flak bursts at your predicted position
+         · CIWS gatlings that hose tracer at anything inside 1.6 km, and on the destroyer will
+           also try to shoot down missiles and bombs coming at it
+       Ships are big, armoured targets (Mavericks, Paveways, clusters, the air wing). Sunk ones
+       list, burn and go under; a new group sails out a while later.
+       ============================================================ */
+    var NAVY = { ships: [], s: 0, lock: 0, search: false, emitters: [], bursts: [], respawnT: 0, path: null, t: 0 };
+    var NAVY_PATH = { cx: -800, cz: 5400, rx: 6500, rz: 1000 };    // clear of the coast, the carrier and Kaela's shelf
+    var NAVY_KIND = {
+      destroyer: { name: 'DESTROYER', L: 92, B: 11.5, hp: 950, bounty: 600, sam: 8, ciws: 2, gun: true, score: 900 },
+      frigate:   { name: 'FRIGATE', L: 72, B: 9.5, hp: 650, bounty: 400, sam: 4, ciws: 1, gun: true, score: 600 },
+      oiler:     { name: 'SUPPLY SHIP', L: 84, B: 14, hp: 420, bounty: 250, sam: 0, ciws: 1, gun: false, score: 300 }
+    };
+    var NVM = {
+      hull: samMat(0x6f777d, 0.6, 0.35), deck: samMat(0x4a4f52, 0.8, 0.2), sup: samMat(0x8a9196, 0.55, 0.35), dark: samMat(0x2c3135, 0.6, 0.3),
+      boot: samMat(0x6a2620, 0.7, 0.2), white: samMat(0xd8dcdf, 0.5, 0.2), vls: samMat(0x26292b, 0.7, 0.3)
+    };
+    function navyBuildShip(kind) {
+      var K = NAVY_KIND[kind], L = K.L, B = K.B, g = new THREE.Group();
+      // hull: a plan-view shape (sharp bow at +z) pulled up into a slab, red boot-topping below the waterline
+      var sh = new THREE.Shape();
+      sh.moveTo(0, L / 2); sh.quadraticCurveTo(B * 0.55, L * 0.22, B / 2, 0); sh.lineTo(B / 2, -L / 2 + 2); sh.lineTo(-B / 2, -L / 2 + 2); sh.lineTo(-B / 2, 0); sh.quadraticCurveTo(-B * 0.55, L * 0.22, 0, L / 2);
+      var hg = new THREE.ExtrudeGeometry(sh, { depth: 7.5, bevelEnabled: false });
+      hg.rotateX(-Math.PI / 2); hg.translate(0, -3.2, 0);
+      g.add(new THREE.Mesh(hg, NVM.hull));
+      var bg = new THREE.ExtrudeGeometry(sh, { depth: 1.2, bevelEnabled: false });
+      bg.rotateX(-Math.PI / 2); bg.scale(1.01, 1, 1.002); bg.translate(0, -1.0, 0);
+      g.add(new THREE.Mesh(bg, NVM.boot));
+      g.add(samBox(B * 0.92, 0.12, L * 0.82, NVM.deck, 0, 4.32, -L * 0.04));
+      var parts = { turret: null, radar: null, ciws: [], vls: [] };
+      if (kind === 'oiler') {
+        g.add(samBox(B * 0.8, 7, 12, NVM.sup, 0, 7.8, -L / 2 + 10));
+        g.add(samBox(B * 0.7, 2.5, 9, NVM.sup, 0, 12.3, -L / 2 + 10));
+        g.add(samBox(B * 0.9, 0.8, 2, NVM.dark, 0, 13.9, -L / 2 + 14.6));
+        for (var k = 0; k < 4; k++) { g.add(samBox(0.5, 11, 0.5, NVM.dark, -2.5, 9.5, -8 + k * 11)); g.add(samBox(0.5, 11, 0.5, NVM.dark, 2.5, 9.5, -8 + k * 11)); g.add(samBox(6, 0.4, 0.4, NVM.dark, 0, 14.8, -8 + k * 11)); }
+        g.add(samCyl(1.1, 1.3, 7, 10, NVM.dark, 0, 11, -L / 2 + 20));
+      } else {
+        // superstructure, mast, funnel, VLS, helipad
+        g.add(samBox(B * 0.82, 6, L * 0.2, NVM.sup, 0, 7.3, L * 0.08));
+        g.add(samBox(B * 0.66, 3, L * 0.12, NVM.sup, 0, 11.8, L * 0.1));
+        g.add(samBox(B * 0.68, 0.9, 1.4, NVM.dark, 0, 12.6, L * 0.165));
+        g.add(samBox(B * 0.6, 5, L * 0.13, NVM.sup, 0, 6.8, -L * 0.13));
+        var fn = samBox(B * 0.36, 5, 5, NVM.sup, 0, 10.5, -L * 0.1); fn.rotation.x = -0.12; g.add(fn);
+        g.add(samBox(B * 0.37, 0.6, 5.2, NVM.dark, 0, 13.1, -L * 0.115));
+        g.add(samCyl(0.35, 0.6, 14, 6, NVM.sup, 0, 18, L * 0.08));
+        g.add(samBox(0.25, 0.25, 6, NVM.dark, 0, 21, L * 0.08));
+        g.add(samBox(B * 0.8, 0.15, L * 0.18, NVM.deck, 0, 4.45, -L * 0.38));
+        g.add(samBox(5, 0.18, 0.4, NVM.white, 0, 4.56, -L * 0.38));
+        g.add(samBox(0.4, 0.18, 5, NVM.white, 0, 4.56, -L * 0.38));
+        // vertical launch cells: two blocks of hatches
+        [L * 0.3, -L * 0.25].forEach(function(z, bi) {
+          if (kind === 'frigate' && bi) return;
+          var vl = samBox(B * 0.5, 0.35, 6, NVM.vls, 0, 4.55, z); g.add(vl);
+          for (var r = 0; r < 4; r++) for (var c = 0; c < 2; c++) g.add(samBox(B * 0.18, 0.1, 1.2, NVM.dark, (c - 0.5) * B * 0.24, 4.78, z - 2.2 + r * 1.45));
+          parts.vls.push(new THREE.Vector3(0, 5.2, z));
+        });
+        // radar: a rotating array on the mast
+        var rad = new THREE.Group(); rad.position.set(0, 25.5, L * 0.08); g.add(rad);
+        rad.add(samBox(5.5, 1.4, 0.3, NVM.dark, 0, 0, 0));
+        parts.radar = rad;
+        // main gun, forward
+        var tur = new THREE.Group(); tur.position.set(0, 4.5, L * 0.36); g.add(tur);
+        tur.add(samBox(3.6, 2.2, 4.6, NVM.sup, 0, 1.1, 0));
+        var brl = samCyl(0.2, 0.26, 7, 8, NVM.dark, 0, 1.4, 5.2); brl.rotation.x = Math.PI / 2; tur.add(brl);
+        parts.turret = tur;
+      }
+      // CIWS: white domes on pedestals
+      var cPos = kind === 'destroyer' ? [[0, 13.5, L * 0.19], [0, 9.6, -L * 0.24]] : kind === 'frigate' ? [[0, 9.6, -L * 0.22]] : [[0, 15.2, -L / 2 + 10]];
+      cPos.forEach(function(p) {
+        var c = new THREE.Group(); c.position.set(p[0], p[1], p[2]); g.add(c);
+        c.add(samCyl(0.9, 1.1, 1.6, 10, NVM.white, 0, 0.8, 0));
+        var dome = new THREE.Mesh(new THREE.SphereGeometry(0.95, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), NVM.white); dome.position.y = 1.6; c.add(dome);
+        var gun = samCyl(0.12, 0.12, 2.2, 6, NVM.dark, 0, 1.3, 1.2); gun.rotation.x = Math.PI / 2; c.add(gun);
+        parts.ciws.push(c);
+      });
+      warBake(g, [parts.turret, parts.radar].concat(parts.ciws));
+      g.traverse(function(o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      scene.add(g);
+      return { group: g, parts: parts };
+    }
+    // the patrol loop, parametrised by distance sailed (an ellipse's angle isn't: ships would bunch at the ends)
+    (function() {
+      var P = NAVY_PATH, N = 720, acc = 0, px = 0, pz = 0;
+      P.tab = [];
+      for (var i = 0; i <= N; i++) {
+        var a = i / N * Math.PI * 2, x = P.cx + Math.cos(a) * P.rx, z = P.cz + Math.sin(a) * P.rz;
+        if (i) acc += Math.hypot(x - px, z - pz);
+        P.tab.push(acc); px = x; pz = z;
+      }
+      P.len = acc; P.N = N;
+    })();
+    function navyPathPos(s, out) {
+      var P = NAVY_PATH, T = P.tab;
+      s = ((s % P.len) + P.len) % P.len;
+      var lo = 0, hi = P.N;
+      while (hi - lo > 1) { var mid = (lo + hi) >> 1; if (T[mid] <= s) lo = mid; else hi = mid; }
+      var a = (lo + (s - T[lo]) / Math.max(1e-6, T[hi] - T[lo])) / P.N * Math.PI * 2;
+      out.set(P.cx + Math.cos(a) * P.rx, 0, P.cz + Math.sin(a) * P.rz);
+      return out;
+    }
+    function navySpawn() {
+      NAVY.ships.forEach(function(sh) { scene.remove(sh.group); var i = strikeTargets.indexOf(sh); if (i >= 0) { sh.alive = false; sh.group.visible = false; } });
+      var keep = NAVY.ships; NAVY.ships = [];
+      ['destroyer', 'frigate', 'frigate', 'oiler'].forEach(function(kind, i) {
+        var K = NAVY_KIND[kind], old = keep[i], b = navyBuildShip(kind);
+        var t;
+        if (old) {
+          // reuse the strike-target slot so indices stay stable for multiplayer sync
+          old.group = b.group; old.parts = b.parts; old.alive = true; old.hp = old.maxHp; old.dmgState = 0; old.sinkT = 0;
+          old.origMats = []; b.group.traverse(function(c) { if (c.isMesh) old.origMats.push([c, c.material]); });
+          t = old;
+        } else {
+          t = stAddTarget({ kind: 'ship', label: K.name, group: b.group, hitR: K.B * 1.5, maxHp: K.hp, navy: true, bounty: K.bounty, armor: 0.7 });
+          t.parts = b.parts;
+        }
+        t.shipKind = kind; t.slot = i; t.sam = K.sam; t.samCd = 6 + i * 2; t.gunT = 2 + i; t.ciwsT = 0; t.burst = 0; t.lock = 0; t.sinkT = 0;
+        NAVY.ships.push(t);
+      });
+      ARS_TGT = null;
+      navyPlace(0);
+    }
+    var _nvV = new THREE.Vector3(), _nvV2 = new THREE.Vector3(), _nvF = new THREE.Vector3();
+    function navyPlace(dt) {
+      NAVY.s += 8.5 * dt;
+      NAVY.t += dt;
+      NAVY.ships.forEach(function(t, i) {
+        var s = NAVY.s - i * 150;
+        navyPathPos(s, _nvV); navyPathPos(s + 5, _nvV2);
+        var hdg = Math.atan2(_nvV2.x - _nvV.x, _nvV2.z - _nvV.z);
+        var g = t.group, sink = t.sinkT || 0;
+        if (!t.alive && sink <= 0) return;
+        if (t.alive) { g.position.set(_nvV.x, WATER_LEVEL + Math.sin(NAVY.t * 0.7 + i) * 0.25, _nvV.z); g.rotation.set(Math.sin(NAVY.t * 0.5 + i * 2) * 0.012, hdg, Math.sin(NAVY.t * 0.63 + i) * 0.02); }
+        t.center.set(g.position.x, WATER_LEVEL + 6, g.position.z);
+        t.fwd = { x: Math.sin(g.rotation.y), z: Math.cos(g.rotation.y) };
+      });
+    }
+    // the ships' weapons
+    function navyLaunch(t) {
+      var m = null;
+      for (var i = 0; i < samMissiles.length; i++) if (!samMissiles[i].active) { m = samMissiles[i]; break; }
+      if (!m) return false;
+      var cell = t.parts.vls[t.sam % t.parts.vls.length];
+      t.group.updateMatrixWorld(true);
+      m.pos.copy(cell).applyMatrix4(t.group.matrixWorld); m.prev.copy(m.pos);
+      m.vel.set((position.x - m.pos.x) * 0.006, 70, (position.z - m.pos.z) * 0.006);
+      m.active = true; m.life = 0; m.target = 'player'; m.lost = 0; m.seen = {}; m.smokeT = 0; m.reacquireTried = false;
+      m.los = (m.los || new THREE.Vector3()).copy(position).sub(m.pos).normalize();
+      m.owner = null; m.mid = null; m._miss = 99;
+      m.group.visible = true;
+      for (var s = 0; s < 8; s++) samEmitSmoke(m.pos, new THREE.Vector3((Math.random() - 0.5) * 8, Math.random() * 6, (Math.random() - 0.5) * 8), 9, 3, 0.6, 0.9);
+      if (m.pos.distanceTo(position) < 2500) playMissileLaunchSound();
+      samLaunchWarn = 3;
+      samToast('SHIP LAUNCH — ' + NAVY_KIND[t.shipKind].name + ' — FLARES!', '#ff3b30', 2.4);
+      return true;
+    }
+    function navyTracer(from, aim, dmg) {
+      for (var i = 0; i < AA_TRACERS.length; i++) {
+        var tr = AA_TRACERS[i];
+        if (tr.active) continue;
+        var d = from.distanceTo(aim), dir = _nvF.copy(aim).sub(from).normalize();
+        dir.x += (Math.random() - 0.5) * 0.03; dir.y += (Math.random() - 0.5) * 0.03; dir.z += (Math.random() - 0.5) * 0.03;
+        tr.pos.copy(from); tr.vel.copy(dir.normalize()).multiplyScalar(1100); tr.life = 0; tr.max = d / 1100 + 0.3; tr.active = true; tr.s.visible = true; tr.dmg = dmg;
+        return;
+      }
+    }
+    function navyUpdate(dt) {
+      if (!NAVY.ships.length) return;
+      navyPlace(dt);
+      var eligible = started && !crashing && !ejecting && !isCarMode && !wasGrounded && !kj.boxed && samGrace <= 0;
+      var agl = position.y - Math.max(getEffectiveGroundHeight(position.x, position.z), WATER_LEVEL);
+      var airborne = 0;
+      for (var mi = 0; mi < samMissiles.length; mi++) if (samMissiles[mi].active) airborne++;
+      var lock = 0, search = false;
+      NAVY.emitters.length = 0;
+      var anyAlive = false;
+      NAVY.ships.forEach(function(t) {
+        var g = t.group;
+        if (!t.alive) {
+          // sinking: settle by the stern, list over, burn, then gone
+          if (t.sinkT > 0) {
+            t.sinkT += dt;
+            g.position.y -= dt * (0.25 + t.sinkT * 0.012);
+            g.rotation.z += (0.38 - g.rotation.z) * dt * 0.08;
+            g.rotation.x += (-0.12 - g.rotation.x) * dt * 0.05;
+            if (Math.random() < dt * 6) samEmitSmoke(_nvV.copy(t.center).add(_nvV2.set((Math.random() - 0.5) * 30, 4, (Math.random() - 0.5) * 30)), _nvV2.set(0, 6, 0), 26, 9, 0.6, 0.08);
+            if (t.sinkT > 70) { t.sinkT = 0; g.visible = false; }
+          }
+          return;
+        }
+        anyAlive = true;
+        if (t.parts.radar) t.parts.radar.rotation.y += dt * 2.4;
+        var c = t.center, d = c.distanceTo(position);
+        var range = 5200 * (isStealthMode ? 0.4 : 1);
+        var seen = eligible && d < range && !(agl < 12 && d > 1500);
+        t.lock = seen ? Math.min(1, t.lock + dt / 1.8) : Math.max(0, t.lock - dt * 0.6);
+        if (seen) { search = true; NAVY.emitters.push({ x: c.x, z: c.z, lethal: t.lock > 0.05, sym: 'S' }); }
+        if (seen && t.lock > 0.05) lock = Math.max(lock, t.lock);
+        // turret and CIWS mounts follow you
+        var yawTo = Math.atan2(position.x - c.x, position.z - c.z) - g.rotation.y;
+        if (t.parts.turret && seen) t.parts.turret.rotation.y += Math.atan2(Math.sin(yawTo - t.parts.turret.rotation.y), Math.cos(yawTo - t.parts.turret.rotation.y)) * Math.min(1, dt * 1.5);
+        t.parts.ciws.forEach(function(cw) { if (d < 2500) cw.rotation.y += Math.atan2(Math.sin(yawTo - cw.rotation.y), Math.cos(yawTo - cw.rotation.y)) * Math.min(1, dt * 4); });
+        if ((t.samCd -= dt) < 0) t.samCd = 0;
+        if (t.lock >= 1 && t.sam > 0 && t.samCd <= 0 && d < 4600 && airborne < SAM_MAX_AIRBORNE + 1 && t.parts.vls.length) {
+          if (navyLaunch(t)) { t.sam--; t.samCd = 9 + Math.random() * 5; airborne++; }
+        }
+        // the main gun: flak bursts where you'll be, scattered more the further out you are
+        if (NAVY_KIND[t.shipKind].gun && seen && d < 4800 && (t.gunT -= dt) <= 0) {
+          t.gunT = 1.7 + Math.random() * 0.6;
+          var tof = d / 800;
+          var at = _nvV.copy(position).addScaledVector(samPlayerVel, tof);
+          var err = d * 0.014;
+          at.add(_nvV2.set((Math.random() - 0.5) * err, (Math.random() - 0.5) * err, (Math.random() - 0.5) * err));
+          NAVY.bursts.push({ t: tof, pos: at.clone() });
+          if (t.parts.turret) samEmitSmoke(_nvV2.copy(t.parts.turret.position).applyMatrix4(g.matrixWorld), _nvV.set(0, 2, 0), 6, 1.5, 0.5, 0.8);
+          if (d < 3000 && audioCtx && soundEnabled && typeof esShot === 'function' && ES.brown) esShot(ES.brown, 'lowpass', 400, 70, Math.min(0.25, 60 / d), 0.5);
+        }
+        // CIWS: tracer at you inside 1.6 km
+        if (seen && d < 1600 && (t.ciwsT -= dt) <= 0) {
+          if (++t.burst > 16) { t.burst = 0; t.ciwsT = 0.9 + Math.random() * 0.6; }
+          else {
+            t.ciwsT = 0.05;
+            var cw = t.parts.ciws[t.burst % t.parts.ciws.length];
+            var from = cw.getWorldPosition(_nvV2).clone(); from.y += 1.5;
+            navyTracer(from, _nvV.copy(position).addScaledVector(samPlayerVel, d / 1100), 2.5);
+          }
+        }
+        // the destroyer's CIWS also engages incoming weapons
+        if (t.shipKind === 'destroyer') {
+          // one look at each incoming weapon as it closes inside 900 m; a salvo saturates it
+          if (t.ciwsCd > 0) t.ciwsCd -= dt;
+          for (var pi = ARS.proj.length - 1; pi >= 0; pi--) {
+            var p = ARS.proj[pi];
+            if (p.ciwsRolled || p.pos.distanceTo(c) > 900 || p.life < 0.5) continue;
+            p.ciwsRolled = true;
+            if (!(t.ciwsCd > 0) && Math.random() < 0.38) {
+              t.ciwsCd = 2.5;
+              var cf = t.parts.ciws[0].getWorldPosition(_nvV2).clone();
+              for (var k = 0; k < 5; k++) navyTracer(cf, p.pos, 0);
+              triggerMissileBlast(p.pos.clone());
+              samToast('CIWS SHOT DOWN YOUR ' + (p.w.kind === 'missile' ? 'MISSILE' : 'BOMB'), '#ffb46a', 1.8);
+              arsRetire(p); ARS.proj.splice(pi, 1);
+            }
+          }
+        }
+        // our air wing in range catches a SAM now and then
+        if (t.sam > 0 && t.samCd <= 0) {
+          var aw = AW.list.filter(function(a) { return a.alive && a.state !== 'down' && a.state !== 'catwait' && a.state !== 'cat' && a.pos.distanceTo(c) < 3500 && a.pos.y > WATER_LEVEL + 60; })[0];
+          if (aw) { awFire(c.clone().add(_nvV.set(0, 6, 0)), aw, null, true, null); t.sam--; t.samCd = 12; }
+        }
+      });
+      NAVY.lock = lock; NAVY.search = search;
+      for (var b = NAVY.bursts.length - 1; b >= 0; b--) {
+        var e = NAVY.bursts[b];
+        if ((e.t -= dt) <= 0) { NAVY.bursts.splice(b, 1); aaFlakEffect(e.pos, null); }
+      }
+      // a fresh group puts to sea a while after the last one goes down
+      if (!anyAlive) {
+        if (NAVY.respawnT <= 0) NAVY.respawnT = WAR.on ? 900 : 300;
+        if ((NAVY.respawnT -= dt) <= 0) { navySpawn(); awRadio('OVERLORD: New enemy surface group at sea, south of the coast.', '#ffd27a'); }
+      } else NAVY.respawnT = 0;
+    }
+    function navyOnSunk(t, fx) {
+      t.sinkT = 0.001;
+      if (fx) {
+        for (var k = 0; k < 6; k++) strikeSecondaries.push({ t: 0.2 + k * 0.45, pos: t.center.clone().add(new THREE.Vector3((Math.random() - 0.5) * 40, 3 + Math.random() * 6, (Math.random() - 0.5) * 40)) });
+        stIgniteFire(t.center.clone(), 22, 70);
+      }
+    }
+    function navyKillMsg(t, quiet) {
+      var left = NAVY.ships.filter(function(s) { return s.alive; }).length;
+      if (WAR.on) { WAR.score += NAVY_KIND[t.shipKind].score; WAR.kills++; WAR.dirty = true; }
+      if (quiet) return;
+      var msg = NAVY_KIND[t.shipKind].name + ' SUNK' + (left ? ' — ' + left + ' LEFT IN THE GROUP' : ' — SURFACE GROUP DESTROYED');
+      stInfoFlash(msg); samToast(msg, '#7dff8a', 3);
+      if (!left) warBanner('SURFACE GROUP DESTROYED', 'The sea lanes are clear', '#7dff8a', 4);
+    }
+    function navyMap(ctx, toS, exp, inView, label, rot) {
+      NAVY.ships.forEach(function(t) {
+        if (!t.alive && !(t.sinkT > 0)) return;
+        var c = t.center, d = Math.hypot(c.x - position.x, c.z - position.z);
+        if (d > 9000 && !(isAwacsMode && d < 15000)) return;
+        var p = toS(c.x, c.z);
+        if (!inView(p, 4)) return;
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.PI - t.group.rotation.y + rot);
+        ctx.fillStyle = t.alive ? '#ff4a3a' : 'rgba(160,160,160,.7)'; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.lineWidth = 1;
+        var Ls = exp ? 7 : 5, Bs = exp ? 2.3 : 1.8;
+        ctx.beginPath(); ctx.moveTo(0, -Ls); ctx.lineTo(Bs, -Ls * 0.3); ctx.lineTo(Bs, Ls); ctx.lineTo(-Bs, Ls); ctx.lineTo(-Bs, -Ls * 0.3); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.restore();
+        if (exp && t.slot === 0 && t.alive) label('ENEMY FLEET', p.x, p.y - 12, '#ff7a64', 8);
+      });
+    }
+    navySpawn();
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
