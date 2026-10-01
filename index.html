@@ -104,224 +104,212 @@
     100%{ background-position:120px 0; opacity:.4; }
   }
 
-  /* ---------- start screen ---------- */
+  /* ---------- start screen: a title menu over the live world ---------- */
   #startScreen{
-    position:fixed; inset:0; z-index:30;
-    display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
-    text-align:center; padding:24px;
-    overflow-y:auto; -webkit-overflow-scrolling:touch; touch-action:pan-y;
+    position:fixed; inset:0; z-index:30; overflow:hidden;
+    display:grid; gap:12px 28px;
+    grid-template-columns:minmax(270px, 330px) 1fr minmax(290px, 330px);
+    grid-template-rows:auto 1fr auto auto;
+    grid-template-areas:"top top top" "menu stage setup" "menu ac setup" "tip tip tip";
+    padding:calc(20px + env(safe-area-inset-top)) calc(28px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(28px + env(safe-area-inset-left));
+    color:#e9eef2; font-family:-apple-system, system-ui, "Segoe UI", Roboto, sans-serif; text-align:left;
     background:
-      radial-gradient(ellipse at 30% 20%, rgba(255,255,255,.18) 0%, transparent 45%),
-      radial-gradient(ellipse at 70% 60%, rgba(180,220,255,.12) 0%, transparent 40%),
-      linear-gradient(180deg,
-        #0d3a6e 0%,
-        var(--sky-top) 18%,
-        #5aaedd 45%,
-        #a8d8f0 68%,
-        var(--sky-bottom) 100%);
+      radial-gradient(ellipse at 56% 50%, rgba(0,0,0,0) 32%, rgba(3,6,11,.45) 100%),
+      linear-gradient(90deg, rgba(4,7,12,.88) 0%, rgba(4,7,12,.55) 21%, rgba(4,7,12,0) 40%),
+      linear-gradient(270deg, rgba(4,7,12,.72) 0%, rgba(4,7,12,0) 30%),
+      linear-gradient(0deg, rgba(4,7,12,.92) 0%, rgba(4,7,12,.62) 24%, rgba(4,7,12,.18) 40%, rgba(4,7,12,0) 52%),
+      linear-gradient(180deg, rgba(4,7,12,.55) 0%, rgba(4,7,12,0) 16%);
   }
-  #startScreen::before{
-    content:"";
-    position:fixed; inset:0; z-index:0; pointer-events:none;
-    background:var(--noise);
-    opacity:.55;
-  }
-  #startScreen::before,
-  #startScreen::after{ content:""; flex:1 0 auto; min-height:0; }
-  #startScreen h1{
-    margin:0; color:var(--ink); font-weight:800;
-    letter-spacing:.06em; line-height:.92;
-    font-size:clamp(42px,13vw,72px);
-    text-shadow:0 3px 0 rgba(0,0,0,.12), 0 0 60px rgba(255,255,255,.25);
-    position:relative; z-index:1;
-  }
-  #startScreen .rule{
-    width:64px; height:4px;
-    background:linear-gradient(90deg, var(--red-deep), var(--red), #ff5533);
-    margin:14px 0 12px; border-radius:2px;
-    box-shadow:0 0 10px var(--red-glow);
-    position:relative; z-index:1;
-  }
-  #startScreen p.sub{
-    margin:0 0 22px; color:var(--ink); opacity:.78; font-size:14px; max-width:340px;
-    position:relative; z-index:1;
-  }
-  .instructions{
-    display:flex; gap:22px; margin-bottom:26px; flex-wrap:wrap; justify-content:center;
-    position:relative; z-index:1;
-  }
-  .instructions .col{
-    background:
-      var(--hatch),
-      rgba(255,255,255,.52);
-    border:1px solid rgba(20,22,26,.18);
-    border-top:2px solid rgba(20,22,26,.28);
-    border-radius:12px; padding:12px 16px; min-width:168px; text-align:left;
-    box-shadow:0 2px 12px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.6);
-    backdrop-filter:blur(4px);
-  }
-  .instructions .col h3{
-    margin:0 0 8px; font-size:10px; letter-spacing:.14em; text-transform:uppercase;
-    color:var(--ink); opacity:.55;
-    border-bottom:1px solid rgba(20,22,26,.1); padding-bottom:6px;
-  }
-  .instructions .col div{ font-size:13px; color:var(--ink); padding:3px 0; border-bottom:1px solid rgba(0,0,0,.05); }
-  .instructions .col div:last-child{ border-bottom:none; }
-  .instructions .col b{ display:inline-block; min-width:64px; color:var(--red); font-family:ui-monospace,Consolas,monospace; }
-  #startBtn{
-    appearance:none; border:none; cursor:pointer;
-    background:
-      var(--hatch),
-      linear-gradient(180deg, #252830 0%, var(--ink) 100%);
-    color:var(--off);
-    padding:16px 44px; font-size:15px; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
-    border-radius:999px;
-    border:1px solid rgba(255,255,255,.08);
-    border-bottom:3px solid var(--red);
-    box-shadow:0 4px 20px rgba(0,0,0,.35), 0 0 0 1px rgba(225,6,0,.25), inset 0 1px 0 rgba(255,255,255,.07);
-    transition:transform .12s ease, box-shadow .12s ease;
-    position:relative; z-index:1;
-  }
-  #startBtn:active{
-    transform:scale(.96);
-    box-shadow:0 2px 10px rgba(0,0,0,.4), 0 0 0 1px rgba(225,6,0,.4);
-  }
-  #startScreen .foot{ margin-top:16px; font-size:12px; color:var(--ink); opacity:.5; max-width:320px; }
+  #startScreen > *{ min-width:0; min-height:0; animation:ssIn .7s cubic-bezier(.2,.8,.2,1) both; }
+  #startScreen .ss-menu{ animation-delay:.08s; } #startScreen .ss-aircraft{ animation-delay:.16s; } #startScreen .ss-setup{ animation-delay:.24s; }
+  @keyframes ssIn{ from{ opacity:0; transform:translateY(14px); } to{ opacity:1; transform:none; } }
+  #startScreen button{ font-family:inherit; }
 
-  #timePicker{ width:100%; max-width:340px; margin:4px 0 18px; }
-  #mpBox{ width:100%; max-width:340px; margin:0 0 18px; }
-  #mpBox .rowHead{ margin-bottom:8px; }
-  #mpBox h3{ margin:0; font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink); opacity:.6; }
-  #mpBox .mpRow{ display:flex; gap:8px; }
-  #mpBox input{
-    flex:1; min-width:0; padding:10px 11px; border-radius:10px; border:1px solid rgba(0,0,0,.14);
-    background:rgba(255,255,255,.75); font:600 13px/1 ui-monospace,Menlo,monospace; letter-spacing:.06em; color:#14181c;
-    text-transform:uppercase; outline:none;
-  }
-  #mpBox input:focus{ border-color:var(--red); box-shadow:0 0 0 3px rgba(225,6,0,.15); }
-  #mpBox input::placeholder{ text-transform:none; letter-spacing:0; font-family:-apple-system,system-ui,sans-serif; font-weight:500; color:#8a9199; }
-  .mpStatus{ margin-top:7px; font:700 10.5px/1.3 ui-monospace,Menlo,monospace; letter-spacing:.08em; color:#8a9199; }
+  .ss-top{ grid-area:top; display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+  .ss-brand b{ display:block; font-size:clamp(34px, 4.6vw, 62px); font-weight:900; letter-spacing:.16em; line-height:.95;
+    background:linear-gradient(180deg, #ffffff 0%, #c9d3db 100%); -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter:drop-shadow(0 3px 18px rgba(0,0,0,.45)); }
+  .ss-brand span{ display:flex; align-items:center; gap:10px; margin-top:8px; font-size:11px; font-weight:800; letter-spacing:.42em; text-transform:uppercase; color:#ffb08a; }
+  .ss-brand span i{ width:44px; height:3px; border-radius:2px; background:linear-gradient(90deg, var(--red-deep), var(--red), #ff7a33); box-shadow:0 0 12px var(--red-glow); }
+  .ss-meta{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; padding-top:4px; }
+  .ss-pill{ font:800 11.5px/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing:.1em; padding:8px 12px; border-radius:3px;
+    background:rgba(8,12,18,.62); border:1px solid rgba(255,255,255,.12); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+  .ss-pill.ss-gold{ color:#f3c454; border-color:rgba(243,196,84,.4); }
+  .ss-pill.ss-dim{ color:#a9b5be; }
+
+  /* main menu */
+  .ss-menu{ grid-area:menu; align-self:end; display:flex; flex-direction:column; gap:7px; padding-bottom:4px; }
+  .ss-play{ appearance:none; border:0; cursor:pointer; text-align:left; color:#fff; position:relative; overflow:hidden;
+    padding:20px 28px 16px 24px; margin-bottom:8px;
+    background:linear-gradient(100deg, #f0521f 0%, #c42a0e 55%, #8f1a08 100%);
+    clip-path:polygon(0 0, 100% 0, calc(100% - 18px) 100%, 0 100%);
+    box-shadow:0 10px 40px rgba(230,70,20,.35); transition:filter .15s ease, transform .1s ease; }
+  .ss-play::after{ content:""; position:absolute; top:0; bottom:0; width:40%; left:-60%;
+    background:linear-gradient(100deg, transparent, rgba(255,255,255,.28), transparent); animation:ssShine 4.5s ease-in-out 1.2s infinite; }
+  @keyframes ssShine{ 0%, 70%{ left:-60%; } 100%{ left:130%; } }
+  .ss-play span{ display:block; font-size:30px; font-weight:900; letter-spacing:.16em; text-transform:uppercase; line-height:1; text-shadow:0 2px 0 rgba(0,0,0,.25); }
+  .ss-play small{ display:block; margin-top:6px; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:#ffd9c6; }
+  .ss-play kbd, .ss-play small kbd{ font:700 9.5px ui-monospace, monospace; padding:1px 5px; border-radius:2px; background:rgba(0,0,0,.25); color:#fff; letter-spacing:.06em; }
+  .ss-play:hover{ filter:brightness(1.1); } .ss-play:active{ transform:scale(.98); }
+  .ss-item{ appearance:none; cursor:pointer; display:flex; align-items:center; gap:14px; text-align:left; color:#e9eef2;
+    padding:10px 14px; background:linear-gradient(90deg, rgba(10,14,20,.72), rgba(10,14,20,.38)); border:1px solid rgba(255,255,255,.07);
+    border-left:3px solid rgba(255,255,255,.14); border-radius:2px; transition:transform .15s ease, background .15s ease, border-color .15s ease; }
+  .ss-item b{ flex:0 0 34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:17px; background:rgba(255,255,255,.06); border-radius:2px; color:#ffb08a; }
+  .ss-item span{ font-size:15px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+  .ss-item small{ display:block; margin-top:3px; font-size:10.5px; font-weight:500; letter-spacing:.06em; text-transform:none; color:#93a0aa; }
+  .ss-item:hover, .ss-item:focus-visible{ transform:translateX(5px); border-left-color:#ff7a33; background:linear-gradient(90deg, rgba(40,26,20,.85), rgba(40,26,20,.4)); outline:none; }
+  .ss-item:active{ transform:translateX(5px) scale(.98); }
+  .ss-narrow{ display:none !important; }
+
+  /* the open stage in the middle, where the aircraft sits */
+  #ssStage{ grid-area:stage; position:relative; cursor:grab; touch-action:none; }
+  #ssStage:active{ cursor:grabbing; }
+  .ss-drag{ position:absolute; left:50%; bottom:6px; transform:translateX(-50%); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:rgba(233,238,242,.42); pointer-events:none; white-space:nowrap; }
+
+  /* aircraft selector */
+  .ss-aircraft{ grid-area:ac; align-self:end; text-shadow:0 1px 8px rgba(0,0,0,.85); }
+  .ss-acHead{ display:flex; align-items:center; gap:14px; }
+  .ss-acHead button{ appearance:none; cursor:pointer; flex:0 0 42px; height:42px; border-radius:50%; font-size:24px; line-height:1; color:#fff;
+    background:rgba(8,12,18,.55); border:1px solid rgba(255,255,255,.18); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); transition:background .15s ease, transform .1s ease; }
+  .ss-acHead button:hover{ background:rgba(255,110,40,.35); border-color:#ff7a33; } .ss-acHead button:active{ transform:scale(.92); }
+  .ss-acName{ flex:1; min-width:0; text-align:center; }
+  .ss-acName i{ display:flex; justify-content:center; gap:10px; font-style:normal; font-size:10.5px; font-weight:800; letter-spacing:.3em; color:#ff8a4a; }
+  .ss-acName i em{ font-style:normal; color:#7f8b94; letter-spacing:.14em; }
+  .ss-acName b{ display:block; font-size:clamp(26px, 3.4vw, 44px); font-weight:900; letter-spacing:.04em; line-height:1.05; text-shadow:0 3px 24px rgba(0,0,0,.5); }
+  .ss-acName span{ display:block; font-size:12.5px; color:#b5c0c8; text-shadow:0 1px 8px rgba(0,0,0,.6); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #ssStats{ display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin:12px auto 12px; max-width:620px; }
+  .ss-stat{ display:grid; grid-template-columns:1fr auto; gap:4px 6px; font-size:10.5px; }
+  .ss-stat span{ color:#9aa6af; letter-spacing:.1em; text-transform:uppercase; font-weight:700; }
+  .ss-stat b{ font:800 11px ui-monospace, Menlo, monospace; color:#fff; }
+  .ss-stat i{ grid-column:1 / 3; height:3px; background:rgba(255,255,255,.12); border-radius:2px; overflow:hidden; }
+  .ss-stat em{ display:block; height:100%; background:linear-gradient(90deg, #d9622a, #ffb36a); }
+  .ss-load span{ display:block; font-size:10.5px; color:#9aa6af; letter-spacing:.1em; text-transform:uppercase; font-weight:700; margin-bottom:3px; }
+  .ss-load b{ font-size:12px; color:#ffd2b5; }
+  #planeOptions{ display:flex; gap:6px; overflow-x:auto; scroll-snap-type:x proximity; padding:2px 2px 6px; scrollbar-width:none; justify-content:safe center; }
+  #planeOptions::-webkit-scrollbar{ display:none; }
+  .planeOpt{ appearance:none; cursor:pointer; flex:0 0 auto; scroll-snap-align:center; display:flex; flex-direction:column; gap:2px; text-align:left;
+    min-width:98px; padding:8px 11px; color:#dfe5ea; border-radius:2px;
+    background:rgba(8,12,18,.62); border:1px solid rgba(255,255,255,.1); border-bottom:2px solid rgba(255,255,255,.12);
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); transition:background .15s ease, border-color .15s ease, transform .1s ease; }
+  .planeOpt:hover{ background:rgba(30,36,44,.8); }
+  .planeOpt:active{ transform:scale(.96); }
+  .planeOpt .pName{ font-size:12.5px; font-weight:800; letter-spacing:.02em; white-space:nowrap; }
+  .planeOpt .pStat{ font:700 9.5px ui-monospace, Menlo, monospace; color:#8d99a3; letter-spacing:.04em; }
+  .planeOpt.active{ background:linear-gradient(180deg, rgba(220,80,30,.55), rgba(140,40,14,.45)); border-color:rgba(255,140,70,.5); border-bottom-color:#ff7a33; color:#fff; }
+  .planeOpt.active .pStat{ color:#ffd6bf; }
+
+  /* mission setup */
+  .ss-setup{ grid-area:setup; align-self:end; max-height:100%; overflow:auto; scrollbar-width:thin;
+    background:linear-gradient(180deg, rgba(9,12,17,.82), rgba(9,12,17,.7)); border:1px solid rgba(255,255,255,.08); border-radius:3px;
+    padding:14px 16px 12px; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+  .ss-setupHead{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .ss-setupHead h3{ margin:0; font-size:10.5px; font-weight:800; letter-spacing:.3em; text-transform:uppercase; color:#8d99a3; }
+  .ss-setupHead button{ appearance:none; cursor:pointer; border:0; background:rgba(255,255,255,.08); color:#e9eef2; width:30px; height:30px; border-radius:50%; font-size:13px; }
+  #ssSetupClose{ display:none; }
+  .ss-block{ padding:10px 0 12px; border-top:1px solid rgba(255,255,255,.07); }
+  .ss-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:9px; }
+  .ss-row h4, #liveryRow .liveryLabel{ margin:0; font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:#dfe5ea; }
+  #startScreen .clockVal{ font:800 14px ui-monospace, Menlo, monospace; color:#ffcf8a; font-variant-numeric:tabular-nums; }
+  #timeSlider{ width:100%; height:6px; border-radius:3px; appearance:none; -webkit-appearance:none; outline:none; cursor:pointer;
+    background:linear-gradient(90deg,#141a38 0%,#3a3f6e 11%,#FCD9A8 24%,#DCEFF5 36%,#DCEFF5 64%,#FCD9A8 76%,#4a3560 89%,#141a38 100%); }
+  #timeSlider::-webkit-slider-thumb{ -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:#fff; border:3px solid #ff6a2a; box-shadow:0 1px 6px rgba(0,0,0,.5); cursor:pointer; }
+  #timeSlider::-moz-range-thumb{ width:14px; height:14px; border-radius:50%; background:#fff; border:3px solid #ff6a2a; box-shadow:0 1px 6px rgba(0,0,0,.5); cursor:pointer; }
+  #timePresets{ display:flex; gap:5px; margin-top:10px; }
+  #timePresets button{ flex:1; appearance:none; cursor:pointer; font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; padding:7px 4px; border-radius:2px;
+    border:1px solid rgba(255,255,255,.1); background:rgba(255,255,255,.05); color:#c9d2d9; }
+  #timePresets button:hover{ background:rgba(255,255,255,.1); }
+  #timePresets button.active{ background:rgba(255,110,40,.3); border-color:#ff7a33; color:#fff; }
+  #liveryRow{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  #liveryRow .liveryLabel{ flex:1 1 100%; margin-bottom:4px; }
+  .liveryOpt{ position:relative; width:32px; height:32px; border-radius:50%; cursor:pointer; flex:0 0 auto;
+    border:2px solid rgba(255,255,255,.25); box-shadow:0 1px 6px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.35); transition:transform .12s ease, box-shadow .12s ease; }
+  .liveryOpt:hover{ transform:scale(1.08); } .liveryOpt:active{ transform:scale(.9); }
+  .liveryOpt.active{ border-color:#ff7a33; box-shadow:0 0 0 3px rgba(255,122,51,.3), 0 2px 10px rgba(255,122,51,.35); }
+  .liveryOpt.locked{ opacity:.6; }
+  .liveryOpt .lockBadge{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:11px; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.7); pointer-events:none; }
+  .liveryOpt .priceBadge{ position:absolute; left:50%; bottom:-14px; transform:translateX(-50%); font:700 8.5px/1 ui-monospace, Consolas, monospace; color:#f3c454;
+    white-space:nowrap; background:rgba(0,0,0,.75); padding:2px 4px; border-radius:3px; }
+  .liveryOpt.shake{ animation:liveryShake .32s ease; }
+  @keyframes liveryShake{ 0%,100%{ transform:translateX(0); } 20%{ transform:translateX(-4px); } 40%{ transform:translateX(4px); } 60%{ transform:translateX(-3px); } 80%{ transform:translateX(3px); } }
+  #liveryName{ margin-top:12px; font-size:11.5px; color:#9aa6af; }
+  #liveryName b{ color:#e9eef2; }
+  #liveryName .lprice{ color:#f3c454; font-weight:700; }
+  #mpBox .mpRow{ display:flex; gap:6px; }
+  #mpBox input{ flex:1; min-width:0; padding:9px 10px; border-radius:2px; border:1px solid rgba(255,255,255,.14); background:rgba(0,0,0,.35); color:#fff;
+    font:700 12px/1 ui-monospace, Menlo, monospace; letter-spacing:.06em; text-transform:uppercase; outline:none; }
+  #mpBox input:focus{ border-color:#ff7a33; box-shadow:0 0 0 3px rgba(255,122,51,.2); }
+  #mpBox input::placeholder{ text-transform:none; letter-spacing:0; font-family:-apple-system, system-ui, sans-serif; font-weight:500; color:#7d8992; }
+  .mpStatus{ font:700 10px/1.3 ui-monospace, Menlo, monospace; letter-spacing:.08em; color:#8a9199; }
   .mpStatus::before{ content:''; display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px; background:#9aa3ab; vertical-align:0; }
-  .mpStatus.online{ color:#1f8f3a; } .mpStatus.online::before{ background:#27c24c; box-shadow:0 0 6px #27c24c; }
+  .mpStatus.online{ color:#5fe07f; } .mpStatus.online::before{ background:#27c24c; box-shadow:0 0 6px #27c24c; }
   .mpStatus.connecting::before{ background:#e0a400; }
+  .ss-note{ margin:4px 0 0; padding-top:10px; border-top:1px solid rgba(255,255,255,.07); font-size:11px; line-height:1.5; color:#7f8b94; }
+
+  .ss-tip{ grid-area:tip; justify-self:center; font-size:12px; color:#aab5bd; text-shadow:0 1px 6px rgba(0,0,0,.7); opacity:0; }
+  .ss-tip b{ font:800 9.5px ui-monospace, monospace; letter-spacing:.2em; color:#ff8a4a; margin-right:10px; padding:2px 6px; border:1px solid rgba(255,138,74,.45); border-radius:2px; }
+  .ss-tip.in{ animation:ssTip 7s ease both; }
+  @keyframes ssTip{ 0%{ opacity:0; transform:translateY(6px); } 8%, 88%{ opacity:1; transform:none; } 100%{ opacity:0; } }
+
+  /* controls overlay */
+  #ssControls{ position:fixed; inset:0; z-index:5; display:flex; align-items:center; justify-content:center; padding:20px;
+    background:rgba(3,6,10,.62); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); animation:none; }
+  #ssControls.hidden{ display:none !important; }
+  .ss-ctlCard{ width:min(860px, 100%); max-height:100%; overflow:auto; background:rgba(10,13,18,.94); border:1px solid rgba(255,255,255,.1); border-radius:4px; padding:16px 20px 20px; animation:ssIn .3s ease both; }
+  #startScreen .instructions{ display:grid; grid-template-columns:repeat(4, 1fr); gap:18px; }
+  #startScreen .instructions h5{ margin:0 0 8px; font-size:10px; letter-spacing:.24em; text-transform:uppercase; color:#ff8a4a; }
+  #startScreen .instructions div div{ display:flex; gap:10px; font-size:12.5px; color:#cfd7dd; padding:5px 0; border-bottom:1px solid rgba(255,255,255,.05); }
+  #startScreen .instructions b{ flex:0 0 52px; font:700 11px ui-monospace, Menlo, monospace; color:#fff; }
+
+  /* compact landscape (laptops, tablets, phones on their side): setup moves behind a button */
+  @media (max-width: 1099px), (max-height: 619px) {
+    #startScreen{ grid-template-columns:minmax(220px, 290px) 1fr; grid-template-areas:"top top" "menu stage" "menu ac" "tip tip"; gap:8px 20px; }
+    .ss-narrow{ display:flex !important; }
+    #startScreen .ss-setup{ position:fixed; z-index:4; top:0; right:0; bottom:0; width:min(360px, 92vw); max-height:none; border-radius:0;
+      padding:calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 16px 16px; background:rgba(9,12,17,.96);
+      transform:translateX(105%); transition:transform .28s cubic-bezier(.2,.8,.2,1); animation:none; }
+    #startScreen .ss-setup.open{ transform:none; box-shadow:-20px 0 60px rgba(0,0,0,.5); }
+    #ssSetupClose{ display:block; }
+  }
+  @media (max-height: 520px) and (orientation: landscape) {
+    #startScreen{ padding:calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); grid-template-columns:minmax(200px, 250px) 1fr; }
+    .ss-brand b{ font-size:28px; } .ss-brand span{ margin-top:4px; font-size:9px; letter-spacing:.3em; }
+    .ss-pill{ padding:6px 9px; font-size:10px; } .ss-pill.ss-dim{ display:none; }
+    .ss-play{ padding:12px 18px 10px 16px; margin-bottom:4px; } .ss-play span{ font-size:21px; } .ss-play small{ font-size:9.5px; margin-top:3px; }
+    .ss-item{ padding:5px 10px; gap:10px; } .ss-item b{ flex-basis:26px; height:26px; font-size:13px; } .ss-item span{ font-size:12px; } .ss-item small{ display:none; }
+    .ss-acName b{ font-size:24px; } .ss-acName span{ display:none; }
+    #ssStats{ display:none; }
+    .ss-tip, .ss-drag{ display:none; }
+    #startScreen .instructions{ grid-template-columns:repeat(4, 1fr); gap:10px; }
+  }
+  /* portrait phones: one column, aircraft on top of the stack, big take-off button at the bottom */
+  @media (orientation: portrait) and (max-width: 760px) {
+    #startScreen{ grid-template-columns:1fr; grid-template-rows:auto 1fr auto auto; grid-template-areas:"top" "stage" "ac" "menu"; gap:10px;
+      padding:calc(16px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
+      background:
+        linear-gradient(0deg, rgba(4,7,12,.92) 0%, rgba(4,7,12,.55) 34%, rgba(4,7,12,0) 52%),
+        linear-gradient(180deg, rgba(4,7,12,.7) 0%, rgba(4,7,12,0) 22%); }
+    .ss-top{ flex-direction:column; align-items:center; text-align:center; gap:10px; }
+    .ss-brand b{ font-size:40px; } .ss-brand span{ justify-content:center; }
+    .ss-meta{ justify-content:center; }
+    .ss-menu{ display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; }
+    .ss-play{ grid-column:1 / -1; text-align:center; clip-path:none; border-radius:3px; padding:16px; }
+    .ss-play span{ font-size:24px; }
+    .ss-item{ flex-direction:column; gap:4px; padding:8px 4px; text-align:center; border-left-width:1px; border-bottom:2px solid rgba(255,255,255,.14); }
+    .ss-item:hover{ transform:none; }
+    .ss-item b{ flex:0 0 auto; width:30px; height:30px; } .ss-item span{ font-size:9.5px; letter-spacing:.06em; } .ss-item small{ display:none; }
+    #ssStats{ grid-template-columns:repeat(2, 1fr); gap:8px 14px; margin:8px 0; }
+    .ss-tip{ display:none; }
+    #startScreen .ss-setup{ top:auto; left:0; width:auto; max-height:78vh; transform:translateY(105%); border-radius:12px 12px 0 0; }
+    #startScreen .ss-setup.open{ transform:none; }
+    #startScreen .instructions{ grid-template-columns:repeat(2, 1fr); }
+  }
+  @media (pointer: coarse) { .ss-play kbd{ display:none; } }
+
   .mpHudRow{ display:flex; align-items:center; gap:6px; margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,.08);
     font:700 9.5px/1 ui-monospace,Menlo,monospace; letter-spacing:.1em; color:#9aa6b2; }
   .mpHudRow .dot{ width:6px; height:6px; border-radius:50%; background:#6b7580; }
   .mpHudRow.online{ color:#bfe9ff; } .mpHudRow.online .dot{ background:#35c8ff; box-shadow:0 0 6px #35c8ff; }
   .mpHudRow.connecting .dot{ background:#e0a400; }
-  #timePicker .rowHead{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
-  #timePicker h3{ margin:0; font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink); opacity:.6; }
-  #timePicker .clockVal{ font-size:15px; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums; }
-  #timeSlider{ width:100%; height:6px; border-radius:3px; appearance:none; -webkit-appearance:none;
-    background:linear-gradient(90deg,#141a38 0%,#3a3f6e 11%,#FCD9A8 24%,#DCEFF5 36%,#DCEFF5 64%,#FCD9A8 76%,#4a3560 89%,#141a38 100%);
-    outline:none; cursor:pointer; }
-  #timeSlider::-webkit-slider-thumb{ -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
-    background:#fff; border:2px solid var(--red); box-shadow:0 1px 4px rgba(0,0,0,.35); cursor:pointer; }
-  #timeSlider::-moz-range-thumb{ width:16px; height:16px; border-radius:50%;
-    background:#fff; border:2px solid var(--red); box-shadow:0 1px 4px rgba(0,0,0,.35); cursor:pointer; }
-  #timePresets{ display:flex; gap:6px; margin-top:8px; }
-  #timePresets button{ flex:1; font-size:11px; padding:6px 4px; border-radius:6px; border:1px solid rgba(0,0,0,.12);
-    background:rgba(0,0,0,.03); color:var(--ink); cursor:pointer; letter-spacing:.02em; }
-  #timePresets button.active{ background:var(--red); color:#fff; border-color:var(--red); }
-
-  #planePicker{ width:100%; max-width:340px; margin:4px 0 18px; }
-  #planePicker .rowHead{ margin-bottom:8px; }
-  #planePicker h3{ margin:0; font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink); opacity:.6; }
-  #planePreviewWrap{
-    position:relative; width:100%; height:130px; border-radius:14px; margin-bottom:10px;
-    background:
-      radial-gradient(ellipse at 30% 20%, rgba(255,255,255,.28) 0%, transparent 50%),
-      radial-gradient(ellipse at 70% 70%, rgba(100,180,255,.14) 0%, transparent 40%),
-      repeating-linear-gradient(180deg, rgba(255,255,255,.025) 0 1px, transparent 1px 20px),
-      linear-gradient(180deg, #0d3a6e 0%, var(--sky-top) 35%, #7bc8ed 100%);
-    border:1px solid rgba(255,255,255,.18);
-    box-shadow:0 4px 16px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.2);
-    overflow:hidden;
-  }
-  #planePreviewCanvas{ width:100%; height:100%; display:block; }
-  #planePreviewName{
-    position:absolute; left:0; right:0; bottom:8px; text-align:center;
-    font-size:12px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
-    color:var(--ink); opacity:.72; pointer-events:none;
-  }
-  #planePreviewPrev, #planePreviewNext{
-    position:absolute; top:50%; transform:translateY(-50%);
-    width:30px; height:30px; border-radius:50%; border:none; cursor:pointer;
-    background:rgba(20,22,26,.28); color:#fff; font-size:16px; line-height:1;
-    display:flex; align-items:center; justify-content:center;
-  }
-  #planePreviewPrev:active, #planePreviewNext:active{ background:rgba(20,22,26,.44); }
-  #planePreviewPrev{ left:8px; }
-  #planePreviewNext{ right:8px; }
-  #planeOptions{ display:flex; gap:8px; flex-wrap:wrap; }
-  .planeOpt{
-    flex:1 1 45%; text-align:left; padding:10px 12px; border-radius:10px;
-    border:1px solid rgba(0,0,0,.12);
-    background:
-      var(--hatch),
-      rgba(255,255,255,.55);
-    color:var(--ink); cursor:pointer; display:flex; flex-direction:column; gap:3px;
-    box-shadow:0 1px 4px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.7);
-    transition:transform .1s ease, box-shadow .1s ease;
-  }
-  .planeOpt:active{ transform:scale(.97); }
-  .planeOpt .pName{ font-size:13px; font-weight:700; letter-spacing:.02em; }
-  .planeOpt .pStat{ font-size:11px; opacity:.65; letter-spacing:.01em; }
-  .planeOpt.active{
-    background:
-      var(--hatch),
-      rgba(225,6,0,.07);
-    border-color:var(--red);
-    box-shadow:0 0 0 1px rgba(225,6,0,.2), 0 2px 8px rgba(225,6,0,.12), inset 0 1px 0 rgba(255,255,255,.5);
-  }
-  .planeOpt.active .pName{ color:var(--red); text-shadow:0 0 8px rgba(225,6,0,.3); }
-
-  /* ---------- livery paint swatches ---------- */
-  #liveryRow{
-    display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap;
-  }
-  #liveryRow .liveryLabel{
-    font-size:10px; font-weight:700; letter-spacing:.16em; text-transform:uppercase;
-    color:var(--ink); opacity:.5; flex:1 1 100%; margin-bottom:2px;
-  }
-  .liveryOpt{
-    position:relative; width:34px; height:34px; border-radius:50%; cursor:pointer;
-    border:2px solid rgba(0,0,0,.15);
-    box-shadow:0 1px 4px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.4);
-    transition:transform .12s ease, box-shadow .12s ease;
-    flex:0 0 auto;
-  }
-  .liveryOpt:active{ transform:scale(.9); }
-  .liveryOpt.active{
-    border-color:var(--red);
-    box-shadow:0 0 0 3px rgba(225,6,0,.18), 0 2px 8px rgba(225,6,0,.25);
-  }
-  .liveryOpt.locked{ opacity:.55; }
-  .liveryOpt .lockBadge{
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    font-size:12px; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.7);
-    pointer-events:none;
-  }
-  .liveryOpt .priceBadge{
-    position:absolute; left:50%; bottom:-15px; transform:translateX(-50%);
-    font:700 8.5px/1 ui-monospace,Consolas,monospace; color:var(--gold);
-    white-space:nowrap; text-shadow:0 1px 2px rgba(0,0,0,.5);
-    background:rgba(20,22,26,.65); padding:2px 5px; border-radius:6px;
-  }
-  .liveryOpt.shake{ animation:liveryShake .32s ease; }
-  @keyframes liveryShake{
-    0%,100%{ transform:translateX(0); }
-    20%{ transform:translateX(-4px); }
-    40%{ transform:translateX(4px); }
-    60%{ transform:translateX(-3px); }
-    80%{ transform:translateX(3px); }
-  }
-  #liveryName{
-    flex:1 1 100%; font-size:11.5px; color:var(--ink); opacity:.65;
-    margin-top:6px; letter-spacing:.01em;
-  }
-  #liveryName b{ color:var(--ink); opacity:1; }
-  #liveryName .lprice{ color:var(--gold); font-weight:700; }
 
   /* ---------- HUD ---------- */
   #hud{
@@ -1011,12 +999,6 @@
     box-shadow:0 8px 30px rgba(220,60,20,.35); text-shadow:0 1px 0 rgba(0,0,0,.3); transition:filter .15s ease, transform .1s ease; }
   #hgGo:hover{ filter:brightness(1.12); }
   #hgGo:active, #hgCarrier:active, .hg-card:active, .hg-pre:active{ transform:scale(.97); }
-  #hangarBtn{ appearance:none; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px; margin:0 0 12px; padding:12px 40px;
-    color:#fff; background:linear-gradient(180deg, #3a2a20, #1c1612); border:1px solid rgba(255,138,74,.55); border-bottom:3px solid #ff7a33; border-radius:4px;
-    box-shadow:0 4px 18px rgba(0,0,0,.3); position:relative; z-index:1; }
-  #hangarBtn span{ font-size:15px; font-weight:900; letter-spacing:.32em; text-transform:uppercase; }
-  #hangarBtn small{ font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:#ffcfae; }
-  #hangarBtn:active{ transform:scale(.96); }
   @media (orientation: landscape) and (max-height: 500px) {
     #hangar .hg-top{ height:44px; }
     .hg-title b{ font-size:15px; } .hg-title span{ display:none; }
@@ -1356,19 +1338,6 @@
     #fsToggle{ right:calc(106px + env(safe-area-inset-right)); }
     #heliDpad{ transform:scale(.85); transform-origin:bottom left; }
   }
-  /* start screen on phones: smaller title, touch guide only, Take Off always reachable */
-  @media (max-height: 500px), (max-width: 500px) {
-    #startScreen{ padding:14px 14px calc(18px + env(safe-area-inset-bottom)); }
-    #startScreen h1{ font-size:clamp(34px, 9vw, 52px); }
-    #startScreen .sub{ font-size:12.5px; margin:8px 0 12px; }
-    #startBtn{
-      position:sticky; bottom:calc(10px + env(safe-area-inset-bottom)); z-index:5; flex-shrink:0;
-      box-shadow:0 10px 28px rgba(0,0,0,.45), 0 0 0 6px rgba(255,255,255,.18);
-    }
-  }
-  @media (pointer: coarse) {
-    .instructions .col:first-child{ display:none; }
-  }
 
 </style>
 <!-- CSS_ADSBLOCK_START -->
@@ -1380,114 +1349,126 @@
   <div id="loadingScreen">Loading terrain…</div>
 
   <div id="startScreen" class="hidden">
-    <h1>GLIDEPATH</h1>
-    <div class="rule"></div>
-    <p class="sub">An endless flight over procedurally generated terrain, starting from your own airfield.</p>
-    <p class="sub" style="letter-spacing:.42em;font-size:11px;opacity:.75;margin-top:-6px">TACTICAL AVIATION ACTION</p>
-    <div class="instructions">
-      <div class="col">
-        <h3>Keyboard</h3>
-        <div><b>↑ / W</b>Climb</div>
-        <div><b>↓ / S</b>Dive</div>
-        <div><b>← / A</b>Bank left</div>
-        <div><b>→ / D</b>Bank right</div>
-        <div><b>= / -</b>Throttle</div>
-        <div><b>Shift</b>Boost</div>
-        <div><b>Q / E</b>Barrel roll</div>
-        <div><b>F</b>Flaps</div>
-        <div><b>I</b>Codec radio</div>
-        <div><b>O</b>Photo mode</div>
-        <div><b>U</b>Cardboard box</div>
-        <div><b>Y</b>Walkman</div>
-        <div><b>N</b>Drop cargo</div>
-        <div><b>1-5</b>Pick weapon</div>
-        <div><b>M</b>Fire</div>
-        <div><b>T</b>Next target</div>
-        <div><b>Backspace</b>Respawn</div>
+    <header class="ss-top">
+      <div class="ss-brand">
+        <b>GLIDEPATH</b>
+        <span><i></i>Tactical aviation action</span>
       </div>
-      <div class="col">
-        <h3>Touch</h3>
-        <div><b>Drag</b>Steer</div>
-        <div><b>Slider</b>Throttle</div>
-        <div><b>Hold ⚡</b>Boost</div>
-        <div><b>↺ / ↻</b>Barrel roll</div>
-        <div><b>FLAPS</b>Toggle flaps</div>
-        <div><b>FIRE</b>Fire weapon</div>
-        <div><b>WPN</b>Next weapon</div>
-        <div><b>📻 / 📷</b>Codec / photo</div>
-        <div><b>📦</b>Box (stopped)</div>
+      <div class="ss-meta">
+        <div class="ss-pill" id="ssPilot">PILOT</div>
+        <div class="ss-pill ss-gold" id="ssCoins">◆ 0</div>
+        <div class="ss-pill ss-dim" id="ssBest">BEST 0.0 km</div>
       </div>
-    </div>
-    <div id="planePicker">
-      <div class="rowHead"><h3>Aircraft</h3></div>
-      <div id="planePreviewWrap">
-        <canvas id="planePreviewCanvas"></canvas>
-        <div id="planePreviewName">Interceptor</div>
+    </header>
+
+    <nav class="ss-menu" aria-label="Main menu">
+      <button id="startBtn" type="button" class="ss-play"><span>Take off</span><small>Main runway <kbd>Enter</kbd></small></button>
+      <button id="carrierStartBtn" type="button" class="ss-item"><b>⚓</b><span>Carrier ops<small>Catapult launch at sea</small></span></button>
+      <button id="hangarBtn" type="button" class="ss-item"><b>▣</b><span>Hangar<small>Aircraft &amp; loadout</small></span></button>
+      <button id="ssSetupBtn" type="button" class="ss-item ss-narrow"><b>☼</b><span>Mission setup<small>Time · paint · multiplayer</small></span></button>
+      <button id="ssControlsBtn" type="button" class="ss-item"><b>⌨</b><span>Controls<small>Keyboard &amp; touch</small></span></button>
+    </nav>
+
+    <div id="ssStage" aria-hidden="true"><div class="ss-drag">⟲ drag to look around</div></div>
+
+    <section class="ss-aircraft" aria-label="Aircraft">
+      <div class="ss-acHead">
         <button type="button" id="planePreviewPrev" aria-label="Previous aircraft">‹</button>
+        <div class="ss-acName">
+          <i><span id="ssClass">FIGHTER</span><em id="ssIndex">1 / 8</em></i>
+          <b id="planePreviewName">Interceptor</b>
+          <span id="ssTag"></span>
+        </div>
         <button type="button" id="planePreviewNext" aria-label="Next aircraft">›</button>
       </div>
+      <div id="ssStats"></div>
       <div id="planeOptions">
-        <button type="button" class="planeOpt active" data-plane="interceptor">
-          <span class="pName">Interceptor</span>
-          <span class="pStat">700 km/h · balanced, responsive</span>
-        </button>
-        <button type="button" class="planeOpt" data-plane="voyager">
-          <span class="pName">Voyager</span>
-          <span class="pStat">480 km/h · heavy, forgiving</span>
-        </button>
-        <button type="button" class="planeOpt" data-plane="rocket">
-          <span class="pName">Rocket</span>
-          <span class="pStat">1900 km/h · vicious, hair-trigger</span>
-        </button>
-        <button type="button" class="planeOpt" data-plane="helicopter">
-          <span class="pName">Helicopter</span>
-          <span class="pStat">250 km/h · rotor physics, hover assist, autorotation</span>
-        </button>
-        <button type="button" class="planeOpt" data-plane="car">
-          <span class="pName">Car</span>
-          <span class="pStat">160 km/h · drive to the city</span>
-        </button>
-        <button type="button" class="planeOpt" data-plane="drone">
-          <span class="pName">Reaper Drone</span>
-          <span class="pStat">480 km/h · slow, steady, built to loiter</span>
-        </button>
-        <button type="button" class="planeOpt" data-plane="stealth">
-          <span class="pName">Nighthawk Wing</span>
-          <span class="pStat">380 km/h · all-black flying wing, heavy</span>
-        </button>
-        <button type="button" class="planeOpt" data-plane="seaplane">
-          <span class="pName">Albatross</span>
-          <span class="pStat">420 km/h · amphibian, lands on the sea</span>
-        </button>
+        <button type="button" class="planeOpt active" data-plane="interceptor"><span class="pName">Interceptor</span><span class="pStat">700 km/h</span></button>
+        <button type="button" class="planeOpt" data-plane="voyager"><span class="pName">Voyager</span><span class="pStat">480 km/h</span></button>
+        <button type="button" class="planeOpt" data-plane="rocket"><span class="pName">Rocket</span><span class="pStat">1900 km/h</span></button>
+        <button type="button" class="planeOpt" data-plane="helicopter"><span class="pName">Helicopter</span><span class="pStat">250 km/h</span></button>
+        <button type="button" class="planeOpt" data-plane="car"><span class="pName">Car</span><span class="pStat">160 km/h</span></button>
+        <button type="button" class="planeOpt" data-plane="drone"><span class="pName">Reaper Drone</span><span class="pStat">480 km/h</span></button>
+        <button type="button" class="planeOpt" data-plane="stealth"><span class="pName">Nighthawk</span><span class="pStat">380 km/h</span></button>
+        <button type="button" class="planeOpt" data-plane="seaplane"><span class="pName">Albatross</span><span class="pStat">420 km/h</span></button>
       </div>
-      <div id="liveryRow">
-        <span class="liveryLabel">Livery</span>
+    </section>
+
+    <aside class="ss-setup" id="ssSetup" aria-label="Mission setup">
+      <div class="ss-setupHead"><h3>Mission setup</h3><button type="button" id="ssSetupClose" aria-label="Close">✕</button></div>
+      <div id="timePicker" class="ss-block">
+        <div class="ss-row"><h4>Time of day</h4><span class="clockVal" id="clockVal">7:20 AM</span></div>
+        <input type="range" id="timeSlider" min="0" max="1000" value="340" step="1" aria-label="Time of day">
+        <div id="timePresets">
+          <button data-t="0.02">Night</button>
+          <button data-t="0.28" class="active">Dawn</button>
+          <button data-t="0.50">Noon</button>
+          <button data-t="0.75">Dusk</button>
+        </div>
       </div>
-      <div id="liveryName"></div>
+      <div class="ss-block">
+        <div id="liveryRow"><span class="liveryLabel">Paint scheme</span></div>
+        <div id="liveryName"></div>
+      </div>
+      <div id="mpBox" class="ss-block">
+        <div class="ss-row"><h4>Multiplayer</h4><div id="mpStatus" class="mpStatus offline">OFFLINE</div></div>
+        <div class="mpRow">
+          <input id="mpName" maxlength="12" autocomplete="off" spellcheck="false" placeholder="Callsign">
+          <input id="mpRoom" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Room (blank = public)">
+        </div>
+      </div>
+      <p class="ss-note">You start on the runway at a standstill: throttle up to roll, ease back to lift off. Gold rings appear once you're airborne; chain them for a multiplier.</p>
+    </aside>
+
+    <div class="ss-tip" id="ssTip"></div>
+
+    <div id="ssControls" class="hidden" role="dialog" aria-label="Controls">
+      <div class="ss-ctlCard">
+        <div class="ss-setupHead"><h3>Controls</h3><button type="button" class="ss-close" aria-label="Close">✕</button></div>
+        <div class="instructions">
+          <div class="col">
+            <h5>Flying</h5>
+            <div><b>W / S</b>Climb · dive</div>
+            <div><b>A / D</b>Bank</div>
+            <div><b>Q / E</b>Barrel roll</div>
+            <div><b>+ / −</b>Throttle</div>
+            <div><b>Shift</b>Boost</div>
+            <div><b>F</b>Flaps</div>
+            <div><b>C</b>Cruise / hover</div>
+            <div><b>P</b>Cockpit view</div>
+          </div>
+          <div class="col">
+            <h5>Weapons</h5>
+            <div><b>1 – 5</b>Pick weapon</div>
+            <div><b>M / X</b>Fire</div>
+            <div><b>T</b>Next target</div>
+            <div><b>G</b>Flares (hold)</div>
+            <div><b>H</b>Auto flares</div>
+            <div><b>V</b>Drone sensor</div>
+            <div><b>Bksp</b>Respawn</div>
+            <div><b>Esc</b>Pause</div>
+          </div>
+          <div class="col">
+            <h5>Extras</h5>
+            <div><b>I</b>Codec radio</div>
+            <div><b>O</b>Photo mode</div>
+            <div><b>Y</b>Walkman</div>
+            <div><b>U</b>Cardboard box</div>
+            <div><b>N</b>Drop cargo</div>
+            <div><b>L</b>Catapult</div>
+          </div>
+          <div class="col">
+            <h5>Touch</h5>
+            <div><b>Drag</b>Steer</div>
+            <div><b>Slider</b>Throttle</div>
+            <div><b>⚡</b>Boost (hold)</div>
+            <div><b>↺ ↻</b>Barrel roll</div>
+            <div><b>FIRE</b>Fire weapon</div>
+            <div><b>WPN</b>Next weapon</div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div id="timePicker">
-      <div class="rowHead"><h3>Time of day</h3><span class="clockVal" id="clockVal">7:20 AM</span></div>
-      <input type="range" id="timeSlider" min="0" max="1000" value="340" step="1">
-      <div id="timePresets">
-        <button data-t="0.02">Midnight</button>
-        <button data-t="0.28" class="active">Dawn</button>
-        <button data-t="0.50">Noon</button>
-        <button data-t="0.75">Dusk</button>
-      </div>
-    </div>
-    <div id="mpBox">
-      <div class="rowHead"><h3>Multiplayer</h3></div>
-      <div class="mpRow">
-        <input id="mpName" maxlength="12" autocomplete="off" spellcheck="false" placeholder="Callsign">
-        <input id="mpRoom" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Room (blank = public)">
-      </div>
-      <div id="mpStatus" class="mpStatus offline">OFFLINE</div>
-    </div>
-    <button id="hangarBtn" type="button"><span>Hangar</span><small>Aircraft · loadout</small></button>
-    <button id="startBtn">Take Off</button>
-    <button id="carrierStartBtn" type="button" style="appearance:none;cursor:pointer;margin-top:10px;background:rgba(20,40,70,.55);color:#dbeaff;padding:11px 26px;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;border-radius:999px;border:1px solid rgba(120,180,255,.55)">⚓ Start on the carrier</button>
-    <p class="foot">You start on the runway at a standstill — push the throttle up yourself to accelerate and lift off. Ease down gently over the runway to land — dive into it and it's another story.</p>
-    <p class="foot">Gold rings appear along your flight path once airborne — fly through them to bank coins and build a streak. Chain rings quickly to multiply your payout; miss one and the streak resets.</p>
   </div>
 
   <div id="hud" class="hidden">
@@ -6325,112 +6306,122 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
        aircraft picker. Reparents the *actual* plane model into its own
        mini renderer so what you see is exactly what you fly.
        ============================================================ */
+    /* ============================================================
+       TITLE CAMERA — the start menu runs over the live world
+       The selected aircraft sits on the runway in the real scene and the game camera circles it
+       slowly (drag the open space to swing round it). The picture is shifted so the aircraft sits in
+       the space the menu panels leave free. Same interface the old preview window had: show / hide /
+       tick / refreshModel, called from the plane picker, the hangar and Take Off.
+       ============================================================ */
     var planePreview = (function() {
-      var canvasEl = document.getElementById('planePreviewCanvas');
-      var wrapEl = document.getElementById('planePreviewWrap');
       var nameEl = document.getElementById('planePreviewName');
-      var renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: true });
-      renderer.setPixelRatio(2);
-      renderer.outputEncoding = THREE.sRGBEncoding;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.1;
-
-      var pScene = new THREE.Scene();
-      var pCamera = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
-      pCamera.position.set(0, 1.1, 7.5);
-      pCamera.lookAt(0, 0, 0);
-
-      var key = new THREE.DirectionalLight(0xffffff, 1.4);
-      key.position.set(3, 4, 5);
-      pScene.add(key);
-      var fill = new THREE.HemisphereLight(0x9fc7ff, 0x555a52, 0.85);
-      pScene.add(fill);
-
-      var rigYaw = new THREE.Group();   // slow auto-spin
-      var rigPitch = new THREE.Group(); // fixed nose-down tilt for a 3/4 view
-      rigPitch.rotation.x = -0.12;
-      rigYaw.add(rigPitch);
-      pScene.add(rigYaw);
-
-      var active = false;
-      var spinAngle = Math.PI * 0.65; // start on a nice 3/4 angle rather than dead-on
-
-      function resize() {
-        var w = wrapEl.clientWidth, h = wrapEl.clientHeight;
-        if (!w || !h) return;
-        renderer.setSize(w, h, false);
-        pCamera.aspect = w / h;
-        pCamera.updateProjectionMatrix();
-      }
-      window.addEventListener('resize', resize);
-
-      function attachPlane() {
-        // pull the live plane model out of the main scene and into the preview rig;
-        // release() puts it back exactly where flight code expects it
-        plane.rotation.set(0, 0, 0);
-        plane.position.set(0, 0, 0);
-        plane.scale.setScalar(1);
-        rigPitch.add(plane);
-        // the fuselage origin isn't the model's visual center (nose and tail extend
-        // unevenly from it), so pivoting on it makes the plane swing off-axis as it
-        // spins. Recenter using the actual bounding box, then apply a uniform scale
-        // to fit the preview frame consistently across aircraft of different sizes.
-        // only the aircraft that's actually shown (the hidden bodies of the other types live in the same group)
-        plane.updateMatrixWorld(true);
-        var box = new THREE.Box3();
-        plane.traverseVisible(function(o) { if (o.isMesh) box.expandByObject(o); });
-        if (box.isEmpty()) box.setFromObject(plane);
-        var center = box.getCenter(new THREE.Vector3());
-        var size = box.getSize(new THREE.Vector3());
-        // a flying wing is all span and no depth: look down on it more and let it fill more of the frame
-        pCamera.position.set(0, isStealthMode ? 3.4 : 1.1, isStealthMode ? 6.8 : 7.5);
-        pCamera.lookAt(0, 0, 0);
-        var fitScale = (isStealthMode ? 4.4 : 3.4) / Math.max(size.x, size.y, size.z, 0.001);
-        plane.scale.setScalar(fitScale);
-        plane.position.set(-center.x * fitScale, -center.y * fitScale, -center.z * fitScale);
-      }
-      function releasePlane() {
-        plane.scale.setScalar(1);
+      var active = false, t = 0, fitR = 6, yawUser = 0, yawVel = 0, metaT = 0, tipT = 0, tipI = 0;
+      var _look = new THREE.Vector3(), _box = new THREE.Box3(), _sz = new THREE.Vector3();
+      var stageEl = document.getElementById('ssStage');
+      function pose() {
         scene.add(plane);
+        plane.scale.setScalar(1); plane.visible = true;
+        plane.position.copy(position); plane.rotation.set(0, heading, 0);
+        if (isStealthMode) { nhReset(true); for (var i = 0; i < 30; i++) nhAnimate(1 / 30); }
+        plane.updateMatrixWorld(true);
+        _box.makeEmpty();
+        plane.traverseVisible(function(o) { if (o.isMesh) _box.expandByObject(o); });
+        fitR = _box.isEmpty() ? 6 : Math.max(2.5, Math.max(_box.getSize(_sz).x, _sz.z) * 0.5);
       }
-
       function show() {
-        active = true;
-        attachPlane();
-        var preset = PLANE_TYPES[selectedPlaneType];
-        nameEl.textContent = preset.name;
-        // wrapEl may not have final layout size in the same tick the start screen
-        // is unhidden — defer the first resize+render a frame so clientWidth/Height are real
-        requestAnimationFrame(function() {
-          resize();
-          renderOnce();
-        });
+        active = true; pose(); ssRefresh(); ssTip(true);
       }
       function hide() {
         active = false;
-        releasePlane();
+        camera.clearViewOffset(); camera.updateProjectionMatrix();
       }
-      function renderOnce() {
-        renderer.render(pScene, pCamera);
-      }
+      function refreshModel() { if (!active) return; pose(); ssRefresh(); }
       function tick(dt) {
         if (!active) return;
-        if (!canvasEl.width || !canvasEl.height) resize();
-        spinAngle += dt * 0.5;
-        rigYaw.rotation.y = spinAngle;
-        // update() keeps running pre-flight and drives the real plane's world position/rotation
-        // (e.g. back to its runway spawn point) — pin it back to the preview pose every frame
-        plane.rotation.set(0, 0, 0);
-        renderOnce();
+        t += dt;
+        yawUser += yawVel * dt; yawVel *= Math.pow(0.04, dt);
+        var a = 2.35 + t * 0.06 + yawUser;
+        var r = fitR * 2.4 + 7, h = 1.4 + fitR * 0.32 + Math.sin(t * 0.17) * 0.6;
+        camera.position.set(plane.position.x + Math.sin(a) * r, plane.position.y + h, plane.position.z + Math.cos(a) * r);
+        var gy = Math.max(getEffectiveGroundHeight(camera.position.x, camera.position.z), WATER_LEVEL);
+        if (camera.position.y < gy + 1) camera.position.y = gy + 1;
+        _look.copy(plane.position); _look.y += 0.4;
+        camera.up.set(0, 1, 0); camera.lookAt(_look);
+        // frame the aircraft in the open part of the screen
+        var W = window.innerWidth, H = window.innerHeight, r0 = stageEl.getBoundingClientRect();
+        var cx = r0.width > 0 ? r0.left + r0.width / 2 : W / 2, cy = r0.height > 0 ? r0.top + r0.height * 0.55 : H / 2;
+        camera.fov = W < H ? 62 : 46; camera.aspect = W / H;
+        camera.setViewOffset(W, H, W / 2 - cx, H / 2 - cy, W, H);
+        if ((metaT -= dt) <= 0) { metaT = 1; ssMeta(); }
+        if ((tipT -= dt) <= 0) ssTip();
       }
-      function refreshModel() {
-        if (!active) return;
-        attachPlane();
-        var preset = PLANE_TYPES[selectedPlaneType];
-        nameEl.textContent = preset.name;
-        renderOnce();
+      // drag the open space to swing round the aircraft
+      var drag = null;
+      stageEl.addEventListener('pointerdown', function(e) { drag = e.clientX; try { stageEl.setPointerCapture(e.pointerId); } catch (x) {} });
+      stageEl.addEventListener('pointermove', function(e) { if (drag === null) return; var d = e.clientX - drag; drag = e.clientX; yawUser -= d * 0.006; yawVel = -d * 0.35; });
+      ['pointerup', 'pointercancel'].forEach(function(ev) { stageEl.addEventListener(ev, function() { drag = null; }); });
+
+      /* ---------- the menu's own panels ---------- */
+      var SS_TIPS = [
+        'Lock on with the nose, wait for the steady tone, then fire.',
+        'The hangar sets what each aircraft carries: Hellfires, Paveways, cluster bombs.',
+        'Fly through the gold rings in a chain to multiply your coins.',
+        'The flak guns lead you. Jink, or fly low and let the ground hide you.',
+        'Press I in flight for the codec. Someone is always listening.',
+        'Eject, and a rescue helicopter can come for you.',
+        'The Albatross lands on the sea. Wings level, gently.',
+        'Somewhere flat and forgotten, an old wartime strip is still long enough to land on.'
+      ];
+      function ssTip(first) {
+        var el = document.getElementById('ssTip');
+        tipT = 7; tipI = first ? Math.floor(Math.random() * SS_TIPS.length) : (tipI + 1) % SS_TIPS.length;
+        el.classList.remove('in'); void el.offsetWidth;
+        el.innerHTML = '<b>TIP</b>' + SS_TIPS[tipI]; el.classList.add('in');
       }
-      return { show: show, hide: hide, tick: tick, refreshModel: refreshModel, resize: resize };
+      function ssMeta() {
+        var n = document.getElementById('mpName');
+        document.getElementById('ssPilot').textContent = (n && n.value.trim() ? n.value.trim().toUpperCase() : 'PILOT');
+        document.getElementById('ssCoins').textContent = '◆ ' + Math.round(coins).toLocaleString();
+        document.getElementById('ssBest').textContent = 'BEST ' + bestDistanceKm.toFixed(1) + ' km';
+      }
+      function ssBar(label, val, f) {
+        return '<div class="ss-stat"><span>' + label + '</span><b>' + val + '</b><i><em style="width:' + Math.round(THREE.MathUtils.clamp(f, 0.04, 1) * 100) + '%"></em></i></div>';
+      }
+      function ssRefresh() {
+        var P = PLANE_TYPES[selectedPlaneType], h = P.handling || {};
+        nameEl.textContent = P.name;
+        document.getElementById('ssClass').textContent = (typeof HG_CLASS !== 'undefined' && HG_CLASS[selectedPlaneType]) || '';
+        document.getElementById('ssTag').textContent = P.tagline || '';
+        var pre = typeof arsPresetFor === 'function' ? arsPresetFor(selectedPlaneType) : null;
+        document.getElementById('ssStats').innerHTML =
+          ssBar('Top speed', P.maxSpeedKmh + ' km/h', Math.sqrt(P.maxSpeedKmh / 1900)) +
+          ssBar('Agility', h.turnRate ? h.turnRate.toFixed(2) : '—', (h.turnRate || 0) / 2.1) +
+          ssBar('Take-off', P.isCar ? '—' : P.takeoffSpeedKmh > 0 ? P.takeoffSpeedKmh + ' km/h' : 'vertical', P.isCar ? 0 : P.takeoffSpeedKmh > 0 ? 1 - P.takeoffSpeedKmh / 300 : 1) +
+          '<div class="ss-load"><span>Loadout</span><b>' + (pre ? pre.name : 'Unarmed') + '</b></div>';
+        var i = PLANE_ORDER.indexOf(selectedPlaneType);
+        document.getElementById('ssIndex').textContent = (i + 1) + ' / ' + PLANE_ORDER.length;
+        var on = document.querySelector('.planeOpt.active');
+        if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'center' });
+        ssMeta();
+      }
+      return { show: show, hide: hide, tick: tick, refreshModel: refreshModel, resize: function() {} };
+    })();
+
+    // menu-only controls: the setup sheet and the controls overlay on small screens, Enter to take off
+    (function() {
+      var ss = document.getElementById('startScreen'), setup = document.getElementById('ssSetup'), ctl = document.getElementById('ssControls');
+      document.getElementById('ssSetupBtn').addEventListener('click', function() { setup.classList.add('open'); });
+      document.getElementById('ssSetupClose').addEventListener('click', function() { setup.classList.remove('open'); });
+      document.getElementById('ssControlsBtn').addEventListener('click', function() { ctl.classList.remove('hidden'); });
+      ctl.addEventListener('click', function(e) { if (e.target === ctl || e.target.closest('.ss-close')) ctl.classList.add('hidden'); });
+      window.addEventListener('keydown', function(e) {
+        if (ss.classList.contains('hidden') || (typeof HG !== 'undefined' && HG.open)) return;
+        if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+        if (e.code === 'Escape') { ctl.classList.add('hidden'); setup.classList.remove('open'); }
+        else if (e.code === 'Enter' && ctl.classList.contains('hidden')) { e.preventDefault(); document.getElementById('startBtn').click(); }
+        else if (e.code === 'ArrowLeft') document.getElementById('planePreviewPrev').click();
+        else if (e.code === 'ArrowRight') document.getElementById('planePreviewNext').click();
+      });
     })();
 
 
