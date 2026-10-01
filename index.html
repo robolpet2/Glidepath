@@ -12269,6 +12269,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var missileBlastCursor = 0;
 
     function triggerMissileBlast(pos) {
+      if (typeof gfxShockwave === 'function') gfxShockwave(pos, 0.7);
       var b = missileBlasts[missileBlastCursor];
       missileBlastCursor = (missileBlastCursor + 1) % missileBlasts.length;
       var i, p;
@@ -12713,6 +12714,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     function nukeDetonate(pos, gy) {
+      if (typeof gfxShockwave === 'function') gfxShockwave(pos, 3);
       var N = NUKE;
       N.state = 'rearm';
       bombCooldownTimer = N.REARM_TIME;
@@ -16578,14 +16580,34 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         'uniform float bloomStrength; uniform float raysStrength; uniform float flareStrength; uniform float grain;',
         'uniform float time; uniform vec2 res; uniform vec2 sunUV;',
         'uniform float golden; uniform float night; uniform float sunVeil; uniform vec3 sunTint;',
+        'uniform vec4 shock; uniform vec2 hazeUV; uniform float haze; uniform float hazeR; uniform float speedBlur; uniform float hurt;',
         'varying vec2 vUv;',
         'float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }',
         'void main() {',
-        '  vec2 d = vUv - 0.5;',
+        '  vec2 asp = vec2(res.x / res.y, 1.0);',
+        '  vec2 uv = vUv;',
+        // explosion shockwave: a refracting ring racing outward across the screen
+        '  if (shock.w > 0.001) {',
+        '    vec2 sv = (uv - shock.xy) * asp; float sd = length(sv); float ring = sd - shock.z;',
+        '    float sw = exp(-ring * ring * 700.0) * shock.w;',
+        '    uv -= sv / max(sd, 1e-4) / asp * sw * 0.03;',
+        '  }',
+        // heat haze: the air behind a hot exhaust wobbles
+        '  if (haze > 0.001) {',
+        '    vec2 hv = (uv - hazeUV) * asp; float hk = haze * exp(-dot(hv, hv) / (hazeR * hazeR));',
+        '    uv += vec2(sin(uv.y * 260.0 + time * 33.0) + sin(uv.y * 97.0 - time * 19.0), cos(uv.x * 230.0 - time * 29.0)) * 0.0016 * hk;',
+        '  }',
+        '  vec2 d = uv - 0.5;',
         '  float r2 = dot(d, d);',
-        // lens chromatic aberration, only really visible toward the frame edges
-        '  vec2 ca = d * r2 * 0.012;',
-        '  vec3 col = vec3(texture2D(tScene, vUv - ca).r, texture2D(tScene, vUv).g, texture2D(tScene, vUv + ca).b);',
+        // lens chromatic aberration, only really visible toward the frame edges (more at speed)
+        '  vec2 ca = d * r2 * (0.012 + speedBlur * 0.03);',
+        '  vec3 col = vec3(texture2D(tScene, uv - ca).r, texture2D(tScene, uv).g, texture2D(tScene, uv + ca).b);',
+        // speed blur: radial streaking toward the frame edges at high speed / on the afterburner
+        '  if (speedBlur > 0.001) {',
+        '    vec3 acc = col;',
+        '    for (int i = 1; i <= 6; i++) acc += texture2D(tScene, uv - d * (float(i) / 6.0) * speedBlur * 0.07).rgb;',
+        '    col = mix(col, acc / 7.0, smoothstep(0.04, 0.42, length(d * asp)));',
+        '  }',
         '  vec3 bloom = texture2D(tBloom1, vUv).rgb * 0.55 + texture2D(tBloom2, vUv).rgb * 0.85;',
         '  col = 1.0 - (1.0 - col) * (1.0 - clamp(bloom * bloomStrength, 0.0, 1.0));',
         '  col += texture2D(tRays, vUv).rgb * raysStrength * vec3(1.0, 0.94, 0.82);',
@@ -16613,6 +16635,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         '  col = mix(col, mix(vec3(lumN), col, 0.72) * vec3(0.86, 0.95, 1.14), night * 0.5);',
         // natural lens vignette
         '  col *= mix(1.0, (1.0 - smoothstep(0.2, 0.85, length(d * vec2(res.x / res.y, 1.0)) * 0.9)), 0.32);',
+        // damage: colour drains and the edges pulse red when the airframe is hurt or just took a hit
+        '  if (hurt > 0.001) {',
+        '    float lumH = dot(col, vec3(0.2126, 0.7152, 0.0722));',
+        '    col = mix(col, vec3(lumH) * vec3(1.08, 0.82, 0.8), hurt * 0.5);',
+        '    col += vec3(0.42, 0.02, 0.0) * hurt * smoothstep(0.22, 0.85, length(d * asp));',
+        '  }',
         // fine animated film grain (replaces the old full-screen CPU grain canvas)
         '  col += (h12(vUv * res + fract(time * 13.7) * 311.0) - 0.5) * grain;',
         '  gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);',
@@ -16621,7 +16649,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         tScene: { value: sceneRT.texture }, tBloom1: { value: P.blurB.texture }, tBloom2: { value: P.blur2B.texture }, tRays: { value: P.rays.texture },
         bloomStrength: { value: 0.6 }, raysStrength: { value: 0 }, flareStrength: { value: 0 }, grain: { value: 0.028 },
         time: { value: 0 }, res: { value: new THREE.Vector2(sz.x, sz.y) }, sunUV: { value: P.sunUV },
-        golden: { value: 0 }, night: { value: 0 }, sunVeil: { value: 0 }, sunTint: { value: new THREE.Color(1, 0.9, 0.75) }
+        golden: { value: 0 }, night: { value: 0 }, sunVeil: { value: 0 }, sunTint: { value: new THREE.Color(1, 0.9, 0.75) },
+        shock: { value: new THREE.Vector4() }, hazeUV: { value: new THREE.Vector2() }, haze: { value: 0 }, hazeR: { value: 0.1 },
+        speedBlur: { value: 0 }, hurt: { value: 0 }
       });
       return P;
     }
@@ -16645,6 +16675,56 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     /* ---------------- per-frame driving + adaptive resolution ---------------- */
     var _gfxSunWorld = new THREE.Vector3(), _gfxSunNdc = new THREE.Vector3(), _gfxCamDir = new THREE.Vector3();
+    /* ---------- gameplay screen effects (composite pass): shockwaves, heat haze, speed blur, damage ---------- */
+    var GFX_SHOCKS = [], gfxHurtKick = 0, _gfxFxLast = 0, _gfxFxV = new THREE.Vector3(), _gfxSpeedFx = 0, _gfxHaze = 0;
+    function gfxShockwave(pos, power) {
+      if (!pos) return;
+      GFX_SHOCKS.push({ p: pos.clone(), t: 0, power: power || 1 });
+      if (GFX_SHOCKS.length > 4) GFX_SHOCKS.shift();
+    }
+    function gfxGameFx(cam, cu, fx) {
+      var now = performance.now() / 1000, dt = Math.min(0.1, now - (_gfxFxLast || now)); _gfxFxLast = now;
+      var live = started && !gpPaused && !(typeof kj !== 'undefined' && kj.paused);
+      if (!live) dt = 0;
+      // the strongest shockwave in view drives the ring
+      var best = null, bestS = 0;
+      for (var i = GFX_SHOCKS.length - 1; i >= 0; i--) {
+        var S = GFX_SHOCKS[i]; S.t += dt;
+        var life = 0.9 + S.power * 0.6;
+        if (S.t > life) { GFX_SHOCKS.splice(i, 1); continue; }
+        var dist = S.p.distanceTo(cam.position);
+        var k = S.power * THREE.MathUtils.clamp(1 - dist / (900 + S.power * 2500), 0, 1) * (1 - S.t / life);
+        _gfxFxV.copy(S.p).project(cam);
+        if (_gfxFxV.z > 1) continue;
+        if (k > bestS) { bestS = k; best = S; cu.shock.value.set(_gfxFxV.x * 0.5 + 0.5, _gfxFxV.y * 0.5 + 0.5, S.t * (0.55 + S.power * 0.35), 0); }
+      }
+      cu.shock.value.w = fx && best ? Math.min(1, bestS) : 0;
+      // heat haze behind a jet's exhaust: on with throttle, strong on the afterburner
+      var jet = !isHelicopterMode && !isCarMode && !isDroneMode && !isSeaplaneMode;
+      var hazeT = 0;
+      if (fx && started && jet && !crashing) {
+        hazeT = THREE.MathUtils.clamp(throttle / MAX_SPEED, 0, 1) * 0.45 + (keys.boost ? 0.55 : 0);
+        _gfxFxV.set(0, isStealthMode ? 0.1 : 0.1, isStealthMode ? 3.6 : 5.6);
+        plane.localToWorld(_gfxFxV);
+        var hd = _gfxFxV.distanceTo(cam.position);
+        _gfxFxV.project(cam);
+        if (_gfxFxV.z > 1 || hd < 2) hazeT = 0;
+        else { cu.hazeUV.value.set(_gfxFxV.x * 0.5 + 0.5, _gfxFxV.y * 0.5 + 0.5); cu.hazeR.value = THREE.MathUtils.clamp(1.6 / hd, 0.02, 0.3); }
+      }
+      _gfxHaze += (hazeT - _gfxHaze) * Math.min(1, dt * 4 + (live ? 0 : 1));
+      cu.haze.value = _gfxHaze;
+      // speed blur
+      var sp = 0;
+      if (fx && started && !crashing && !ejecting && !isCarMode && !isHelicopterMode && !(typeof droneCamActive !== 'undefined' && droneCamActive))
+        sp = THREE.MathUtils.clamp((speed / MAX_SPEED - 0.62) / 0.38, 0, 1) * 0.55 + (keys.boost && jet ? 0.45 : 0);
+      _gfxSpeedFx += (sp - _gfxSpeedFx) * Math.min(1, dt * 3 + (live ? 0 : 1));
+      cu.speedBlur.value = _gfxSpeedFx * (gpSet && gpSet.shake === 0 ? 0.4 : 1);
+      // damage: a badly worn airframe pulses, fresh hits flash
+      gfxHurtKick = Math.max(0, gfxHurtKick - dt * 1.8);
+      var wear = typeof kjWearGet === 'function' && started ? kjWearGet() : 1;
+      var low = THREE.MathUtils.clamp((0.35 - wear) / 0.35, 0, 1) * (0.55 + 0.45 * Math.sin(now * 5.5));
+      cu.hurt.value = started && !crashing ? Math.min(1, Math.max(low * 0.7, gfxHurtKick)) : 0;
+    }
     var gfxLastT = performance.now(), gfxFrameAcc = 0, gfxFrameN = 0, gfxGoodWindows = 0;
     // Adaptive quality: every ~40 frames look at the average frame time and step resolution,
     // mirror-reflection resolution and shadow-map size down (or back up) to hold ~60 fps
@@ -16815,6 +16895,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       cu.bloomStrength.value = fx ? 0.6 + night * 0.25 : 0;
       cu.grain.value = !gpSet || gpSet.grain ? 0.028 : 0;
       cu.time.value = time;
+      gfxGameFx(cam, cu, fx);
       gfxBlit(P.compMat, null);
     }
     window.renderWithPost = function(r, s, c, t) { gfxRender(c, t || 0); };
@@ -18788,6 +18869,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var _aaAim = new THREE.Vector3(), _aaD = new THREE.Vector3();
     function aaFlakEffect(at, fromGun) {
       samEmitSmoke(at, _aaD.set(0, 0.4, 0), 10 + Math.random() * 4, 6, 0.85, 0.07);
+      if (at.distanceTo(position) < 160) gfxShockwave(at, 0.45);
       arsMiniBlast(at, 5);
       var d = at.distanceTo(position);
       if (d < 3000) {
@@ -18810,6 +18892,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (typeof kjWear === 'function') kjWear(0.03 + 0.06 * hurt, 'flak');
           ARS.hullHits++;
           samToast(d < 10 ? '💥 DIRECT FLAK HIT' : 'FLAK HIT', '#ff8a5a', 1.2);
+          gfxHurtKick = Math.max(gfxHurtKick, 0.45 + hurt * 0.5);
           if (d < 9 || (ARS.hullHits >= 5 && Math.random() < 0.4)) { ARS.hullHits = 0; wreckDamage('flak'); }
         }
       }
@@ -18881,6 +18964,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             if (typeof kjWear === 'function') kjWear(0.012, 'gunfire');
             ARS.hullHits += 0.25;
             if (Math.random() < 0.3) samToast('TAKING HITS', '#ff8a5a', 0.8);
+            gfxHurtKick = Math.max(gfxHurtKick, 0.3);
             if (ARS.hullHits >= 6 && Math.random() < 0.15) { ARS.hullHits = 0; wreckDamage('gunfire'); }
           }
         }
