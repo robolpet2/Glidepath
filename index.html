@@ -2164,6 +2164,19 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
       }
 
+      // the enemy's airfields: flat along the runway and out over the apron on one side
+      for (var wsi = 0; wsi < WAR_STRIPS.length; wsi++) {
+        var WS = WAR_STRIPS[wsi], wsx = x - WS.x, wsz = z - WS.z;
+        if (wsx * wsx + wsz * wsz > WS.reach2) continue;
+        var wsu = Math.abs(wsx * WS.ux + wsz * WS.uz), wsv = -wsx * WS.uz + wsz * WS.ux;
+        var wsvo = wsv > 0 ? Math.max(0, wsv - WS.W / 2 - WS.apron) : Math.max(0, -wsv - WS.W / 2 - 40);
+        var wsd = Math.hypot(Math.max(0, wsu - WS.L / 2 - 60), wsvo);
+        if (wsd < 220) {
+          var wst = 1 - wsd / 220; wst = wst * wst * (3 - 2 * wst);
+          naturalHeight = naturalHeight * (1 - wst) + WS.y * wst;
+        }
+      }
+
       // Distance from the runway pad's paved edge (0 = under/at the pad itself).
       var apx = x - RUNWAY_CENTER_X, apz = z - RUNWAY_CENTER_Z;
       var dx = Math.max(0, AIRPORT_PAD.x0 - apx, apx - AIRPORT_PAD.x1);
@@ -2193,6 +2206,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     // pick the hostile base site once: on the far side of the airport from the city, ~3 km
     // out, on dry, reasonably level ground clear of the river and the coast
     var SAM_BASE = null, SAM_BASE_FLAT_R = 260, SAM_BASE_BLEND_R = 620;
+    var WAR_SITES = [], WAR_STRIPS = [];   // campaign sectors + the enemy's airfields (chosen below)
     var CITY_FLAT = null; // set by the city builder once its ground level is known
     (function chooseSamBase() {
       function raw(x, z) { return Math.pow(fbm(x * 0.0009, z * 0.0009, 6), 2.2) * 300 - 40; }
@@ -2270,6 +2284,84 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       if (bu) UFO_SITE = { x: bu.x, z: bu.z, y: bu.y, yaw: (bu.x * 0.37 + bu.z * 0.11) % (Math.PI * 2) };
     })();
+    // ---- the war: sector sites for the campaign, picked once and deterministically from the raw
+    // landscape like the other sites. The enemy capital and its forward airbases are graded flat
+    // (see getTerrainHeight) whether or not a campaign is running: in free flight they're just
+    // empty fields.
+    (function chooseWarSites() {
+      function raw(x, z) { return oceanShape(x, z, Math.pow(fbm(x * 0.0009, z * 0.0009, 6), 2.2) * 300 - 40); }
+      var CITY_C = { x: RUNWAY_CENTER_X + 1450, z: RUNWAY_CENTER_Z + 950 };
+      function dry(x, z, pad) {
+        if (z > oceanCoastZ(x) - 450 - pad || oceanFactor(x, z) > 0) return false;
+        return Math.abs(z - RIVER_Z) > 260 + pad;
+      }
+      function clear(x, z, pad) {
+        if (!dry(x, z, pad)) return false;
+        if (Math.hypot(x - RUNWAY_CENTER_X, z - RUNWAY_CENTER_Z) < 2300 + pad) return false;
+        if (Math.hypot(x - CITY_C.x, z - CITY_C.z) < 1300 + pad) return false;
+        if (SAM_BASE && Math.hypot(x - SAM_BASE.x, z - SAM_BASE.z) < 1800 + pad) return false;
+        if (OLD_STRIP && Math.hypot(x - OLD_STRIP.x, z - OLD_STRIP.z) < 1100 + pad) return false;
+        if (UFO_SITE && Math.hypot(x - UFO_SITE.x, z - UFO_SITE.z) < 400) return false;
+        for (var i = 0; i < WAR_STRIPS.length; i++) if (Math.hypot(x - WAR_STRIPS[i].x, z - WAR_STRIPS[i].z) < 2000 + pad) return false;
+        for (var j = 0; j < WAR_SITES.length; j++) if (Math.hypot(x - WAR_SITES[j].x, z - WAR_SITES[j].z) < 1900 + pad) return false;
+        return true;
+      }
+      // a runway: the flattest straight piece of dry ground inside a search band
+      function findStrip(r0, r1, a0, a1, L) {
+        var best = null;
+        for (var r = r0; r <= r1; r += 250) {
+          for (var a = a0; a <= a1; a += 6) {
+            var ang = a * Math.PI / 180, x = RUNWAY_CENTER_X + Math.cos(ang) * r, z = RUNWAY_CENTER_Z + Math.sin(ang) * r;
+            if (!clear(x, z, 250)) continue;
+            for (var o = 0; o < 4; o++) {
+              var dir = o * Math.PI / 4, ux = Math.cos(dir), uz = Math.sin(dir), sum = 0, sum2 = 0, n = 0, lo = 1e9, hi = -1e9;
+              if (!dry(x + ux * L / 2, z + uz * L / 2, 120) || !dry(x - ux * L / 2, z - uz * L / 2, 120)) continue;
+              for (var k = -4; k <= 4; k++) for (var q = -1; q <= 2; q++) {
+                var px = x + ux * k * L / 8 - uz * q * 60, pz = z + uz * k * L / 8 + ux * q * 60, h = raw(px, pz);
+                sum += h; sum2 += h * h; n++; if (h < lo) lo = h; if (h > hi) hi = h;
+              }
+              if (lo < WATER_LEVEL + 10 || hi > 170) continue;
+              var mean = sum / n, sd = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
+              var score = sd + (hi - lo) * 0.3;
+              if (!best || score < best.score) best = { x: x, z: z, y: mean, ang: dir, score: score };
+            }
+          }
+        }
+        return best;
+      }
+      function addStrip(b, name, kind, L) {
+        if (!b) return;
+        var W = kind === 'capital' ? 44 : 32, apron = kind === 'capital' ? 190 : 120;
+        var reach = Math.hypot(L / 2 + 60, W / 2 + apron) + 230;
+        WAR_STRIPS.push({ name: name, kind: kind, x: b.x, z: b.z, y: Math.max(b.y, WATER_LEVEL + 12), ux: Math.cos(b.ang), uz: Math.sin(b.ang),
+          L: L, W: W, apron: apron, reach2: reach * reach });
+      }
+      var away = Math.atan2(SAM_BASE.z - RUNWAY_CENTER_Z, SAM_BASE.x - RUNWAY_CENTER_X) * 180 / Math.PI;
+      addStrip(findStrip(6800, 9300, Math.round(away - 50), Math.round(away + 50), 1000), 'KASTOR', 'capital', 1000);
+      addStrip(findStrip(4300, 6600, Math.round(away + 40), Math.round(away + 115), 760), 'VULTURE FIELD', 'airbase', 760);
+      addStrip(findStrip(4300, 6600, Math.round(away - 115), Math.round(away - 40), 760), 'RAVEN FIELD', 'airbase', 760);
+      // the rest: small installations on firm, gently sloping ground, spread out over the hills
+      var cand = [], rng = mulberry32(7331);
+      for (var r = 2600; r <= 9800; r += 350) {
+        for (var a = 0; a < 360; a += 5) {
+          var ang = a * Math.PI / 180, x = RUNWAY_CENTER_X + Math.cos(ang) * r, z = RUNWAY_CENTER_Z + Math.sin(ang) * r;
+          var h0 = raw(x, z);
+          if (h0 < WATER_LEVEL + 10 || h0 > 190) continue;
+          var sl = Math.max(Math.abs(raw(x + 60, z) - raw(x - 60, z)), Math.abs(raw(x, z + 60) - raw(x, z - 60)));
+          if (sl > 26) continue;
+          cand.push({ x: x, z: z, r: r, k: rng() });
+        }
+      }
+      cand.sort(function(p, q) { return p.k - q.k; });
+      for (var c = 0; c < cand.length && WAR_SITES.length < 10; c++) {
+        if (clear(cand[c].x, cand[c].z, 0)) WAR_SITES.push({ x: cand[c].x, z: cand[c].z, r: cand[c].r });
+      }
+      // the two nearest home are unguarded outposts; the rest are typed by distance, the far ones the hardest
+      WAR_SITES.sort(function(p, q) { return p.r - q.r; });
+      var TYPES = ['outpost', 'outpost', 'depot', 'aa', 'sam', 'aa', 'depot', 'sam', 'aa', 'sam'];
+      var NAMES = ['ALDER RIDGE', 'BLACKWATER', 'CRESCENT VALE', 'DUNMORE PASS', 'EAGLE LAKE', 'FOXHOLLOW', 'GRANITE FLATS', 'HARROW HILL', 'KESTREL BLUFF', 'LANTERN GAP'];
+      WAR_SITES.forEach(function(s, i) { s.type = TYPES[i]; s.name = NAMES[i]; s.rot = (s.x * 0.0131 + s.z * 0.0071) % (Math.PI * 2); });
+    })();
     // no forest trees on the city, the highway corridor (incl. embankments), the airfield or the SAM base
     function treeBlockedAt(wx, wz) {
       if (OLD_STRIP) {
@@ -2277,6 +2369,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (Math.abs(obx * OLD_STRIP.ux + obz * OLD_STRIP.uz) < OLD_STRIP.L / 2 + 90 && Math.abs(-obx * OLD_STRIP.uz + obz * OLD_STRIP.ux) < 110) return true;
       }
       if (UFO_SITE && Math.hypot(wx - UFO_SITE.x, wz - UFO_SITE.z) < 45) return true;
+      for (var wti = 0; wti < WAR_STRIPS.length; wti++) {
+        var WT = WAR_STRIPS[wti], wtx = wx - WT.x, wtz = wz - WT.z;
+        if (wtx * wtx + wtz * wtz > WT.reach2) continue;
+        var wtv = -wtx * WT.uz + wtz * WT.ux;
+        if (Math.abs(wtx * WT.ux + wtz * WT.uz) < WT.L / 2 + 90 && wtv > -WT.W / 2 - 60 && wtv < WT.W / 2 + WT.apron + 40) return true;
+      }
+      for (var wsj = 0; wsj < WAR_SITES.length; wsj++) {
+        var wdx = wx - WAR_SITES[wsj].x, wdz = wz - WAR_SITES[wsj].z;
+        if (wdx * wdx + wdz * wdz < 190 * 190) return true;
+      }
       if (CITY_FLAT) { var cdx = wx - CITY_FLAT.x, cdz = wz - CITY_FLAT.z; if (cdx * cdx + cdz * cdz < Math.pow(CITY_FLAT.r + 20, 2)) return true; }
       if (SAM_BASE) { var sdx = wx - SAM_BASE.x, sdz = wz - SAM_BASE.z; if (sdx * sdx + sdz * sdz < 300 * 300) return true; }
       var hwp = window.__highwayPath;
@@ -2292,6 +2394,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     // other places a plane can put down: the abandoned airstrip, and frozen water in winter
     function worldLandable(x, z, margin) {
+      for (var wli = 0; wli < WAR_STRIPS.length; wli++) {
+        var WL = WAR_STRIPS[wli], wlx = x - WL.x, wlz = z - WL.z;
+        if (Math.abs(wlx * WL.ux + wlz * WL.uz) < WL.L / 2 + (margin || 0) && Math.abs(-wlx * WL.uz + wlz * WL.ux) < WL.W / 2 + (margin || 0)) return true;
+      }
       if (OLD_STRIP) {
         var ox = x - OLD_STRIP.x, oz = z - OLD_STRIP.z;
         if (Math.abs(ox * OLD_STRIP.ux + oz * OLD_STRIP.uz) < OLD_STRIP.L / 2 + (margin || 0) && Math.abs(-ox * OLD_STRIP.uz + oz * OLD_STRIP.ux) < OLD_STRIP.W / 2 + (margin || 0)) return true;
@@ -10456,6 +10562,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (task === 'sam') {
         if (samRadar && samRadar.alive) pts.push(samRadar.pos.clone());
         samLaunchers.forEach(function(L) { if (L.alive) pts.push(L.pos.clone()); });
+        // in a campaign: every enemy battery you know about, nearest first
+        if (WAR.on) {
+          WAR.extra.forEach(function(o) { if (o.alive && o.war.owner === 'red' && o.war.known) pts.push(o.pos.clone()); });
+          pts.sort(function(a, b) { return a.distanceTo(from) - b.distanceTo(from); });
+        }
       } else if (task === 'convoy') {
         strikeTargets.forEach(function(t) { if (t.alive && t.kind === 'vehicle') pts.push(t.center.clone()); });
       } else if (task === 'aa') {
@@ -14823,6 +14934,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         ctx.drawImage(mapTerrain.canvas, (mapTerrain.cx - span / 2 - position.x) * scale, (mapTerrain.cz - span / 2 - position.z) * scale, span * scale, span * scale);
         ctx.restore();
       }
+      warMapUnder(ctx, cx, cy, rot, scale);
       // 1 km grid (north-up chart only)
       if (exp) {
         var gridStep = range > 4000 ? 2000 : 1000;
@@ -14880,6 +14992,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
       nukeMinimap(ctx, toS, scale);
       cmdMinimap(ctx, toS, exp);
+      warMapOver(ctx, toS, exp, inView, label, scale);
       var hel = window.__airwingHelo;
       if (hel) { var hq = toS(hel.pos.x, hel.pos.z); ctx.fillStyle = '#7dff8a'; ctx.beginPath(); ctx.arc(hq.x, hq.y, 3, 0, Math.PI * 2); ctx.fill(); }
       // airfield: runway as a true oriented strip
@@ -14901,7 +15014,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (rwLen < 6) { ctx.fillStyle = '#ecebe3'; ctx.fillRect(rwMid.x - 2, rwMid.y - 2, 4, 4); }
 
       // hostile SAM site
-      if (SAM_BASE) {
+      if (SAM_BASE && !(WAR.on && WAR.iron && WAR.iron.owner === 'blue')) {
         var sp = toS(SAM_BASE.x, SAM_BASE.z);
         var threatR = SAM_DETECT_RANGE * (isStealthMode ? 0.33 : 1) * scale;
         ctx.fillStyle = 'rgba(255,48,36,0.12)'; ctx.strokeStyle = 'rgba(255,70,50,0.8)'; ctx.lineWidth = 1.4; ctx.setLineDash([5, 4]);
@@ -14915,13 +15028,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
         if (typeof strikeTargets !== 'undefined') {
           strikeTargets.forEach(function(t) {
+            if (t.war && (!t.war.known || t.surrendered)) return;
             var tp = toS(t.center.x, t.center.z);
             if (!inView(tp, 4)) return;
             if (t.alive) { ctx.fillStyle = '#ffb020'; ctx.fillRect(tp.x - 1.8, tp.y - 1.8, 3.6, 3.6); }
             else if (exp) { ctx.strokeStyle = 'rgba(160,160,160,0.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(tp.x - 2, tp.y - 2); ctx.lineTo(tp.x + 2, tp.y + 2); ctx.moveTo(tp.x + 2, tp.y - 2); ctx.lineTo(tp.x - 2, tp.y + 2); ctx.stroke(); }
           });
         }
-        if (inView(sp, 10)) label('SAM', sp.x, sp.y - (exp ? 12 : 0), '#ff5a48', exp ? 10 : 9);
+        if (inView(sp, 10) && !WAR.on) label('SAM', sp.x, sp.y - (exp ? 12 : 0), '#ff5a48', exp ? 10 : 9);
       }
       // waypoints
       WAYPOINTS.forEach(function(wp) {
@@ -14976,7 +15090,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
       // off-map pointers on the rim (SAM site, downed pilot, home base when returning)
       var pointers = [];
-      if (SAM_BASE) pointers.push({ x: SAM_BASE.x, z: SAM_BASE.z, color: '#ff4a3a', text: 'SAM' });
+      if (WAR.on) { if (WAR.objective) pointers.push({ x: WAR.objective.x, z: WAR.objective.z, color: '#ffd25a', text: WAR.objective.name }); }
+      else if (SAM_BASE) pointers.push({ x: SAM_BASE.x, z: SAM_BASE.z, color: '#ff4a3a', text: 'SAM' });
       if (csarPt) pointers.push({ x: csarPt.x, z: csarPt.z, color: csarPt.color, text: 'PILOT' });
       if (rtb || (!exp && Math.hypot(position.x - RUNWAY_CENTER_X, position.z - RUNWAY_CENTER_Z) > range)) pointers.push({ x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z, color: rtb ? '#7dff8a' : '#e8e6de', text: 'BASE' });
       pointers.forEach(function(pt) {
@@ -15464,7 +15579,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
         if (wasGrounded && !crashing && speed < RUMBLE_MIN_SPEED * 2.5 &&
             (isOverRunway(position.x, position.z, RUNWAY_LANDING_MARGIN + 40) || isOnAirportPavement(position.x, position.z) || nearGasStation ||
-             isOverCarrierDeck(position.x, position.z))) {
+             isOverCarrierDeck(position.x, position.z) || warRearmAt(position.x, position.z))) {
           isRefueling = fuel < FUEL_MAX;
           if (!nearGasStation) samRearmAtBase();
           if (isRefueling) {
@@ -15677,6 +15792,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       updateSAM(dt);
       airWingUpdate(dt);
       cmdUpdate(dt);
+      warUpdate(dt);
       updateStrike(dt);
       updateStrikePostCamera(dt);
       updateCSAR(dt);
@@ -17486,7 +17602,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var flareCount = FLARE_MAX, flareIdSeq = 1;
     var samPrevPlayerPos = new THREE.Vector3(), samPlayerVel = new THREE.Vector3(), samHavePrev = false;
     var samWasInZone = false, samDamageSmokeTimer = 0, samFireSmoke = [];
-    var samRadarPrevAngle = 0;
+    var samRadarPrevAngle = 0, samBaseEmitting = false;
 
     function samMat(hex, rough, metal) {
       return new THREE.MeshStandardMaterial({ color: new THREE.Color(hex).convertSRGBToLinear(), roughness: rough, metalness: metal || 0 });
@@ -17665,7 +17781,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     /* ---------- pools: SAM missiles, flares, smoke ---------- */
     function samBuildPools() {
       for (var i = 0; i < 300; i++) samSmoke.push(samSprite(smokeGlowTexture, false));
-      for (var j = 0; j < 4; j++) {
+      for (var j = 0; j < 8; j++) {
         var g = new THREE.Group();
         var body = samCyl(0.17, 0.17, 3.0, 12, SAM_M.white, 0, 0, 0); body.rotation.x = Math.PI / 2; g.add(body);
         var nose = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.6, 12), SAM_M.metal); nose.rotation.x = -Math.PI / 2; nose.position.z = -1.8; g.add(nose);
@@ -17786,7 +17902,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       [1, 0.5].forEach(function(f) { rwrCtx.beginPath(); rwrCtx.arc(cx, cy, R * f, 0, Math.PI * 2); rwrCtx.stroke(); });
       rwrCtx.beginPath(); rwrCtx.moveTo(cx, cy - R); rwrCtx.lineTo(cx, cy + R); rwrCtx.moveTo(cx - R, cy); rwrCtx.lineTo(cx + R, cy); rwrCtx.stroke();
       rwrCtx.fillStyle = 'rgba(120,255,140,0.9)'; rwrCtx.fillRect(cx - 2, cy - 2, 4, 4);
-      if (samRadar && samRadar.alive) {
+      WAR.emitters.forEach(function(em) {
+        var eb = samBearingTo(em.x, em.z), er = R * (em.lethal ? 0.55 : 0.85);
+        rwrCtx.font = 'bold 13px monospace'; rwrCtx.textAlign = 'center'; rwrCtx.textBaseline = 'middle';
+        rwrCtx.fillStyle = em.lethal ? '#ff3b30' : '#ffcc33';
+        rwrCtx.fillText('6', cx + Math.sin(eb) * er, cy - Math.cos(eb) * er);
+      });
+      if (samRadar && samRadar.alive && samBaseEmitting) {
         var b = samBearingTo(samRadar.pos.x, samRadar.pos.z);
         var lethal = state !== 'search';
         var r = R * (lethal ? 0.55 : 0.85);
@@ -18155,13 +18277,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     /* ---------- ground damage from your own drone missiles / bombs ---------- */
     function samKill(obj, isRadar) {
-      netEmit('samkill', { r: isRadar ? 1 : 0, t: isRadar ? -1 : samLaunchers.indexOf(obj) });
+      if (!WAR.loading) netEmit('samkill', { r: isRadar ? 1 : 0, t: isRadar ? -1 : samLaunchers.indexOf(obj) });
       obj.alive = false; obj.deadTimer = SAM_REPAIR_TIME; obj.smokeTimer = 0;
       obj.group.traverse(function(c) { if (c.isMesh) c.material = SAM_M.charred; });
       if (!isRadar) { obj.rack.rotation.x = -0.35; obj.turret.rotation.z = 0.18; }
       else { obj.head.rotation.z = 0.5; }
-      if (net.quiet) return;
+      if (net.quiet || WAR.loading) { if (obj.war) warOnKill(obj, true); return; }
       triggerMissileBlast(obj.pos.clone());
+      if (obj.war && WAR.on) { warOnKill(obj, false); return; }
       var left = samLaunchers.filter(function(l) { return l.alive; }).length;
       if (isRadar) samToast('SEARCH RADAR DESTROYED — SITE IS BLIND', '#7dff8a', 3.5);
       else samToast(left ? 'LAUNCHER DESTROYED — ' + left + ' LEFT' : 'ALL LAUNCHERS DESTROYED', '#7dff8a', 3);
@@ -18210,12 +18333,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
       // search radar spins; repairs tick down
       if (samRadar.alive) samRadar.head.rotation.y += dt * (Math.PI * 2 / 3.2);
-      else if ((samRadar.deadTimer -= dt) <= 0) samRepair(samRadar, true);
+      else if ((samRadar.deadTimer -= dt) <= 0 && !samRadar.war) samRepair(samRadar, true);
       samLaunchers.forEach(function(L) {
         if (!L.alive) {
           L.smokeTimer -= dt;
           if (L.smokeTimer <= 0 && L.deadTimer > SAM_REPAIR_TIME - 45) { L.smokeTimer = 0.25; samEmitSmoke(L.pos, new THREE.Vector3(Math.random() - 0.5, 4, Math.random() - 0.5), 9, 5, 0.6, 0.18); }
-          if ((L.deadTimer -= dt) <= 0) samRepair(L, false);
+          if ((L.deadTimer -= dt) <= 0 && !L.war) samRepair(L, false);
           return;
         }
         if (L.cooldown > 0) L.cooldown -= dt;
@@ -18298,6 +18421,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (eligible && (incoming || samLaunchWarn > 0)) state = 'launch';
       else if (eligible && samLock > 0.02 && tracking) state = 'lock';
       else if (eligible && samRadar.alive && dist < detectR * 1.35 && !masked) state = 'search';
+      samBaseEmitting = state !== null && samRadar.alive && dist < detectR * 1.35;
+      var lockShown = samLock;
+      if (WAR.on && state !== 'launch') {
+        if (WAR.lock > 0.02 && (state !== 'lock' || WAR.lock > samLock)) { state = 'lock'; lockShown = Math.max(samLock, WAR.lock); }
+        else if (!state && WAR.search) state = 'search';
+      }
 
       if (state === 'search' && samRadar.alive) {
         // the classic RWR "chirp" as the search beam sweeps across you
@@ -18314,7 +18443,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (state) {
         rwrPanelEl.classList.remove('hidden');
         rwrPanelEl.className = 'rwr-' + state;
-        rwrTextEl.textContent = state === 'launch' ? 'MISSILE LAUNCH' : (state === 'lock' ? 'SAM LOCK ' + Math.round(samLock * 100) + '%' : 'SAM SEARCH');
+        rwrTextEl.textContent = state === 'launch' ? 'MISSILE LAUNCH' : (state === 'lock' ? 'SAM LOCK ' + Math.round(lockShown * 100) + '%' : 'SAM SEARCH');
         samDrawRwr(state, samClock);
       } else {
         rwrPanelEl.className = 'hidden';
@@ -18576,7 +18705,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
     }
     function stKill(t, quiet, byName) {
-      netEmit('kill', { t: strikeTargets.indexOf(t) });
+      if (!t.war || !WAR.on || t.war === WAR.iron) { if (!WAR.loading) netEmit('kill', { t: strikeTargets.indexOf(t) }); }
       var fx = !quiet;
       t.alive = false; t.deadTimer = STRIKE_REPAIR_TIME;
       t.group.traverse(function(c) { if (c.isMesh) c.material = SAM_M.charred; });
@@ -18598,8 +18727,22 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       } else if (t.kind === 'bunker') {
         t.group.scale.y = 0.5;
         if (fx) stIgniteFire(p, 6, 50);
+      } else if (t.kind === 'hangar') {
+        // the roof comes in and whatever was parked inside goes up with it
+        t.group.scale.y = 0.38;
+        if (fx) { stIgniteFire(p, 13, 100); for (var hg = 0; hg < 5; hg++) strikeSecondaries.push({ t: 0.2 + hg * 0.3, pos: p.clone().add(new THREE.Vector3((Math.random() - 0.5) * 18, 2 + Math.random() * 4, (Math.random() - 0.5) * 18)) }); }
+      } else if (t.kind === 'jet') {
+        t.group.rotation.z = 0.14; t.group.position.y -= 0.6;
+        if (fx) { stIgniteFire(p, 8, 80); for (var jt = 0; jt < 3; jt++) strikeSecondaries.push({ t: 0.15 + jt * 0.25, pos: p.clone().add(new THREE.Vector3((Math.random() - 0.5) * 6, 1.5, (Math.random() - 0.5) * 6)) }); }
+      } else if (t.kind === 'tower') {
+        t.group.rotation.x = 0.42; t.group.rotation.z = 0.12;
+        if (fx) stIgniteFire(p, 6, 60);
+      } else if (t.kind === 'truck') {
+        t.group.rotation.z = (Math.random() - 0.5) * 0.35;
+        if (fx) stIgniteFire(p, 5.5, 45);
       }
       if (strikeTrack === t) strikeTrack = null;
+      if (t.war && WAR.on) { warOnKill(t, quiet); return; }
       var left = strikeTargets.filter(function(x) { return x.alive; }).length;
       var total = strikeTargets.length;
       var msg = left ? t.label + ' DESTROYED — ' + (total - left) + '/' + total : 'ALL STRIKE TARGETS DESTROYED';
@@ -18689,7 +18832,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (stMsgTimer > 0 && (stMsgTimer -= dt) <= 0) stMsgEl.classList.remove('show');
       strikeTargets.forEach(function(t) {
         if (t.alive) return;
-        if ((t.deadTimer -= dt) <= 0) {
+        if ((t.deadTimer -= dt) <= 0 && !t.war) {
           // the convoy is replaced as a unit, so wrecks don't snap back onto the moving road
           if (t.kind === 'vehicle') {
             var anyVehicleTimerLeft = strikeTargets.some(function(v) { return v.kind === 'vehicle' && !v.alive && v.deadTimer > 0; });
@@ -19000,14 +19143,15 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (!ARS_TGT) {
         ARS_TGT = [];
         strikeTargets.forEach(function(t) { ARS_TGT.push(t); });
-        samLaunchers.forEach(function(L) { L.label = 'SAM LAUNCHER'; L.hitR = 6; L.maxHp = 150; L.hp = 150; L.armor = 0.9; ARS_TGT.push(L); });
-        if (samRadar) { samRadar.label = 'SEARCH RADAR'; samRadar.hitR = 7; samRadar.maxHp = 130; samRadar.hp = 130; ARS_TGT.push(samRadar); }
+        samLaunchers.forEach(function(L) { L.label = 'SAM LAUNCHER'; L.hitR = 6; L.maxHp = 150; if (L.hp === undefined) L.hp = 150; L.armor = 0.9; ARS_TGT.push(L); });
+        if (samRadar) { samRadar.label = 'SEARCH RADAR'; samRadar.hitR = 7; samRadar.maxHp = 130; if (samRadar.hp === undefined) samRadar.hp = 130; ARS_TGT.push(samRadar); }
         AA.forEach(function(g) { ARS_TGT.push(g); });
+        WAR.extra.forEach(function(o) { ARS_TGT.push(o); });
       }
       return ARS_TGT;
     }
     function arsPos(t) { return t.center || t.pos; }
-    var ARS_ARMOR = { vehicle: 1, fuel: 1.25, ammo: 1.1, bunker: 0.42 };
+    var ARS_ARMOR = { vehicle: 1, fuel: 1.25, ammo: 1.1, bunker: 0.42, truck: 1, hangar: 0.8, jet: 1.2, tower: 0.9 };
 
     /* ---------- damage model ---------- */
     function arsDamage(pos, radius, dmg, quiet, pay) {
@@ -19023,8 +19167,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
     }
     // coins for what you destroy yourself (air-wing strikes don't pay)
-    var ARS_BOUNTY = { vehicle: 40, fuel: 50, ammo: 80, bunker: 120 };
+    var ARS_BOUNTY = { vehicle: 40, fuel: 50, ammo: 80, bunker: 120, truck: 40, hangar: 120, jet: 150, tower: 90 };
     function arsBounty(t) {
+      if (t.bounty) return t.bounty;
       if (t.isAA) return 60;
       if (t === samRadar) return 150;
       if (samLaunchers.indexOf(t) >= 0) return 100;
@@ -19044,6 +19189,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         else if (t === samRadar) samKill(samRadar, true);
         else if (samLaunchers.indexOf(t) >= 0) samKill(t, false);
         else if (t.isAA) aaKill(t);
+        else if (t.onKill) t.onKill(t);
         return;
       }
       var frac = t.hp / max, st = frac < 0.34 ? 2 : frac < 0.67 ? 1 : 0;
@@ -19412,12 +19558,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         AA_TRACERS.push({ s: s, pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, max: 0, active: false });
       }
     }
-    function aaKill(g) {
+    function aaKill(g, quiet) {
       g.alive = false; g.deadTimer = STRIKE_REPAIR_TIME; g.hp = 0; g.dmgState = 0;
       g.group.traverse(function(c) { if (c.isMesh) c.material = SAM_M.charred; });
       g.pitch.rotation.x = -0.25; g.yaw.rotation.z = 0.12;
-      triggerMissileBlast(g.pos.clone());
-      stIgniteFire(g.pos.clone(), 5, 60);
+      if (!quiet) { triggerMissileBlast(g.pos.clone()); stIgniteFire(g.pos.clone(), 5, 60); }
+      if (g.war && WAR.on) { warOnKill(g, quiet); return; }
+      if (quiet) return;
       var left = AA.filter(function(a) { return a.alive; }).length;
       samToast(left ? 'AA GUN DESTROYED — ' + left + ' LEFT' : 'ALL AA GUNS SILENCED', '#7dff8a', 2.4);
     }
@@ -19466,7 +19613,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if ((e.t -= dt) <= 0) { g.bursts.splice(b, 1); aaFlakEffect(e.pos, g); }
         }
         g.flashes.forEach(function(f) { f.material.opacity = Math.max(0, f.material.opacity - dt * 9); f.visible = f.material.opacity > 0.01; });
-        if (!g.alive) { if ((g.deadTimer -= dt) <= 0) aaRepair(g); return; }
+        if (!g.alive) { if ((g.deadTimer -= dt) <= 0 && !g.war) aaRepair(g); return; }
         var engage = started && !crashing && !ejecting && !wasGrounded && !isCarMode;
         var d = g.pos.distanceTo(position);
         var range = 2800 * (isStealthMode ? 0.4 : 1) * (isHelicopterMode ? 0.85 : 1);
@@ -19690,6 +19837,921 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if ((_arsPanelT -= dt) <= 0) { _arsPanelT = 0.15; arsRefreshPanel(); }
     }
     aaBuildAll();
+
+    /* ============================================================
+       CAMPAIGN — a living war over the island
+       The land is split into sectors. Blue holds the home airfield, the port city and the old
+       field; red holds Ironhold (the SAM fortress), a ring of installations out in the hills
+       (AA sites, SAM batteries, supply depots, two forward airbases) and its capital, Kastor
+       Airbase. Destroy every key installation in a sector and it falls: the garrison
+       surrenders, the flag changes and the front line moves out. Two unguarded outposts near
+       home only need a low pass to secure. Take Kastor to win. Sectors you haven't seen are
+       hidden on the chart until you get close (or sweep them with the AWACS radar).
+       Everything is saved as you go.
+       ============================================================ */
+    var WAR_KEY = 'gp-war-v1';
+    var WAR = { on: false, built: false, sectors: [], extra: [], lock: 0, search: false, emitters: [], launchCd: 4, won: false,
+                score: 0, kills: 0, playT: 0, t: 0, saveT: 0, dirty: false, loading: false, inside: null, hudEl: null, objective: null };
+    var WAR_TYPE = {
+      home: { label: 'HOME AIRFIELD', glyph: '✈' }, city: { label: 'PORT CITY', glyph: '▦' }, field: { label: 'FORWARD STRIP', glyph: '✈' },
+      outpost: { label: 'OUTPOST', glyph: '◇' }, aa: { label: 'AA SITE', glyph: '✶' }, sam: { label: 'SAM BATTERY', glyph: '▲' },
+      depot: { label: 'SUPPLY DEPOT', glyph: '■' }, airbase: { label: 'FORWARD AIRBASE', glyph: '✈' }, fortress: { label: 'SAM FORTRESS', glyph: '▲' },
+      capital: { label: 'CAPITAL AIRBASE', glyph: '★' }
+    };
+    var WAR_COL = { blue: '#5aa8ff', red: '#ff4a3a', neutral: '#c9ced3' };
+
+    /* ---------- the sector list (no meshes yet: built when a campaign starts) ---------- */
+    function warSectorList() {
+      var S = [];
+      function add(o) {
+        o.id = S.length; o.owner0 = o.owner; o.objs = []; o.keys = []; o.launchers = []; o.radar = null; o.lock = 0;
+        o.known = o.owner !== 'red' || !!o.intel; o.flag = null; o.rot = o.rot || 0; o.secureT = 0;
+        S.push(o); return o;
+      }
+      add({ name: 'HOME', type: 'home', x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z, owner: 'blue', w: 1.25 });
+      var cs = window.__citySpot;
+      add({ name: 'PORT CITY', type: 'city', x: cs ? cs.x : RUNWAY_CENTER_X + 1450, z: cs ? cs.z : RUNWAY_CENTER_Z + 950, owner: 'blue', w: 0.9 });
+      if (OLD_STRIP) add({ name: 'OLD FIELD', type: 'field', x: OLD_STRIP.x, z: OLD_STRIP.z, owner: 'blue', w: 0.9, rot: Math.atan2(OLD_STRIP.ux, OLD_STRIP.uz) });
+      if (SAM_BASE) add({ name: 'IRONHOLD', type: 'fortress', x: SAM_BASE.x, z: SAM_BASE.z, owner: 'red', w: 1.15, intel: true });
+      WAR_STRIPS.forEach(function(st) {
+        add({ name: st.kind === 'capital' ? 'KASTOR AIRBASE' : st.name, type: st.kind, x: st.x, z: st.z, owner: 'red', strip: st,
+              w: st.kind === 'capital' ? 1.45 : 1.1, intel: st.kind === 'capital' });
+      });
+      WAR_SITES.forEach(function(si) {
+        add({ name: si.name, type: si.type, x: si.x, z: si.z, owner: si.type === 'outpost' ? 'neutral' : 'red', w: 1, rot: si.rot });
+      });
+      return S;
+    }
+    WAR.sectors = warSectorList();
+    function warSig() { return WAR.sectors.map(function(s) { return s.name.slice(0, 2) + s.type[0]; }).join(''); }
+
+    /* ---------- builders ---------- */
+    var WAR_VC = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.15 });
+    // one draw call per installation: every mesh in the group (except the moving parts passed in
+    // `keep`) is flattened into a single vertex-coloured mesh
+    function warBake(g, keep) {
+      var kept = (keep || []).filter(Boolean);
+      kept.forEach(function(k) { k.parent.remove(k); });
+      g.updateMatrixWorld(true);
+      var inv = new THREE.Matrix4().copy(g.matrixWorld).invert(), m = new THREE.Matrix4();
+      var P = [], N = [], C = [], dead = [];
+      g.traverse(function(c) {
+        if (!c.isMesh) return;
+        m.multiplyMatrices(inv, c.matrixWorld);
+        var geo = c.geometry.index ? c.geometry.toNonIndexed() : c.geometry.clone();
+        geo.applyMatrix4(m);
+        var pa = geo.attributes.position.array, na = geo.attributes.normal.array, col = c.material.color || new THREE.Color(1, 1, 1);
+        for (var i = 0; i < pa.length; i += 3) { P.push(pa[i], pa[i + 1], pa[i + 2]); N.push(na[i], na[i + 1], na[i + 2]); C.push(col.r, col.g, col.b); }
+        dead.push(c);
+      });
+      dead.forEach(function(c) { c.parent.remove(c); });
+      for (var i = g.children.length - 1; i >= 0; i--) if (g.children[i].isGroup && !g.children[i].children.length) g.remove(g.children[i]);
+      if (P.length) {
+        var out = new THREE.BufferGeometry();
+        out.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+        out.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+        out.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+        out.computeBoundingSphere();
+        var mesh = new THREE.Mesh(out, WAR_VC); mesh.castShadow = mesh.receiveShadow = true;
+        g.add(mesh);
+      }
+      kept.forEach(function(k) { g.add(k); });
+      return g;
+    }
+    function warLocal(s, lx, lz) {
+      var c = Math.cos(s.rot), n = Math.sin(s.rot);
+      return { x: s.x + lx * c + lz * n, z: s.z - lx * n + lz * c };
+    }
+    // on an airbase: u along the runway, v across it (+v = the apron side)
+    function warStripPt(s, u, v) { var st = s.strip; return { x: st.x + st.ux * u - st.uz * v, z: st.z + st.uz * u + st.ux * v }; }
+    function warGround(x, z) { return Math.max(getTerrainHeight(x, z), WATER_LEVEL); }
+    function warStructAt(s, kind, label, g, x, z, opt) {
+      opt = opt || {};
+      var gy = warGround(x, z) - (opt.sink || 0.1);
+      g.position.set(x, gy, z); g.rotation.y = opt.yaw || 0;
+      warBake(g);
+      var t = stAddTarget({ kind: kind, label: label, group: g, hitR: opt.hitR || 6, maxHp: opt.hp || 140, fixed: true, war: s, bounty: opt.bounty });
+      t.center.set(x, gy + (opt.cy || 3), z);
+      s.objs.push(t); if (!opt.minor) s.keys.push(t);
+      return t;
+    }
+    function warStruct(s, kind, label, g, lx, lz, opt) {
+      var p = warLocal(s, lx, lz);
+      opt = opt || {}; opt.yaw = s.rot + (opt.yaw || 0);
+      return warStructAt(s, kind, label, g, p.x, p.z, opt);
+    }
+    function warAAAt(s, x, z) {
+      var g = aaBuild(x, z);
+      g.war = s; s.objs.push(g); s.keys.push(g);
+      return g;
+    }
+    function warAA(s, lx, lz) { var p = warLocal(s, lx, lz); return warAAAt(s, p.x, p.z); }
+    function warLauncherAt(s, x, z) {
+      var gy = warGround(x, z);
+      var L = samBuildLauncher();
+      L.group.position.set(x, gy, z);
+      L.group.rotation.y = Math.atan2(-(x - s.x), -(z - s.z)) + Math.PI;     // facing out from the site
+      warBake(L.group, [L.turret]);
+      scene.add(L.group);
+      var bag = new THREE.Mesh(new THREE.TorusGeometry(7.5, 1.3, 8, 28, Math.PI * 1.6), SAM_M.tan);
+      bag.rotation.x = -Math.PI / 2; bag.rotation.z = L.group.rotation.y + Math.PI * 0.7; bag.scale.set(1, 1, 0.6);
+      bag.position.set(x, gy + 0.6, z); bag.receiveShadow = true; scene.add(bag);
+      L.pos = new THREE.Vector3(x, gy + 4, z);
+      L.ammo = 4; L.reload = 0; L.cooldown = 0; L.alive = true; L.deadTimer = 0; L.smokeTimer = 0;
+      L.yaw = L.group.rotation.y; L.elev = 0.15;
+      L.origMats = []; L.group.traverse(function(c) { if (c.isMesh) L.origMats.push([c, c.material]); });
+      L.label = 'SAM LAUNCHER'; L.hitR = 6; L.maxHp = 150; L.hp = 150; L.armor = 0.9; L.bounty = 100;
+      L.war = s; L.onKill = warLauncherKill;
+      WAR.extra.push(L); s.launchers.push(L); s.objs.push(L); s.keys.push(L);
+      return L;
+    }
+    function warLauncher(s, lx, lz) { var p = warLocal(s, lx, lz); return warLauncherAt(s, p.x, p.z); }
+    function warRadarAt(s, x, z, yaw) {
+      var gy = warGround(x, z);
+      var R = samBuildRadar();
+      R.group.position.set(x, gy, z); R.group.rotation.y = yaw || 0;
+      warBake(R.group, [R.head]);
+      scene.add(R.group);
+      R.pos = new THREE.Vector3(x, gy + 6, z);
+      R.alive = true; R.deadTimer = 0;
+      R.origMats = []; R.group.traverse(function(c) { if (c.isMesh) R.origMats.push([c, c.material]); });
+      R.label = 'SEARCH RADAR'; R.hitR = 7; R.maxHp = 130; R.hp = 130; R.bounty = 150;
+      R.war = s; R.onKill = warRadarKill;
+      WAR.extra.push(R); s.radar = R; s.objs.push(R); s.keys.push(R);
+      return R;
+    }
+    function warRadar(s, lx, lz) { var p = warLocal(s, lx, lz); return warRadarAt(s, p.x, p.z, s.rot); }
+    function warLauncherKill(L, quiet) {
+      L.alive = false; L.hp = 0; L.dmgState = 0;
+      L.group.traverse(function(c) { if (c.isMesh) c.material = SAM_M.charred; });
+      L.rack.rotation.x = -0.35; L.turret.rotation.z = 0.18;
+      if (!quiet && !WAR.loading) { triggerMissileBlast(L.pos.clone()); stIgniteFire(L.pos.clone(), 6, 70); }
+      warOnKill(L, quiet);
+    }
+    function warRadarKill(R, quiet) {
+      R.alive = false; R.hp = 0; R.dmgState = 0;
+      R.group.traverse(function(c) { if (c.isMesh) c.material = SAM_M.charred; });
+      R.head.rotation.z = 0.5;
+      if (!quiet && !WAR.loading) { triggerMissileBlast(R.pos.clone()); stIgniteFire(R.pos.clone(), 7, 70); }
+      warOnKill(R, quiet);
+    }
+
+    // --- models (front faces +Z, built at the origin) ---
+    function warHangarModel(w, d) {
+      var g = new THREE.Group();
+      var shell = new THREE.Mesh(new THREE.CylinderGeometry(w / 2, w / 2, d, 20, 1, false, 0, Math.PI), SAM_M.roof);
+      shell.rotation.z = Math.PI / 2; shell.rotation.y = Math.PI / 2; g.add(shell);
+      g.add(samBox(w * 0.98, w * 0.46, 0.4, SAM_M.oliveDark, 0, w * 0.23, -d / 2 + 0.2));
+      g.add(samBox(w * 0.7, w * 0.36, 0.25, SAM_M.track, 0, w * 0.18, d / 2 - 0.1));       // open doors, dark inside
+      g.add(samBox(w * 1.15, 0.3, d + 8, SAM_M.concrete, 0, 0.15, 3));
+      return g;
+    }
+    function warJetModel() {
+      // a parked delta-wing fighter in a grey-green camouflage
+      var g = new THREE.Group(), cam = samMat(0x59614f, 0.7, 0.3), belly = samMat(0x8d948b, 0.6, 0.3), dark = samMat(0x2a2d28, 0.6, 0.3);
+      var fus = samCyl(0.75, 0.95, 13, 12, cam, 0, 2.1, 0); fus.rotation.x = Math.PI / 2; g.add(fus);
+      var nose = new THREE.Mesh(new THREE.ConeGeometry(0.75, 3.4, 12), belly); nose.rotation.x = Math.PI / 2; nose.position.set(0, 2.1, 8.2); g.add(nose);
+      var can = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), SAM_M.glassDark); can.scale.set(1, 0.9, 2.4); can.position.set(0, 2.75, 4.2); g.add(can);
+      [1, -1].forEach(function(sd) {
+        var shape = new THREE.Shape();
+        shape.moveTo(0, 4.5); shape.lineTo(5.6 * sd, -3.4); shape.lineTo(-0.4 * sd, -3.4); shape.lineTo(-0.4 * sd, 4.5);
+        var wing = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.18, bevelEnabled: false }), cam);
+        wing.rotation.x = Math.PI / 2; wing.position.set(0.4 * sd, 2.0, 0); g.add(wing);
+        var fin = samBox(0.16, 2.6, 2.6, cam, 0.55 * sd, 3.6, -5); fin.rotation.z = -0.22 * sd; g.add(fin);
+        g.add(samCyl(0.1, 0.1, 1.6, 6, dark, 1.4 * sd, 0.8, 1.5));
+        var wh = samCyl(0.32, 0.32, 0.25, 10, dark, 1.4 * sd, 0.32, 1.5); wh.rotation.z = Math.PI / 2; g.add(wh);
+      });
+      g.add(samCyl(0.1, 0.1, 1.6, 6, dark, 0, 0.8, 5.5));
+      var noz = samCyl(0.85, 0.7, 1.2, 12, dark, 0, 2.1, -7); noz.rotation.x = Math.PI / 2; g.add(noz);
+      g.add(samBox(1.4, 0.06, 3, SAM_M.red, 0, 2.9, -3));   // the red stripe on the spine
+      return g;
+    }
+    function warTowerModel() {
+      var g = new THREE.Group();
+      [[-2, -2], [2, -2], [-2, 2], [2, 2]].forEach(function(l) { g.add(samCyl(0.25, 0.3, 14, 6, SAM_M.concrete, l[0], 7, l[1])); });
+      g.add(samBox(6, 3.2, 6, SAM_M.tan, 0, 15.2, 0));
+      g.add(samBox(6.3, 1.4, 6.3, SAM_M.glassDark, 0, 15.6, 0));
+      g.add(samBox(7, 0.4, 7, SAM_M.roof, 0, 17, 0));
+      g.add(samCyl(0.08, 0.08, 6, 4, SAM_M.metal, 2, 20, 2));
+      return g;
+    }
+    function warHqModel() {
+      var g = new THREE.Group();
+      g.add(samBox(26, 8, 16, SAM_M.tan, 0, 4, 0));
+      g.add(samBox(27, 0.6, 17, SAM_M.roof, 0, 8.3, 0));
+      g.add(samBox(8, 4, 8, SAM_M.tan, -6, 10.6, 0));
+      g.add(samCyl(0.3, 0.6, 18, 6, SAM_M.metal, 8, 17, 4));
+      for (var i = 0; i < 5; i++) g.add(samBox(2.2, 1.4, 0.1, SAM_M.glassDark, -10 + i * 5, 4.5, 8.05));
+      return g;
+    }
+    function warTentModel() {
+      var g = new THREE.Group();
+      var t = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 3.4, 3, 4, 1), SAM_M.olive); t.rotation.y = Math.PI / 4; t.position.y = 1.5; t.scale.z = 1.6; g.add(t);
+      return g;
+    }
+
+    /* ---------- the runway: a painted ribbon laid flat on the graded ground ---------- */
+    function warRunwayTex(L, W) {
+      var cv = document.createElement('canvas'); cv.width = 64; cv.height = 1024;
+      var c = cv.getContext('2d');
+      c.fillStyle = '#4a4a47'; c.fillRect(0, 0, 64, 1024);
+      for (var i = 0; i < 2600; i++) { c.fillStyle = 'rgba(' + (Math.random() < 0.5 ? '20,20,20' : '120,118,110') + ',' + (Math.random() * 0.18) + ')'; c.fillRect(Math.random() * 64, Math.random() * 1024, 2, 3); }
+      c.fillStyle = 'rgba(225,222,210,0.85)';
+      for (var y = 70; y < 954; y += 34) c.fillRect(31, y, 2, 16);                     // centreline
+      [16, 1008].forEach(function(y0) { for (var k = 0; k < 6; k++) c.fillRect(6 + k * 4.6 + (k > 2 ? 25 : 0), y0 - 12, 3, 24); }); // threshold bars
+      c.fillRect(2, 0, 1.5, 1024); c.fillRect(60.5, 0, 1.5, 1024);                     // edge lines
+      var t = new THREE.CanvasTexture(cv); t.anisotropy = gfxAniso; return t;
+    }
+    function warBuildRunway(s) {
+      var st = s.strip, ang = Math.atan2(st.ux, st.uz);
+      var g = new THREE.Group(); g.position.set(st.x, st.y + 0.12, st.z); g.rotation.y = ang;
+      var rw = new THREE.Mesh(new THREE.PlaneGeometry(st.W, st.L), new THREE.MeshStandardMaterial({ map: warRunwayTex(st.L, st.W), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
+      rw.rotation.x = -Math.PI / 2; rw.receiveShadow = true; g.add(rw);
+      // apron + taxiway on the +v side (local +x after the rotation)
+      var apMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x6c6a64).convertSRGBToLinear(), roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+      var ap = new THREE.Mesh(new THREE.PlaneGeometry(st.apron * 0.62, st.L * 0.5), apMat);
+      ap.rotation.x = -Math.PI / 2; ap.position.set(-(st.W / 2 + st.apron * 0.42), -0.04, 0); ap.receiveShadow = true; g.add(ap);
+      [-0.3, 0.3].forEach(function(f) {
+        var tw = new THREE.Mesh(new THREE.PlaneGeometry(st.apron * 0.2, 14), apMat);
+        tw.rotation.x = -Math.PI / 2; tw.position.set(-(st.W / 2 + st.apron * 0.1), -0.05, st.L * f); g.add(tw);
+      });
+      scene.add(g);
+      return g;
+    }
+
+    /* ---------- the flag that shows who holds a sector ---------- */
+    function warFlagTex(owner) {
+      var cv = document.createElement('canvas'); cv.width = 96; cv.height = 60;
+      var c = cv.getContext('2d');
+      if (owner === 'blue') {
+        c.fillStyle = '#1f5fbf'; c.fillRect(0, 0, 96, 60);
+        c.fillStyle = '#f2f4f7'; c.fillRect(0, 24, 96, 12); c.fillRect(30, 0, 12, 60);
+      } else if (owner === 'red') {
+        c.fillStyle = '#9e1c14'; c.fillRect(0, 0, 96, 60);
+        c.fillStyle = '#1b1b1b'; c.fillRect(0, 40, 96, 20);
+        c.fillStyle = '#f0c040'; c.beginPath();
+        for (var i = 0; i < 10; i++) { var a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 6 : 14; c.lineTo(48 + Math.cos(a) * r, 21 + Math.sin(a) * r); }
+        c.fill();
+      } else {
+        c.fillStyle = '#e8e8e2'; c.fillRect(0, 0, 96, 60);
+      }
+      var t = new THREE.CanvasTexture(cv); return t;
+    }
+    var WAR_FLAG_TEX = null;
+    function warFlagAt(s, x, z) {
+      if (!WAR_FLAG_TEX) WAR_FLAG_TEX = { blue: warFlagTex('blue'), red: warFlagTex('red'), neutral: warFlagTex('neutral') };
+      var gy = warGround(x, z);
+      var g = new THREE.Group(); g.position.set(x, gy, z);
+      g.add(samCyl(0.1, 0.14, 15, 6, SAM_M.metal, 0, 7.5, 0));
+      var knob = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), SAM_M.metal); knob.position.y = 15.1; g.add(knob);
+      var geo = new THREE.PlaneGeometry(4.4, 2.75, 8, 1);
+      var flag = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: WAR_FLAG_TEX[s.owner], side: THREE.DoubleSide, roughness: 0.9 }));
+      flag.position.set(2.2, 13.4, 0); g.add(flag);
+      samShadow(g); scene.add(g);
+      s.flag = { group: g, mesh: flag, base: geo.attributes.position.array.slice(), ph: Math.random() * 6 };
+    }
+    function warBuildFlag(s, lx, lz) { var p = warLocal(s, lx, lz); warFlagAt(s, p.x, p.z); }
+    function warSetFlag(s) { if (s.flag) { s.flag.mesh.material.map = WAR_FLAG_TEX[s.owner]; s.flag.mesh.material.needsUpdate = true; } }
+    function warWaveFlags(dt) {
+      WAR.sectors.forEach(function(s) {
+        var f = s.flag;
+        if (!f) return;
+        var dx = f.group.position.x - position.x, dz = f.group.position.z - position.z;
+        if (dx * dx + dz * dz > 900 * 900) return;
+        f.ph += dt * 5;
+        var a = f.mesh.geometry.attributes.position, b = f.base;
+        for (var i = 0; i < a.count; i++) {
+          var x = b[i * 3] + 2.2;
+          a.array[i * 3 + 2] = Math.sin(f.ph - x * 1.3) * 0.32 * (x / 4.4);
+        }
+        a.needsUpdate = true;
+      });
+    }
+
+    /* ---------- garrisons ---------- */
+    function warBuildSector(s) {
+      var T = s.type;
+      if (T === 'outpost') {
+        // a hilltop radio post: tents, a mast, sandbags. Nothing to destroy, just fly over it low
+        [[-14, 6], [10, -12]].forEach(function(o) {
+          var g = warTentModel(), p = warLocal(s, o[0], o[1]); g.position.set(p.x, warGround(p.x, p.z), p.z); g.rotation.y = s.rot + o[0];
+          warBake(g); scene.add(g);
+        });
+        var m = new THREE.Group(), mp = warLocal(s, 4, 10);
+        m.add(samCyl(0.18, 0.3, 22, 5, SAM_M.metal, 0, 11, 0)); m.add(samCyl(0.5, 0.5, 0.3, 8, SAM_M.red, 0, 22.2, 0));
+        m.position.set(mp.x, warGround(mp.x, mp.z), mp.z); warBake(m); scene.add(m);
+        warBuildFlag(s, -4, -4);
+        return;
+      }
+      if (T === 'aa') {
+        [0, 2.1, 4.2].forEach(function(a) { warAA(s, Math.cos(a) * 105, Math.sin(a) * 105); });
+        warStruct(s, 'bunker', 'COMMAND BUNKER', stBuildBunker(), 0, 0, { hitR: 8.5, hp: 220, cy: 3 });
+        warStruct(s, 'ammo', 'AMMO DUMP', stBuildAmmoDump(), -38, 30, { hitR: 10, hp: 160, cy: 2 });
+        warStruct(s, 'truck', 'TRUCK', stBuildTruck('cargo').group, 30, 26, { hitR: 5, hp: 100, cy: 1.8, yaw: 0.6, minor: true });
+        warBuildFlag(s, 18, -16);
+      } else if (T === 'sam') {
+        warRadar(s, 0, -10);
+        warLauncher(s, 70, 30); warLauncher(s, -70, 30); warLauncher(s, 0, 85);
+        warAA(s, 140, -90); warAA(s, -140, -90);
+        warStruct(s, 'truck', 'RELOAD TRUCK', stBuildTruck('cargo').group, 22, 40, { hitR: 5, hp: 100, cy: 1.8, yaw: 1.2, minor: true });
+        warBuildFlag(s, -20, -30);
+      } else if (T === 'depot') {
+        [[-40, -30], [-27, -30], [-14, -30]].forEach(function(o) { warStruct(s, 'fuel', 'FUEL TANK', stBuildFuelTank(), o[0], o[1], { hitR: 7, hp: 140, cy: 3.5 }); });
+        warStruct(s, 'ammo', 'AMMO DUMP', stBuildAmmoDump(), 35, -20, { hitR: 10, hp: 160, cy: 2 });
+        warStruct(s, 'truck', 'FUEL TRUCK', stBuildTruck('tanker').group, 6, 22, { hitR: 5, hp: 100, cy: 1.8, yaw: 1.57 });
+        warStruct(s, 'truck', 'TRUCK', stBuildTruck('cargo').group, 6, 34, { hitR: 5, hp: 100, cy: 1.8, yaw: 1.57 });
+        warStruct(s, 'truck', 'APC', stBuildApc().group, -18, 36, { hitR: 5.5, hp: 160, cy: 1.8, yaw: 0.3, bounty: 60 });
+        warAA(s, 120, 60);
+        warBuildFlag(s, 20, 10);
+      } else if (T === 'airbase' || T === 'capital') {
+        var st = s.strip, cap = T === 'capital', ang = Math.atan2(st.ux, st.uz), side = st.W / 2;
+        warBuildRunway(s);
+        var put = function(kind, label, g, u, v, opt) {
+          var p = warStripPt(s, u, v);
+          opt = opt || {}; opt.yaw = ang + (opt.yaw || 0);
+          return warStructAt(s, kind, label, g, p.x, p.z, opt);
+        };
+        // hangars facing the runway across the apron, fighters parked out front, the tower at one end
+        (cap ? [-150, -75, 0, 75] : [-60, 20]).forEach(function(u) {
+          put('hangar', 'HANGAR', warHangarModel(24, 30), u, side + st.apron * 0.62, { hitR: 13, hp: 260, cy: 5, yaw: Math.PI / 2, bounty: 120 });
+        });
+        (cap ? [-195, -120, 40, 115] : [-20, 60]).forEach(function(u, i) {
+          put('jet', 'PARKED FIGHTER', warJetModel(), u, side + st.apron * 0.3, { hitR: 6, hp: 110, cy: 2, yaw: Math.PI / 2 + (i % 2 ? 0.25 : -0.25), bounty: 150 });
+        });
+        put('tower', 'CONTROL TOWER', warTowerModel(), cap ? 175 : 115, side + st.apron * 0.36, { hitR: 7, hp: 200, cy: 12, bounty: 90 });
+        if (cap) {
+          put('bunker', 'HQ BUILDING', warHqModel(), 260, side + 140, { hitR: 14, hp: 320, cy: 5, yaw: Math.PI / 2, bounty: 200 });
+          [-245, -230].forEach(function(u) { put('fuel', 'FUEL TANK', stBuildFuelTank(), u, side + 150, { hitR: 7, hp: 140, cy: 3.5 }); });
+          put('bunker', 'BUNKER', stBuildBunker(), -320, side + 120, { hitR: 8.5, hp: 220, cy: 3 });
+        }
+        // air defence ringing the field
+        (cap ? [[-430, -90], [430, -90], [-300, 260], [300, 260], [0, -150]] : [[-300, -80], [300, 200]]).forEach(function(o) {
+          var p = warStripPt(s, o[0], o[1]); warAAAt(s, p.x, p.z);
+        });
+        (cap ? [[-170, -140], [170, -140]] : [[90, -110]]).forEach(function(o) {
+          var p = warStripPt(s, o[0], o[1]); warLauncherAt(s, p.x, p.z);
+        });
+        if (cap) { var rp = warStripPt(s, 0, side + 200); warRadarAt(s, rp.x, rp.z, ang); }
+        var fp = warStripPt(s, cap ? 120 : 60, side + st.apron * 0.14);
+        warFlagAt(s, fp.x, fp.z);
+      }
+    }
+
+    /* ---------- bringing the war to life ---------- */
+    function warSector(name) { for (var i = 0; i < WAR.sectors.length; i++) if (WAR.sectors[i].name === name) return WAR.sectors[i]; return null; }
+    function warSpawn() {
+      if (WAR.built) return;
+      WAR.built = true;
+      var iron = WAR.iron = warSector('IRONHOLD');
+      if (iron) {
+        // the fortress that's always been there joins the war: its radar, launchers and depot are the
+        // key targets; the convoy and the flak around it give up when it falls
+        var objs = [];
+        if (samRadar) objs.push(samRadar);
+        samLaunchers.forEach(function(L) { objs.push(L); });
+        strikeTargets.forEach(function(t) { if (!t.war) objs.push(t); });
+        AA.forEach(function(g) { if (!g.war && Math.hypot(g.pos.x - SAM_BASE.x, g.pos.z - SAM_BASE.z) < 800) objs.push(g); });
+        objs.forEach(function(o) {
+          o.war = iron; iron.objs.push(o);
+          if (o === samRadar || samLaunchers.indexOf(o) >= 0 || (o.kind && o.fixed)) iron.keys.push(o);
+        });
+        warFlagAt(iron, SAM_BASE.x + 40, SAM_BASE.z + 18);
+      }
+      WAR.sectors.forEach(function(s) {
+        if (s.type === 'home' || s.type === 'city' || s.type === 'field' || s.type === 'fortress') return;
+        warBuildSector(s);
+      });
+      ARS_TGT = null;          // the arsenal's target list picks up the new installations
+    }
+    function warKillQuiet(o) {
+      if (!o.alive) return;
+      WAR.loading = true;
+      try {
+        if (o.isAA) aaKill(o, true);
+        else if (o.onKill) o.onKill(o, true);
+        else if (o === samRadar) samKill(samRadar, true);
+        else if (samLaunchers.indexOf(o) >= 0) samKill(o, false);
+        else stKill(o, true);
+      } finally { WAR.loading = false; }
+    }
+    // what's left of a garrison when its sector falls lays down its arms (no explosions)
+    function warSurrender(o) {
+      o.alive = false; o.surrendered = true; o.dmgState = 0;
+      if (o.isAA) { o.pitch.rotation.x = -0.3; o.flashes.forEach(function(f) { f.visible = false; }); }
+      else if (o.rack) { o.rack.rotation.x = 0; o.ammo = 0; }
+      else if (o.head) o.head.rotation.y = 0;
+    }
+    function warKeysLeft(s) { var n = 0; for (var i = 0; i < s.keys.length; i++) if (s.keys[i].alive) n++; return n; }
+    function warOnKill(o, quiet) {
+      var s = o.war;
+      if (!s || !WAR.on || WAR.loading) return;
+      WAR.kills++; WAR.dirty = true;
+      if (s.owner !== 'red') return;
+      s.known = true;
+      var left = warKeysLeft(s), n = s.keys.length;
+      if (!quiet) {
+        var msg = (o.label || 'TARGET') + ' DESTROYED — ' + s.name + ' ' + (n - left) + '/' + n;
+        stInfoFlash(msg); samToast(msg, '#7dff8a', 2.6);
+      }
+      if (!left) warCapture(s, false);
+    }
+    function warCapture(s, quiet) {
+      s.owner = 'blue'; s.known = true; s.lock = 0;
+      s.objs.forEach(function(o) { if (o.alive) warSurrender(o); });
+      warSetFlag(s);
+      WAR.terrDirty = true; WAR.dirty = true;
+      if (!quiet) {
+        var big = s.type === 'capital', pay = big ? 2500 : s.type === 'fortress' || s.type === 'airbase' ? 700 : s.type === 'outpost' ? 150 : 350;
+        WAR.score += big ? 5000 : s.type === 'outpost' ? 200 : 600;
+        coins += pay; lastCoinSaveAt = -999; maybeSaveCoins(elapsedSeconds);
+        if (typeof playCoinChime === 'function') playCoinChime(3);
+        warBanner(s.type === 'outpost' ? 'OUTPOST SECURED' : 'SECTOR CAPTURED', s.name + '  ·  +◆' + pay, '#5aa8ff');
+        var left = WAR.sectors.filter(function(x) { return x.owner !== 'blue'; }).length;
+        awRadio('OVERLORD: ' + s.name + ' is ours. ' + (left ? left + ' sector' + (left > 1 ? 's' : '') + ' still in enemy hands.' : 'The island is free.'), '#9fd0ff');
+      }
+      if (s.type === 'capital') warVictory(quiet);
+      warSave();
+    }
+    function warVictory(quiet) {
+      if (WAR.won) return;
+      WAR.won = true;
+      if (quiet) return;
+      setTimeout(function() {
+        warBanner('VICTORY', 'KASTOR HAS FALLEN — THE ISLAND IS OURS', '#f3c454', 7);
+        awRadio('OVERLORD: All units, Kastor has fallen. Outstanding work, ' + kjCallsign() + '.', '#f3c454');
+      }, 3800);
+    }
+
+    /* ---------- the enemy's SAM batteries ---------- */
+    function warUpdateSams(dt) {
+      var eligible = started && !crashing && !ejecting && !isCarMode && !kj.boxed && samGrace <= 0;
+      var agl = position.y - Math.max(getEffectiveGroundHeight(position.x, position.z), WATER_LEVEL);
+      var detectR = SAM_DETECT_RANGE * (isStealthMode ? 0.33 : 1) * (isDroneMode ? 0.8 : 1) * (isHelicopterMode ? 0.85 : 1);
+      var airborne = 0;
+      for (var mi = 0; mi < samMissiles.length; mi++) if (samMissiles[mi].active) airborne++;
+      if (WAR.launchCd > 0) WAR.launchCd -= dt;
+      var best = 0, search = false;
+      WAR.emitters.length = 0;
+      for (var si = 0; si < WAR.sectors.length; si++) {
+        var s = WAR.sectors[si];
+        if (!s.launchers.length && !s.radar) continue;
+        var radar = s.radar && s.radar.alive;
+        if (radar) s.radar.head.rotation.y += dt * (Math.PI * 2 / 3.2);
+        s.launchers.forEach(function(L) {
+          if (!L.alive) return;
+          if (L.cooldown > 0) L.cooldown -= dt;
+          if (L.reload > 0 && (L.reload -= dt) <= 0) { L.ammo = 4; L.rounds.forEach(function(r) { r.visible = true; }); }
+        });
+        if (s.owner !== 'red') continue;
+        // without the search radar the launchers' own tracking dishes still see you, just not as far
+        var live = s.launchers.some(function(L) { return L.alive; });
+        var range = detectR * (radar ? 1 : 0.7);
+        var dx = position.x - s.x, dz = position.z - s.z, d = Math.sqrt(dx * dx + dz * dz);
+        var masked = agl < SAM_MASK_AGL && d > 300;
+        var sees = eligible && (radar || live) && !masked;
+        var tracking = sees && d < range && live;
+        s.lock = tracking ? Math.min(1, s.lock + dt / SAM_LOCK_TIME) : Math.max(0, s.lock - dt * 0.8);
+        if (sees && d < range * 1.35) { search = true; WAR.emitters.push({ x: s.x, z: s.z, lethal: s.lock > 0.02 }); }
+        if (tracking) best = Math.max(best, s.lock);
+        var pt = position;
+        s.launchers.forEach(function(L) {
+          if (!L.alive) return;
+          var wantYaw = L.group.rotation.y, wantElev = 0.15;
+          if (tracking || s.lock > 0.05) {
+            var tx = pt.x - L.pos.x, ty = pt.y - L.pos.y, tz = pt.z - L.pos.z, hd = Math.sqrt(tx * tx + tz * tz);
+            wantYaw = Math.atan2(-tx, -tz);
+            wantElev = THREE.MathUtils.clamp(Math.atan2(ty, hd) + 0.12, 0.12, 1.2);
+          }
+          var dy = Math.atan2(Math.sin(wantYaw - L.yaw), Math.cos(wantYaw - L.yaw));
+          L.yaw += THREE.MathUtils.clamp(dy, -1.4 * dt, 1.4 * dt);
+          L.elev += THREE.MathUtils.clamp(wantElev - L.elev, -0.8 * dt, 0.8 * dt);
+          L.turret.rotation.y = L.yaw - L.group.rotation.y;
+          L.rack.rotation.x = L.elev;
+        });
+        if (s.lock >= 1 && WAR.launchCd <= 0 && airborne < SAM_MAX_AIRBORNE) {
+          var pick = null, pickD = Infinity;
+          s.launchers.forEach(function(L) {
+            if (!L.alive || L.ammo <= 0 || L.cooldown > 0) return;
+            var ld = L.pos.distanceTo(pt);
+            var want = Math.atan2(-(pt.x - L.pos.x), -(pt.z - L.pos.z));
+            var err = Math.abs(Math.atan2(Math.sin(want - L.yaw), Math.cos(want - L.yaw)));
+            if (ld < SAM_LAUNCH_RANGE && err < 0.25 && ld < pickD) { pick = L; pickD = ld; }
+          });
+          if (pick && samLaunch(pick)) { WAR.launchCd = 5 + Math.random() * 2.5; airborne++; }
+        }
+      }
+      WAR.lock = best; WAR.search = search;
+    }
+
+    /* ---------- recon, outposts, sector entry ---------- */
+    function warSpot(dt) {
+      var eyes = isAwacsMode ? 10000 : 3200;
+      WAR.sectors.forEach(function(s) {
+        var d = Math.hypot(position.x - s.x, position.z - s.z);
+        if (!s.known && s.owner === 'red' && started && !crashing && d < eyes) {
+          s.known = true; WAR.dirty = true;
+          samToast('NEW CONTACT — ' + s.name + ' · ' + WAR_TYPE[s.type].label, '#ffcc33', 2.6);
+          awRadio((isAwacsMode ? 'SENTRY: radar contact, ' : 'OVERLORD: eyes on ') + s.name + ' — ' + WAR_TYPE[s.type].label.toLowerCase() + '.', '#ffd27a');
+        }
+        if (s.owner === 'neutral' && started && !crashing && !ejecting) {
+          var agl = position.y - getEffectiveGroundHeight(position.x, position.z);
+          if (d < 380 && agl < 260) {
+            s.secureT += dt;
+            if (s.secureT > 2.5) warCapture(s, false);
+            else if (s.secureT < dt * 1.5) samToast('SECURING ' + s.name + ' — HOLD LOW', '#9fd0ff', 2.5);
+          } else s.secureT = Math.max(0, s.secureT - dt);
+        }
+      });
+      // a call when you cross into a hostile sector
+      var inside = null;
+      WAR.sectors.forEach(function(s) { if (s.owner === 'red' && Math.hypot(position.x - s.x, position.z - s.z) < (s.strip ? 900 : 650)) inside = s; });
+      if (inside && inside !== WAR.inside && started && !crashing) {
+        inside.known = true;
+        var left = warKeysLeft(inside);
+        samToast('ENTERING ' + inside.name + ' — ' + WAR_TYPE[inside.type].label + ' · ' + left + ' TARGET' + (left === 1 ? '' : 'S'), '#ff8a6a', 3);
+      }
+      WAR.inside = inside;
+    }
+
+    /* ---------- the front line on the chart ---------- */
+    var WAR_TERR = { cv: document.createElement('canvas'), x0: 0, z0: 0, cell: 100, nx: 0, nz: 0, seg: null, ready: false };
+    function warTerrNoise(x, z, k) {
+      return Math.sin(x * 0.0019 + k * 1.7) * Math.cos(z * 0.0023 - k * 2.3) + 0.5 * Math.sin((x + z) * 0.0041 + k * 0.9);
+    }
+    // territory: each point of land belongs to the sector with the strongest claim on it (distance,
+    // weighted by the sector's size, wobbled by noise so the borders meander like real ones). The
+    // front line is the contour where blue's claim meets everyone else's, traced with marching squares.
+    function warComputeTerritory() {
+      var S = WAR.sectors, x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+      S.forEach(function(s) { x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); z0 = Math.min(z0, s.z); z1 = Math.max(z1, s.z); });
+      var pad = 3600, cell = 100;
+      x0 -= pad; x1 += pad; z0 -= pad; z1 = Math.min(z1 + pad, 4000);
+      var nx = Math.ceil((x1 - x0) / cell) + 1, nz = Math.ceil((z1 - z0) / cell) + 1;
+      var own = new Int8Array(nx * nz), F = new Float32Array(nx * nz), OWN = { blue: 1, red: 2, neutral: 3 };
+      for (var j = 0; j < nz; j++) {
+        var wz = z0 + j * cell;
+        for (var i = 0; i < nx; i++) {
+          var wx = x0 + i * cell, best = 1e9, bo = 0, bb = 1e6, bn = 1e6;
+          for (var k = 0; k < S.length; k++) {
+            var s = S[k], dx = wx - s.x, dz = wz - s.z, d2 = dx * dx + dz * dz;
+            if (d2 > 7000 * 7000) continue;
+            var e = Math.sqrt(d2) / s.w + 330 * warTerrNoise(wx, wz, k);
+            if (e < best) { best = e; bo = OWN[s.owner]; }
+            if (s.owner === 'blue') { if (e < bb) bb = e; } else if (e < bn) bn = e;
+          }
+          var q = j * nx + i;
+          F[q] = bb - bn;
+          own[q] = wz > oceanCoastZ(wx) - 60 || best > 3900 ? 0 : bo;
+        }
+      }
+      var cv = WAR_TERR.cv; cv.width = nx; cv.height = nz;
+      var c = cv.getContext('2d'), img = c.createImageData(nx, nz), D = img.data;
+      var FILL = [null, [64, 150, 255, 74], [255, 58, 42, 66], [215, 220, 226, 34]];
+      for (var p = 0; p < nx * nz; p++) {
+        var f = FILL[own[p]];
+        if (!f) continue;
+        D[p * 4] = f[0]; D[p * 4 + 1] = f[1]; D[p * 4 + 2] = f[2]; D[p * 4 + 3] = f[3];
+      }
+      c.putImageData(img, 0, 0);
+      // marching squares on F = 0, with the crossing on each edge found by linear interpolation
+      var seg = [];
+      function edge(ia, ja, ib, jb) {
+        var fa = F[ja * nx + ia], fb = F[jb * nx + ib], t = fa / (fa - fb);
+        return [x0 + (ia + (ib - ia) * t) * cell, z0 + (ja + (jb - ja) * t) * cell];
+      }
+      for (var cj = 0; cj < nz - 1; cj++) {
+        for (var ci = 0; ci < nx - 1; ci++) {
+          var a0 = F[cj * nx + ci] < 0, a1 = F[cj * nx + ci + 1] < 0, a2 = F[(cj + 1) * nx + ci + 1] < 0, a3 = F[(cj + 1) * nx + ci] < 0;
+          var idx = (a0 ? 1 : 0) | (a1 ? 2 : 0) | (a2 ? 4 : 0) | (a3 ? 8 : 0);
+          if (idx === 0 || idx === 15) continue;
+          var mx = x0 + (ci + 0.5) * cell, mz = z0 + (cj + 0.5) * cell;
+          if (mz > oceanCoastZ(mx) - 60) continue;       // no "front" along the beach
+          var T = edge(ci, cj, ci + 1, cj), R = edge(ci + 1, cj, ci + 1, cj + 1), B = edge(ci, cj + 1, ci + 1, cj + 1), L = edge(ci, cj, ci, cj + 1);
+          var pairs = { 1: [L, T], 2: [T, R], 3: [L, R], 4: [R, B], 5: [L, T, R, B], 6: [T, B], 7: [L, B], 8: [B, L], 9: [B, T], 10: [T, R, B, L], 11: [B, R], 12: [R, L], 13: [R, T], 14: [T, L] }[idx];
+          for (var pi = 0; pi < pairs.length; pi += 2) seg.push(pairs[pi][0], pairs[pi][1], pairs[pi + 1][0], pairs[pi + 1][1]);
+        }
+      }
+      WAR_TERR.seg = new Float32Array(seg);
+      WAR_TERR.x0 = x0 - cell / 2; WAR_TERR.z0 = z0 - cell / 2; WAR_TERR.cell = cell; WAR_TERR.nx = nx; WAR_TERR.nz = nz; WAR_TERR.ready = true;
+      WAR.terrDirty = false;
+    }
+    // the front line, in whatever 2D frame the caller has set up (world x/z -> canvas via k, ox, oz)
+    function warStrokeFront(ctx, k, ox, oz, w) {
+      var sg = WAR_TERR.seg;
+      if (!sg || !sg.length) return;
+      ctx.beginPath();
+      for (var i = 0; i < sg.length; i += 4) { ctx.moveTo(sg[i] * k + ox, sg[i + 1] * k + oz); ctx.lineTo(sg[i + 2] * k + ox, sg[i + 3] * k + oz); }
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(8,10,14,0.55)'; ctx.lineWidth = w + 2.5; ctx.stroke();
+      ctx.strokeStyle = '#ffd25a'; ctx.lineWidth = w; ctx.stroke();
+    }
+    // under everything else on the chart: who holds what, with the front line between them
+    function warMapUnder(ctx, cx, cy, rot, scale) {
+      if (!WAR.on) return;
+      if (WAR.terrDirty || !WAR_TERR.ready) warComputeTerritory();
+      var T = WAR_TERR;
+      ctx.save();
+      ctx.translate(cx, cy); ctx.rotate(rot);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(T.cv, (T.x0 - position.x) * scale, (T.z0 - position.z) * scale, T.nx * T.cell * scale, T.nz * T.cell * scale);
+      warStrokeFront(ctx, scale, -position.x * scale, -position.z * scale, miniMapExpanded ? 2.2 : 1.6);
+      ctx.restore();
+    }
+    // sector markers on top: owner colour, type glyph, name and how much of the garrison is left
+    function warMapOver(ctx, toS, exp, inView, label, scale) {
+      if (!WAR.on) return;
+      var pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
+      var detectR = SAM_DETECT_RANGE * (isStealthMode ? 0.33 : 1);
+      WAR.sectors.forEach(function(s) {
+        if (!s.known || s.type === 'home') return;
+        var p = toS(s.x, s.z);
+        if (!inView(p, 6)) return;
+        var col = WAR_COL[s.owner];
+        if (s.owner === 'red' && (s.radar ? s.radar.alive : s.launchers.some(function(L) { return L.alive; })) && s.type !== 'fortress') {
+          ctx.strokeStyle = 'rgba(255,70,50,0.65)'; ctx.fillStyle = 'rgba(255,48,36,0.07)'; ctx.lineWidth = 1.2; ctx.setLineDash([5, 4]);
+          ctx.beginPath(); ctx.arc(p.x, p.y, detectR * (s.radar && s.radar.alive ? 1 : 0.7) * scale, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+        }
+        var r = exp ? (s.type === 'capital' ? 9 : 7) : 4.5;
+        if (WAR.objective === s) {
+          ctx.strokeStyle = 'rgba(255,214,90,' + (0.5 + 0.5 * pulse).toFixed(2) + ')'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(p.x, p.y, r + 4 + pulse * 3, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.fillStyle = col; ctx.strokeStyle = 'rgba(6,9,12,0.9)'; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        if (s.type === 'capital') { for (var i = 0; i < 10; i++) { var a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.5 : r * 1.25; ctx.lineTo(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr); } ctx.closePath(); }
+        else if (s.type === 'outpost') { ctx.moveTo(p.x, p.y - r); ctx.lineTo(p.x + r, p.y); ctx.lineTo(p.x, p.y + r); ctx.lineTo(p.x - r, p.y); ctx.closePath(); }
+        else ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+        if (exp) {
+          if (s.type !== 'capital' && s.type !== 'outpost') label(WAR_TYPE[s.type].glyph, p.x, p.y + 0.5, '#0b0f14', 8);
+          label(s.name, p.x, p.y - r - 8, col, 9);
+          if (s.owner === 'red' && s.keys.length) {
+            var f = warKeysLeft(s) / s.keys.length, bw = 26;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(p.x - bw / 2, p.y + r + 4, bw, 3);
+            ctx.fillStyle = '#ff6a4a'; ctx.fillRect(p.x - bw / 2, p.y + r + 4, bw * f, 3);
+          }
+        }
+      });
+    }
+
+    /* ---------- HUD: sectors held + the nearest objective ---------- */
+    var warHudEl = document.createElement('div');
+    warHudEl.id = 'warHudRow'; warHudEl.className = 'hidden';
+    (function() { var hud = document.getElementById('hud'), mp = document.getElementById('mpHudRow'); if (hud) hud.insertBefore(warHudEl, mp || null); })();
+    var warBannerEl = document.createElement('div');
+    warBannerEl.id = 'warBanner';
+    document.body.appendChild(warBannerEl);
+    var warBannerT = 0;
+    function warBanner(title, sub, col, secs) {
+      warBannerEl.innerHTML = '<b style="color:' + (col || '#fff') + '">' + title + '</b><span>' + (sub || '') + '</span>';
+      warBannerEl.classList.remove('show'); void warBannerEl.offsetWidth; warBannerEl.classList.add('show');
+      warBannerT = secs || 4.5;
+    }
+    function warCompass(dx, dz) {
+      var a = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
+      return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(a / 45) % 8];
+    }
+    function warHeld() {
+      var t = 0, h = 0;
+      WAR.sectors.forEach(function(s) { if (s.owner0 !== 'blue') { t++; if (s.owner === 'blue') h++; } });
+      return { held: h, total: t };
+    }
+    function warPickObjective() {
+      var best = null, bd = Infinity;
+      WAR.sectors.forEach(function(s) {
+        if (s.owner === 'blue' || !s.known) return;
+        var d = Math.hypot(position.x - s.x, position.z - s.z) + (s.type === 'capital' ? 4000 : 0);
+        if (d < bd) { bd = d; best = s; }
+      });
+      WAR.objective = best;
+    }
+    function warHud() {
+      warHudEl.classList.toggle('hidden', !WAR.on);
+      if (!WAR.on) return;
+      var h = warHeld(), o = WAR.objective, html = '<span class="wf">⚑</span><b>' + h.held + '/' + h.total + '</b><span class="wl">SECTORS</span>';
+      if (WAR.won) html += '<span class="wo" style="color:#f3c454">ISLAND LIBERATED</span>';
+      else if (o) {
+        var dx = o.x - position.x, dz = o.z - position.z;
+        html += '<span class="wo">' + o.name + ' <i>' + mapFmtDist(Math.hypot(dx, dz)) + ' ' + warCompass(dx, dz) + '</i></span>';
+      }
+      if (html !== warHudEl._sig) { warHudEl.innerHTML = html; warHudEl._sig = html; }
+    }
+
+    /* ---------- save / load ---------- */
+    function warSave() {
+      if (!WAR.on) return;
+      var o = { v: 1, sig: warSig(), own: '', known: '', dead: {}, score: WAR.score, kills: WAR.kills, won: WAR.won ? 1 : 0, t: Math.round(WAR.playT) };
+      WAR.sectors.forEach(function(s) {
+        o.own += s.owner[0]; o.known += s.known ? '1' : '0';
+        var d = [];
+        s.objs.forEach(function(ob, i) { if (!ob.alive && !ob.surrendered) d.push(i); });
+        if (d.length) o.dead[s.id] = d;
+      });
+      try { localStorage.setItem(WAR_KEY, JSON.stringify(o)); } catch (e) {}
+      WAR.dirty = false; WAR.saveT = 0;
+    }
+    function warReadSave() {
+      try {
+        var o = JSON.parse(localStorage.getItem(WAR_KEY) || 'null');
+        if (o && o.v === 1 && o.sig === warSig()) return o;
+      } catch (e) {}
+      return null;
+    }
+    function warApplySave(o) {
+      if (!o) return;
+      var OWN = { b: 'blue', r: 'red', n: 'neutral' };
+      WAR.score = o.score || 0; WAR.kills = o.kills || 0; WAR.won = !!o.won; WAR.playT = o.t || 0;
+      WAR.sectors.forEach(function(s, i) {
+        s.known = o.known[i] === '1' || s.owner0 !== 'red';
+        (o.dead[s.id] || []).forEach(function(k) { if (s.objs[k]) warKillQuiet(s.objs[k]); });
+        var ow = OWN[o.own[i]] || s.owner0;
+        if (ow === 'blue' && s.owner !== 'blue') warCapture(s, true);
+      });
+      WAR.terrDirty = true;
+    }
+    // start (or resume) the campaign: build the garrisons, then take off from home
+    function warBegin(fresh) {
+      if (fresh) { try { localStorage.removeItem(WAR_KEY); } catch (e) {} }
+      var save = fresh ? null : warReadSave();
+      WAR.on = true;
+      warSpawn();
+      warApplySave(save);
+      warPickObjective();
+      warSave();
+      var h = warHeld();
+      setTimeout(function() {
+        if (!WAR.on) return;
+        if (!save) {
+          warBanner('OPERATION GLIDEPATH', 'Take back the island · capture Kastor Airbase', '#ffb08a', 5.5);
+          awRadio('OVERLORD: ' + kjCallsign() + ', welcome to the front. The enemy holds everything past the hills.', '#9fd0ff');
+          setTimeout(function() { awRadio('OVERLORD: Two outposts near home are unguarded — a low pass secures them. Then push out to Ironhold.', '#9fd0ff'); }, 4500);
+          setTimeout(function() { awRadio('OVERLORD: Open your chart for the front line. Kastor Airbase is the prize.', '#9fd0ff'); }, 9500);
+        } else {
+          warBanner('CAMPAIGN RESUMED', h.held + ' of ' + h.total + ' sectors liberated', '#ffb08a', 4);
+          if (WAR.objective) awRadio('OVERLORD: Welcome back. Nearest objective: ' + WAR.objective.name + '.', '#9fd0ff');
+        }
+      }, 1200);
+    }
+
+    /* ---------- per frame ---------- */
+    var _warSlowT = 0;
+    function warUpdate(dt) {
+      if (warBannerT > 0 && (warBannerT -= dt) <= 0) warBannerEl.classList.remove('show');
+      if (!WAR.on) return;
+      WAR.playT += dt;
+      warUpdateSams(dt);
+      warWaveFlags(dt);
+      _warSlowT += dt;
+      if (_warSlowT >= 0.25) {
+        var step = _warSlowT; _warSlowT = 0;
+        warSpot(step);
+        warPickObjective();
+        warHud();
+        // airborne awacs relays add their radio lines here even when the carrier group isn't up
+        if (!CARRIER_READY) for (var i = awRadioLines.length - 1; i >= 0; i--) { awRadioLines[i].t -= step; if (awRadioLines[i].t <= 0) { awRadioLines.splice(i, 1); awRadioRender(); } }
+      }
+      WAR.saveT += dt;
+      if (WAR.dirty && WAR.saveT > 4) warSave();
+    }
+    // the captured fields (and the old strip) work like home: land, stop, refuel and rearm
+    function warRearmAt(x, z) {
+      if (!WAR.on) return false;
+      for (var i = 0; i < WAR.sectors.length; i++) {
+        var s = WAR.sectors[i];
+        if (s.owner !== 'blue') continue;
+        if (s.strip) {
+          var st = s.strip, dx = x - st.x, dz = z - st.z, v = -dx * st.uz + dz * st.ux;
+          if (Math.abs(dx * st.ux + dz * st.uz) < st.L / 2 + 30 && v > -st.W / 2 - 20 && v < st.W / 2 + st.apron) return true;
+        } else if (s.type === 'field' && OLD_STRIP) {
+          var ox = x - OLD_STRIP.x, oz = z - OLD_STRIP.z;
+          if (Math.abs(ox * OLD_STRIP.ux + oz * OLD_STRIP.uz) < OLD_STRIP.L / 2 + 30 && Math.abs(-ox * OLD_STRIP.uz + oz * OLD_STRIP.ux) < OLD_STRIP.W / 2 + 40) return true;
+        }
+      }
+      return false;
+    }
+
+    /* ---------- the campaign card on the title screen ---------- */
+    (function() {
+      var css = document.createElement('style');
+      css.textContent =
+        '#warHudRow{display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.08);font:700 9.5px/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#9aa6b2;white-space:nowrap}' +
+        '#warHudRow.hidden{display:none}#warHudRow .wf{color:#5aa8ff;font-size:11px}#warHudRow b{color:#fff;font-size:11px}#warHudRow .wo{margin-left:auto;color:#ffd27a;overflow:hidden;text-overflow:ellipsis}#warHudRow .wo i{font-style:normal;color:#c9d2d9}' +
+        '#warBanner{position:fixed;left:50%;top:34%;transform:translate(-50%,-8px);z-index:12;pointer-events:none;text-align:center;opacity:0;transition:opacity .5s ease,transform .5s ease;text-shadow:0 2px 14px rgba(0,0,0,.8)}' +
+        '#warBanner.show{opacity:1;transform:translate(-50%,0)}#warBanner b{display:block;font:900 clamp(22px,4.2vw,44px)/1 -apple-system,system-ui,sans-serif;letter-spacing:.22em}' +
+        '#warBanner span{display:block;margin-top:8px;font:700 12px/1.3 ui-monospace,Menlo,monospace;letter-spacing:.16em;color:#e9eef2}' +
+        '.ss-item.ss-war{border-left-color:#5aa8ff;background:linear-gradient(90deg,rgba(14,28,48,.82),rgba(10,14,20,.38))}.ss-item.ss-war b{color:#8cc4ff}' +
+        '.ss-item.ss-war:hover,.ss-item.ss-war:focus-visible{border-left-color:#5aa8ff;background:linear-gradient(90deg,rgba(20,44,80,.9),rgba(20,30,48,.4))}' +
+        '#ssWar{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(3,6,10,.62);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:none}' +
+        '#ssWar.hidden{display:none!important}' +
+        '.ss-warCard{width:min(720px,100%);max-height:100%;overflow:auto;background:rgba(10,13,18,.95);border:1px solid rgba(90,168,255,.25);border-radius:4px;padding:16px 20px 18px;animation:ssIn .3s ease both}' +
+        '.ss-warGrid{display:grid;grid-template-columns:1.25fr 1fr;gap:16px;align-items:start}' +
+        '#ssWarMap{width:100%;aspect-ratio:4/3;background:#0d1319;border:1px solid rgba(255,255,255,.08);border-radius:3px;display:block}' +
+        '.ss-warLead{margin:0 0 10px;font-size:12.5px;line-height:1.55;color:#b9c4cc}.ss-warLead b{color:#fff}' +
+        '#ssWarStats{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin:0 0 14px;font:700 10.5px/1.3 ui-monospace,Menlo,monospace;letter-spacing:.06em;color:#8d99a3}' +
+        '#ssWarStats b{display:block;font-size:15px;color:#fff;letter-spacing:.04em}' +
+        '.ss-warBtns{display:flex;flex-direction:column;gap:7px}' +
+        '.ss-warBtns button{appearance:none;cursor:pointer;padding:11px 14px;border-radius:2px;font:800 12.5px/1 -apple-system,system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9eef2;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12)}' +
+        '.ss-warBtns button.go{background:linear-gradient(100deg,#2f7fe0,#1b4fa0);border-color:rgba(140,196,255,.5);color:#fff}' +
+        '.ss-warBtns button:hover{filter:brightness(1.15)}.ss-warBtns button.warn{color:#ffb08a}' +
+        '@media (max-width:620px),(max-height:520px){.ss-warGrid{grid-template-columns:1fr 1fr;gap:12px}.ss-warLead{font-size:11px}#ssWarStats b{font-size:13px}}' +
+        '@media (orientation:portrait) and (max-width:620px){.ss-warGrid{grid-template-columns:1fr}}' +
+        '@media (orientation:portrait) and (max-width:760px){#startScreen .ss-menu{grid-template-columns:repeat(5,1fr)}}';
+      document.head.appendChild(css);
+      var menu = document.querySelector('#startScreen .ss-menu'), play = document.getElementById('startBtn');
+      var btn = document.createElement('button');
+      btn.id = 'campaignBtn'; btn.type = 'button'; btn.className = 'ss-item ss-war';
+      btn.innerHTML = '<b>⚑</b><span>Campaign<small id="ssWarSub">Take back the island</small></span>';
+      if (menu && play) menu.insertBefore(btn, play.nextSibling);
+      var ov = document.createElement('div');
+      ov.id = 'ssWar'; ov.className = 'hidden'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Campaign');
+      ov.innerHTML = '<div class="ss-warCard"><div class="ss-setupHead"><h3>Campaign · Operation Glidepath</h3><button type="button" id="ssWarClose" aria-label="Close">✕</button></div>' +
+        '<div class="ss-warGrid"><canvas id="ssWarMap" width="440" height="330"></canvas><div>' +
+        '<p class="ss-warLead">The enemy holds the hills, a SAM fortress and its capital, <b>Kastor Airbase</b>. Knock out a sector\'s defences to capture it and push the front line out. Take Kastor to win.</p>' +
+        '<div id="ssWarStats"></div><div class="ss-warBtns"><button type="button" id="ssWarGo" class="go">Continue</button><button type="button" id="ssWarNew">New campaign</button></div></div></div></div>';
+      var ss = document.getElementById('startScreen'); if (ss) ss.appendChild(ov);
+      function stats() {
+        var o = warReadSave(), OWN = { b: 'blue', r: 'red', n: 'neutral' }, held = 0, total = 0;
+        WAR.sectors.forEach(function(s, i) {
+          if (s.owner0 === 'blue') return;
+          total++; if (o && OWN[o.own[i]] === 'blue') held++;
+        });
+        return { o: o, held: held, total: total };
+      }
+      function drawPreview(o) {
+        var cv = document.getElementById('ssWarMap'), c = cv.getContext('2d'), W = cv.width, H = cv.height;
+        var OWN = { b: 'blue', r: 'red', n: 'neutral' }, keep = WAR.sectors.map(function(s) { return [s.owner, s.known]; });
+        WAR.sectors.forEach(function(s, i) {
+          if (o) { s.owner = OWN[o.own[i]] || s.owner0; s.known = o.known[i] === '1' || s.owner0 !== 'red'; }
+        });
+        warComputeTerritory();
+        var T = WAR_TERR, x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+        WAR.sectors.forEach(function(s) { x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); z0 = Math.min(z0, s.z); z1 = Math.max(z1, s.z); });
+        var pad = 1600, sc = Math.min(W / (x1 - x0 + pad * 2), H / (z1 - z0 + pad * 2)), ox = W / 2 - (x0 + x1) / 2 * sc, oz = H / 2 - (z0 + z1) / 2 * sc;
+        // relief, coloured like the in-flight chart (cached: the land never changes)
+        if (!drawPreview.relief) {
+          var rw = 176, rh = 132, rc = document.createElement('canvas'); rc.width = rw; rc.height = rh;
+          var rx = rc.getContext('2d'), im = rx.createImageData(rw, rh), col = [0, 0, 0];
+          for (var yy = 0; yy < rh; yy++) for (var xx = 0; xx < rw; xx++) {
+            var wx2 = ((xx + 0.5) * W / rw - ox) / sc, wz2 = ((yy + 0.5) * H / rh - oz) / sc, hh = getTerrainHeight(wx2, wz2);
+            mapColorFor(hh, col);
+            var sh = hh > WATER_LEVEL + 0.3 ? THREE.MathUtils.clamp(1 + (getTerrainHeight(wx2 - 60, wz2 - 60) - hh) * 0.012, 0.6, 1.3) : 1;
+            var o4 = (yy * rw + xx) * 4;
+            im.data[o4] = col[0] * sh * 0.7 + 8; im.data[o4 + 1] = col[1] * sh * 0.7 + 10; im.data[o4 + 2] = col[2] * sh * 0.7 + 14; im.data[o4 + 3] = 255;
+          }
+          rx.putImageData(im, 0, 0);
+          drawPreview.relief = rc;
+        }
+        c.imageSmoothingEnabled = true;
+        c.drawImage(drawPreview.relief, 0, 0, W, H);
+        c.drawImage(T.cv, T.x0 * sc + ox, T.z0 * sc + oz, T.nx * T.cell * sc, T.nz * T.cell * sc);
+        warStrokeFront(c, sc, ox, oz, 2);
+        c.font = '700 9px ui-monospace, Menlo, monospace'; c.textAlign = 'center';
+        WAR.sectors.forEach(function(s) {
+          var x = s.x * sc + ox, y = s.z * sc + oz;
+          if (!s.known && s.owner === 'red') { c.font = '800 12px ui-monospace, Menlo, monospace'; c.lineWidth = 3; c.strokeStyle = 'rgba(6,9,12,.8)'; c.strokeText('?', x, y + 4); c.fillStyle = '#ff7a64'; c.fillText('?', x, y + 4); c.font = '700 9px ui-monospace, Menlo, monospace'; return; }
+          c.fillStyle = WAR_COL[s.owner]; c.strokeStyle = '#06090c'; c.lineWidth = 1.5;
+          c.beginPath(); c.arc(x, y, s.type === 'capital' ? 6 : s.type === 'home' ? 5.5 : 4, 0, Math.PI * 2); c.fill(); c.stroke();
+          if (s.type === 'capital' || s.type === 'home' || s.type === 'fortress') {
+            var lx = Math.max(46, Math.min(W - 46, x));
+            c.lineWidth = 3; c.strokeStyle = 'rgba(6,9,12,.85)'; c.strokeText(s.name, lx, y - 9); c.fillText(s.name, lx, y - 9);
+          }
+        });
+        WAR.sectors.forEach(function(s, i) { s.owner = keep[i][0]; s.known = keep[i][1]; });
+        WAR.terrDirty = true;
+      }
+      function refresh() {
+        var st = stats(), sub = document.getElementById('ssWarSub');
+        if (sub) sub.textContent = st.o ? (st.o.won ? 'Island liberated' : st.held + ' / ' + st.total + ' sectors liberated') : 'Take back the island';
+        return st;
+      }
+      function open() {
+        var st = refresh(), o = st.o;
+        document.getElementById('ssWarStats').innerHTML =
+          '<div>SECTORS<b>' + st.held + ' / ' + st.total + '</b></div><div>SCORE<b>' + (o ? o.score : 0).toLocaleString() + '</b></div>' +
+          '<div>KILLS<b>' + (o ? o.kills : 0) + '</b></div><div>FLIGHT TIME<b>' + (o ? Math.floor(o.t / 60) + ' min' : '—') + '</b></div>';
+        var go = document.getElementById('ssWarGo'), nw = document.getElementById('ssWarNew');
+        go.textContent = o ? (o.won ? 'Fly the liberated island' : 'Continue campaign') : 'Begin campaign';
+        nw.style.display = o ? '' : 'none'; nw.textContent = 'New campaign'; nw.classList.remove('warn'); nw._arm = false;
+        drawPreview(o);
+        ov.classList.remove('hidden');
+      }
+      function launch(fresh) {
+        ov.classList.add('hidden');
+        warBegin(fresh);
+        document.getElementById('startBtn').click();
+      }
+      btn.addEventListener('click', open);
+      document.getElementById('ssWarClose').addEventListener('click', function() { ov.classList.add('hidden'); });
+      ov.addEventListener('click', function(e) { if (e.target === ov) ov.classList.add('hidden'); });
+      document.getElementById('ssWarGo').addEventListener('click', function() { launch(false); });
+      document.getElementById('ssWarNew').addEventListener('click', function() {
+        // wiping a campaign takes a second tap
+        if (!this._arm) { this._arm = true; this.textContent = 'Tap again to wipe progress'; this.classList.add('warn'); return; }
+        launch(true);
+      });
+      window.__warOpen = open;
+      refresh();
+    })();
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
@@ -20235,7 +21297,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     function netSendWorldSync() {
       var dead = [], sam = [];
-      strikeTargets.forEach(function(t, i) { if (!t.alive) dead.push(i); });
+      strikeTargets.forEach(function(t, i) { if (!t.alive && (!t.war || t.war === WAR.iron)) dead.push(i); });
       samLaunchers.forEach(function(L, i) { if (!L.alive) sam.push(i); });
       netEmit('sync', { dead: dead, sam: sam, radar: samRadar && !samRadar.alive ? 1 : 0, ca: +strikeConvoy.angle.toFixed(4), cs: strikeConvoy.speed, al: strikeConvoy.alarmed ? 1 : 0 });
     }
@@ -24112,6 +25174,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         gpApplyGraphics(); gpApplyAudio(); gpApplyView(); gpSave(); gpSyncAll();
       } else if (a === 'quit') {
         kjSave();
+        warSave();
         maybeSaveCoins(elapsedSeconds + 1e6);
         if (window.storage) window.storage.set('glidepath-best-distance-km', bestDistanceKm.toFixed(2)).catch(function() {});
         location.reload();
