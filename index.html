@@ -27458,7 +27458,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         for (var k = 0; k < 6; k++) { var tube = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.2, 8), CSG_M.dark); tube.position.set((k % 3 - 1) * 0.4, 0.6, Math.floor(k / 3) * 0.4); tube.rotation.x = -0.6; t.add(tube); }
       });
       var css = document.createElement('style');
-      css.textContent = '#cvaa{position:fixed;z-index:12;right:calc(16px + env(safe-area-inset-right));top:calc(380px + env(safe-area-inset-top));display:none;pointer-events:none;' +
+      css.textContent = '#cvaa{position:fixed;z-index:12;right:calc(16px + env(safe-area-inset-right));top:calc(300px + env(safe-area-inset-top));display:none;pointer-events:none;' +
         'font:700 11px/1.45 ui-monospace,Menlo,monospace;color:#e6f2ff;background:rgba(24,8,6,.72);border:1px solid rgba(255,120,90,.55);border-radius:8px;padding:6px 10px;min-width:170px}' +
         '#cvaa b{color:#ff9a7a;letter-spacing:.1em}#cvaa .r{display:flex;justify-content:space-between;gap:10px}' +
         '@media (orientation: landscape) and (max-height: 500px){#cvaa{top:auto;bottom:calc(120px + env(safe-area-inset-bottom));right:calc(240px + env(safe-area-inset-right))}}';
