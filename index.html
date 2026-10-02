@@ -2388,6 +2388,56 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var REG_VOLC = { x: -3600, z: 10800, r: 2700, h: 640, crater: 290 };
     // the enemy-held island, 2,000 km due south of the home field across open ocean
     var EI = { x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z + 2000000, R: 1500, hqX: RUNWAY_CENTER_X + 380, hqZ: RUNWAY_CENTER_Z + 2000000 - 140 };
+    // DAY TRIPS: three far-off scenic sites you reach with HYPER cruise, each with its own ground
+    //   · POLAR STATION, 600 km north: a flat ice shelf, domes, a radar and an ice runway
+    //   · RED CANYON, 600 km east: a sandstone plateau cut by a winding canyon with timed gates
+    //   · THE CALDERA, an island volcano ~600 km south-west: a sheer rim around a flat floor and a pad
+    var DT_SITES = {
+      arctic: { x: 0, z: -600000, y: 20 },
+      canyon: { x: 600000, z: -6000, floor: 25, top: 240, half: 5200 },
+      crater: { x: -420000, z: 420000, floor: 320, rim: 900, inner: 1700, wall: 2200, R: 7000 }
+    };
+    function dtCanyonZ(x) { var u = x - DT_SITES.canyon.x; return DT_SITES.canyon.z + 520 * Math.sin(u * 0.0011) + 200 * Math.sin(u * 0.0029 + 1.0); }
+    function dtCanyonHalfW(x) { return 75 + 25 * Math.sin(x * 0.0021); }
+    function dtHeight(x, z, h) {
+      var A = DT_SITES.arctic, dax = x - A.x, daz = z - A.z;
+      if (Math.abs(dax) < 3200 && Math.abs(daz) < 3200) {
+        var da = Math.sqrt(dax * dax + daz * daz);
+        if (da < 3200) h += (A.y + (smoothNoise(x * 0.004, z * 0.004) - 0.5) * 4 - h) * gfxSmoothstepJS(3200, 1900, da);
+        return h;
+      }
+      var C = DT_SITES.canyon, dcx = x - C.x, dcz = z - C.z;
+      if (Math.abs(dcx) < C.half + 900 && Math.abs(dcz) < 2600) {
+        var w = gfxSmoothstepJS(C.half + 900, C.half, Math.abs(dcx)) * gfxSmoothstepJS(2600, 1700, Math.abs(dcz));
+        if (w <= 0) return h;
+        var P = C.top + (smoothNoise(x * 0.0016, z * 0.0016) - 0.5) * 40;
+        P = Math.floor(P / 14) * 14 + (P % 14) * 0.35;                      // stepped strata
+        var dist = Math.abs(z - dtCanyonZ(x)), hw = dtCanyonHalfW(x);
+        var c = THREE.MathUtils.clamp((dist - hw) / 55, 0, 1);
+        var floor = C.floor + (smoothNoise(x * 0.01, z * 0.01) - 0.5) * 3;
+        var top = floor + (P - floor) * Math.pow(c, 0.6);
+        return h + (top - h) * w;
+      }
+      var K = DT_SITES.crater, dkx = x - K.x, dkz = z - K.z;
+      if (Math.abs(dkx) < K.R + 1600 && Math.abs(dkz) < K.R + 1600) {
+        var dk = Math.sqrt(dkx * dkx + dkz * dkz), kt;
+        if (dk < K.inner) kt = K.floor + (smoothNoise(x * 0.006, z * 0.006) - 0.5) * 4 * gfxSmoothstepJS(400, 900, dk);
+        else if (dk < K.wall) kt = K.floor + (K.rim - K.floor) * Math.pow((dk - K.inner) / (K.wall - K.inner), 0.55);
+        else if (dk < K.R) {
+          var gl = 1 + 0.1 * Math.sin(Math.atan2(dkz, dkx) * 13 + dk * 0.003);
+          kt = WATER_LEVEL + 6 + (K.rim - WATER_LEVEL - 6) * Math.pow(1 - (dk - K.wall) / (K.R - K.wall), 1.7) * gl;
+        } else kt = WATER_LEVEL + 6 - (dk - K.R) / 1500 * (WATER_LEVEL + 6 - OCEAN_FLOOR);
+        return dk < K.wall ? kt : Math.max(h, kt);
+      }
+      return h;
+    }
+    function dtNear(x, z, s, r) { return Math.abs(x - s.x) < r && Math.abs(z - s.z) < r; }
+    // the two trip airstrips ride on the regions' airfield code: graded flat, landable, serviced
+    [['POLAR ICE RUNWAY', DT_SITES.arctic, 0, 1, 1400, 45, DT_SITES.arctic.y],
+     ['CALDERA PAD', DT_SITES.crater, 1, 0, 520, 70, DT_SITES.crater.floor]].forEach(function(s) {
+      var reach = Math.hypot(s[4] / 2 + 60, s[5] / 2 + 150) + 230;
+      REG_STRIPS.push({ name: s[0], kind: 'trip', x: s[1].x, z: s[1].z, y: s[6], ux: s[2], uz: s[3], L: s[4], W: s[5], apron: 150, reach2: reach * reach });
+    });
     function regArcticW(x, z) { return z > -12500 ? 0 : gfxSmoothstepJS(-12500, -15500, z); }
     function regDesertW(x, z) {
       if (x < 11500) return 0;
@@ -2424,6 +2474,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (top > h) h = top;
       }
       if (eiInRange(x, z, EI.R * 1.7)) h = enemyIslandHeight(x, z, h);
+      if (Math.abs(x) > 300000 || Math.abs(z) > 300000) h = dtHeight(x, z, h);
       return h;
     }
     // trees: none on the sand or the lava, thin and stunted in the far north, jungle low on Kaela
@@ -2431,6 +2482,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var m = (1 - regDesertW(x, z)) * (1 - regArcticW(x, z) * 0.85);
       var V = REG_VOLC, vd = Math.hypot(x - V.x, z - V.z);
       if (vd < V.r * 1.35) m *= h < 70 && vd > V.r * 0.55 ? 1.4 : 0;
+      if (dtNear(x, z, DT_SITES.crater, 9000)) m = 0;
+      if (dtNear(x, z, DT_SITES.arctic, 3300)) m = 0;
       if (eiInRange(x, z, EI.R * 1.7)) m *= Math.hypot(x - EI.hqX + 100, z - EI.hqZ - 80) < 480 ? 0 : 0.18;   // the garrison has cleared the island
       return m;
     }
@@ -2473,6 +2526,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (s > 0.991) lava = gfxSmoothstepJS(0.991, 0.998, s) * (1 - gfxSmoothstepJS(V.r * 0.5, V.r * 0.72, vd));
         }
         bio[2] = lava;
+      }
+      // the caldera: black basalt and ash, a glowing ring where the floor meets the wall
+      var K = DT_SITES.crater;
+      if (dtNear(x, z, K, K.R + 1600) && h > WATER_LEVEL - 6) {
+        var kd = Math.hypot(x - K.x, z - K.z);
+        _regC.copy(REG_C.basalt).lerp(REG_C.ash, gfxSmoothstepJS(500, 850, h) * 0.7 + (kd < K.inner ? 0.35 : 0));
+        col.copy(_regC); bio[0] = 1; bio[1] = 0;
+        bio[2] = kd > K.inner - 90 && kd < K.inner + 10 ? 1 : 0;
       }
     }
     // the regions' runways: the flattest straight ground near each landmark
@@ -15893,6 +15954,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (csarPt) pointers.push({ x: csarPt.x, z: csarPt.z, color: csarPt.color, text: 'PILOT' });
       qolMapPointers(pointers);
       eiMapPointers(pointers);
+      dtMapPointers(pointers);
       if (rtb || (!exp && Math.hypot(position.x - RUNWAY_CENTER_X, position.z - RUNWAY_CENTER_Z) > range)) pointers.push({ x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z, color: rtb ? '#7dff8a' : '#e8e6de', text: 'BASE' });
       pointers.forEach(function(pt) {
         var p = toS(pt.x, pt.z);
@@ -16615,6 +16677,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       aarUpdate(dt);
       qolUpdate(dt);
       eiUpdate(dt);
+      dtUpdate(dt);
       hyUpdate(dt);
       qolbUpdate(dt);
       qolcUpdate(dt);
@@ -23241,6 +23304,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       function mix(r, g, b, w) { col[0] += (r - col[0]) * w; col[1] += (g - col[1]) * w; col[2] += (b - col[2]) * w; }
       if (dw > 0) { if (h > 34) mix(170, 96, 62, dw); else mix(204, 172, 126, dw); }
       if (aw > 0) mix(h < WATER_LEVEL + 3.5 ? 186 : 228, h < WATER_LEVEL + 3.5 ? 210 : 234, h < WATER_LEVEL + 3.5 ? 226 : 240, aw);
+      if (dtNear(x, z, DT_SITES.crater, DT_SITES.crater.R + 1600)) { mix(48, 44, 40, 1); return; }
       if (vd < V.r * 1.3) { var vw = 1 - gfxSmoothstepJS(V.r * 1.05, V.r * 1.3, vd); if (vd < V.crater * 0.62) mix(255, 110, 30, vw); else mix(48, 44, 40, vw * (h < 70 ? 0.5 : 1)); }
     }
     function regStripAt(x, z) {
@@ -23251,9 +23315,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       return null;
     }
     (function regBuild() {
-      REG_STRIPS.forEach(function(st) { if (st.kind === 'arctic') regBuildNorthreach(st); else regBuildDustSea(st); });
+      REG_STRIPS.forEach(function(st) { if (st.kind === 'trip') return; if (st.kind === 'arctic') regBuildNorthreach(st); else regBuildDustSea(st); });
       regBuildKaela();
-      REG_STRIPS.forEach(function(st) { WAYPOINTS.push({ name: st.kind === 'arctic' ? 'NORTHREACH' : 'DUST SEA', x: st.x, z: st.z, color: st.kind === 'arctic' ? '#cfe6ff' : '#f0c88a', icon: 'field' }); });
+      REG_STRIPS.forEach(function(st) { if (st.kind !== 'trip') WAYPOINTS.push({ name: st.kind === 'arctic' ? 'NORTHREACH' : 'DUST SEA', x: st.x, z: st.z, color: st.kind === 'arctic' ? '#cfe6ff' : '#f0c88a', icon: 'field' }); });
       WAYPOINTS.push({ name: 'MT. KAELA', x: REG_VOLC.x, z: REG_VOLC.z, color: '#ff8a4a', icon: 'volcano' });
     })();
 
@@ -25035,7 +25099,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         hyToggle(); e.preventDefault();
       });
     })();
-    function hyAvail() { return started && selectedPlaneType === 'rocket' && !crashing && !ejecting && !wasGrounded && !kj.paused; }
+    function hyAvail() { return started && hyPlaneOk() && !crashing && !ejecting && !wasGrounded && !kj.paused; }
+    // the Rocket always has it; any other aircraft gets it while a DAY TRIP is the NAV target
+    function hyPlaneOk() { return selectedPlaneType === 'rocket' || (!isCarMode && typeof dtNavTrip === 'function' && !!dtNavTrip()); }
+    // day trips drop you out closer in, 8 km short
+    function hyDrop() { return typeof dtNavTrip === 'function' && dtNavTrip() ? 8000 : HY_DROP; }
     function hyPickTarget() {
       if (QOL.nav) return { x: QOL.nav.x, z: QOL.nav.z, name: QOL.nav.name };
       if (Math.hypot(EI.x - position.x, EI.z - position.z) > 60000) return { x: EI.x, z: EI.z, name: 'ENEMY ISLAND' };
@@ -25043,9 +25111,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     function hyToggle() {
       if (HY.on) { hyOff('HYPER CRUISE OFF'); return; }
-      if (!hyAvail()) { if (started && selectedPlaneType === 'rocket') samToast('HYPER — GET AIRBORNE FIRST', '#7cc8ff', 1.6); return; }
+      if (!hyAvail()) { if (started && hyPlaneOk()) samToast('HYPER — GET AIRBORNE FIRST', '#7cc8ff', 1.6); return; }
       var t = hyPickTarget(), d = Math.hypot(t.x - position.x, t.z - position.z);
-      if (d < HY_DROP * 1.6) { samToast('HYPER — ' + t.name + ' IS TOO CLOSE', '#7cc8ff', 1.8); return; }
+      if (d < hyDrop() * 1.6) { samToast('HYPER — ' + t.name + ' IS TOO CLOSE', '#7cc8ff', 1.8); return; }
       HY.on = true; HY.tgt = t; HY.v = Math.max(speed, 0); HY.fuel = fuel; HY.startT = elapsedSeconds; HY.dist0 = d;
       HY.alt = Math.max(1500, position.y);
       cruiseActive = false; if (QOL.ap) qolApOff('');
@@ -25069,9 +25137,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (!HY.on) return;
       if (!hyAvail()) { hyOff(''); return; }
       var t = HY.tgt, dx = t.x - position.x, dz = t.z - position.z, d = Math.hypot(dx, dz);
-      if (d <= HY_DROP) { hyOff('HYPER CRUISE COMPLETE · ' + t.name + ' ' + mapFmtDist(d)); return; }
+      if (d <= hyDrop()) { hyOff('HYPER CRUISE COMPLETE · ' + t.name + ' ' + mapFmtDist(d)); return; }
       // spool up, then brake so we arrive at the drop-out point at ordinary speed
-      var vBrake = Math.sqrt(MAX_SPEED * MAX_SPEED + 2 * HY_ACC * Math.max(0, d - HY_DROP));
+      var vBrake = Math.sqrt(MAX_SPEED * MAX_SPEED + 2 * HY_ACC * Math.max(0, d - hyDrop()));
       var want = Math.min(HY_VMAX, vBrake);
       HY.v = HY.v < want ? Math.min(want, HY.v + HY_ACC * 0.55 * dt) : want;
       // turn onto the target (a gentle bank while the nose comes round), hold the cruise height
@@ -25100,20 +25168,189 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       HY.hudT -= dt;
       if (HY.hudT <= 0) {
         HY.hudT = 0.15;
-        var eta = Math.max(0, Math.round((d - HY_DROP) / Math.max(HY.v, 1)));
+        var eta = Math.max(0, Math.round((d - hyDrop()) / Math.max(HY.v, 1)));
         HY.hud.style.display = 'block';
         HY.hud.innerHTML = 'HYPER CRUISE → ' + t.name + '<big>' + (HY.v / 1000).toFixed(1) + ' km/s · MACH ' + Math.round(HY.v / 340) + '</big>' +
           mapFmtDist(d) + ' TO GO · ETA ' + Math.floor(eta / 60) + ':' + String(eta % 60).padStart(2, '0') +
-          '<div class="bar"><i style="width:' + Math.round(100 * THREE.MathUtils.clamp(1 - (d - HY_DROP) / Math.max(1, HY.dist0 - HY_DROP), 0, 1)) + '%"></i></div>';
+          '<div class="bar"><i style="width:' + Math.round(100 * THREE.MathUtils.clamp(1 - (d - hyDrop()) / Math.max(1, HY.dist0 - hyDrop()), 0, 1)) + '%"></i></div>';
       }
     }
     function hyUpdate(dt) {
-      var show = started && selectedPlaneType === 'rocket' && !crashing && !ejecting && !wasGrounded;
+      var show = started && hyPlaneOk() && !crashing && !ejecting && !wasGrounded;
       HY.btn.classList.toggle('hidden', !show);
       if (HY.on && !hyAvail()) hyOff('');
     }
     // any real stick input takes the aircraft back
     function hyStickCancel(manual) { if (HY.on && manual) hyOff('HYPER CRUISE OFF — STICK'); }
+
+    /* ============================================================
+       DAY TRIPS — far-off scenic destinations with a goal each (TRIPS button)
+       · POLAR STATION (600 km N): land on the ice runway.
+       · RED CANYON (600 km E): fly the 10 gates down the canyon, west to east, inside 2:30.
+       · THE CALDERA (~600 km SW): set down inside the crater.
+       Pick one in the TRIPS panel (or tap it on the chart) to make it the NAV target; HYPER then
+       works in any aircraft, not just the Rocket. Finished trips are saved in this browser.
+       ============================================================ */
+    var DT_KEY = 'gp-trips-v1';
+    var DT = { done: {}, run: null, gates: [], btn: null, panel: null, hud: null, stamp: null, radar: null, t: 0, chkT: 0 };
+    var DT_TRIPS = [
+      { id: 'arctic', name: 'POLAR STATION', color: '#cfe6ff', goal: 'Land on the ice runway', x: DT_SITES.arctic.x, z: DT_SITES.arctic.z },
+      { id: 'canyon', name: 'RED CANYON', color: '#ffb36a', goal: 'Fly all 10 gates inside 2:30', x: DT_SITES.canyon.x - DT_SITES.canyon.half - 400, z: dtCanyonZ(DT_SITES.canyon.x - DT_SITES.canyon.half - 400) },
+      { id: 'crater', name: 'THE CALDERA', color: '#ff7a4a', goal: 'Land inside the crater', x: DT_SITES.crater.x, z: DT_SITES.crater.z }
+    ];
+    var DT_LIMIT = 150;
+    try { DT.done = JSON.parse(localStorage.getItem(DT_KEY) || '{}') || {}; } catch (e) { DT.done = {}; }
+    function dtSave() { try { localStorage.setItem(DT_KEY, JSON.stringify(DT.done)); } catch (e) {} }
+    function dtTrip(id) { for (var i = 0; i < DT_TRIPS.length; i++) if (DT_TRIPS[i].id === id) return DT_TRIPS[i]; return null; }
+    // is the NAV target one of the trips?
+    function dtNavTrip() {
+      if (!QOL.nav) return null;
+      for (var i = 0; i < DT_TRIPS.length; i++) if (Math.hypot(QOL.nav.x - DT_TRIPS[i].x, QOL.nav.z - DT_TRIPS[i].z) < 50) return DT_TRIPS[i];
+      return null;
+    }
+    (function dtBuild() {
+      // --- POLAR STATION: ice runway, domes, a turning radar, the station huts ---
+      var A = DT_SITES.arctic, st = REG_STRIPS.filter(function(s) { return s.name === 'POLAR ICE RUNWAY'; })[0];
+      regStripRibbon(st, '#bcd8ea', 'rgba(40,90,140,.8)');
+      var white = samMat(0xeef2f5, 0.5, 0.1), red = samMat(0xc8321e, 0.55, 0.2), steel = samMat(0x8c939a, 0.4, 0.7), dark = samMat(0x2b3036, 0.6, 0.3);
+      [[-60, 160, 22], [-20, 205, 16], [35, 170, 19], [-95, 230, 12]].forEach(function(d) {
+        var g = new THREE.Group();
+        g.add(samCyl(d[2] * 1.02, d[2] * 1.06, 2.5, 24, dark, 0, 1.2, 0));
+        var dome = new THREE.Mesh(new THREE.SphereGeometry(d[2], 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), white); dome.position.y = 2.4; g.add(dome);
+        g.add(samBox(4, 4, 3, red, 0, 2, d[2] + 1));
+        regPlace(warBake(g), st, d[0], d[1]);
+      });
+      [[90, 120], [90, 150], [120, 135]].forEach(function(o) {
+        var b = new THREE.Group(); b.add(samBox(24, 6, 10, red, 0, 4, 0)); b.add(samBox(24.6, 0.5, 10.6, white, 0, 7.2, 0));
+        for (var k = 0; k < 4; k++) b.add(samCyl(0.3, 0.3, 1.6, 6, steel, -9 + k * 6, 0.8, 0));
+        for (var w = 0; w < 5; w++) b.add(samBox(2, 1.1, 0.1, dark, -9 + w * 4.5, 4.6, 5.05));
+        regPlace(warBake(b), st, o[0], o[1], Math.PI / 2);
+      });
+      // the radar: a lattice tower with a dish that sweeps round
+      var rp = regAt(st, -150, 120), ry = getTerrainHeight(rp.x, rp.z);
+      var tower = new THREE.Group();
+      for (var k = 0; k < 4; k++) { var a = k / 4 * Math.PI * 2 + Math.PI / 4; tower.add(samCyl(0.25, 0.4, 28, 5, steel, Math.cos(a) * 2.2, 14, Math.sin(a) * 2.2)); }
+      tower.add(samBox(6, 1, 6, steel, 0, 28, 0));
+      tower.position.set(rp.x, ry, rp.z); scene.add(warBake(tower));
+      var radar = new THREE.Group();
+      var dish = new THREE.Mesh(new THREE.SphereGeometry(7, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.32), white);
+      dish.rotation.x = -Math.PI / 2 - 0.35; dish.position.z = -2; radar.add(dish);
+      radar.add(samCyl(0.4, 0.4, 4, 6, steel, 0, -1, 0));
+      radar.position.set(rp.x, ry + 31, rp.z); scene.add(radar); DT.radar = radar;
+      // --- RED CANYON: ten gates down the canyon, west to east ---
+      var C = DT_SITES.canyon, ringGeo = new THREE.TorusGeometry(30, 2.2, 8, 36);
+      for (var i = 0; i < 10; i++) {
+        var gx = C.x - C.half + 500 + i * (2 * C.half - 1000) / 9, gz = dtCanyonZ(gx);
+        var tx = 40, tz = dtCanyonZ(gx + 20) - dtCanyonZ(gx - 20), tl = Math.hypot(tx, tz); tx /= tl; tz /= tl;
+        var gy = getTerrainHeight(gx, gz) + 40;
+        var m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffa040, fog: true }));
+        m.position.set(gx, gy, gz); m.rotation.y = Math.atan2(tx, tz); scene.add(m);
+        DT.gates.push({ m: m, x: gx, y: gy, z: gz, tx: tx, tz: tz });
+      }
+      // --- THE CALDERA: a pad on the floor, a glowing lava ring where the floor meets the wall ---
+      var K = DT_SITES.crater, pad = REG_STRIPS.filter(function(s) { return s.name === 'CALDERA PAD'; })[0];
+      regStripRibbon(pad, '#3a3633', 'rgba(255,200,80,.85)');
+      var ring = new THREE.Mesh(new THREE.RingGeometry(K.inner - 80, K.inner + 4, 96), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 0.36, 0.08), fog: true }));
+      ring.rotation.x = -Math.PI / 2; ring.position.set(K.x, K.floor + 0.6, K.z); scene.add(ring);
+      var hp = new THREE.Mesh(new THREE.RingGeometry(18, 22, 40), new THREE.MeshBasicMaterial({ color: 0xffd25a, fog: true }));
+      hp.rotation.x = -Math.PI / 2; hp.position.set(K.x + 200, K.floor + 0.4, K.z); scene.add(hp);
+      DT_TRIPS.forEach(function(t) { WAYPOINTS.push({ name: t.name, x: t.x, z: t.z, color: t.color, icon: 'trip' }); });
+      // --- UI: the TRIPS button, the panel, the gate HUD and the stamp ---
+      var css = document.createElement('style');
+      css.textContent = [
+        '#dtBtn{position:fixed;z-index:12;left:calc(170px + env(safe-area-inset-left));bottom:calc(250px + env(safe-area-inset-bottom));width:64px;height:40px;box-sizing:border-box;border-radius:12px;display:flex;align-items:center;justify-content:center;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#ffe2c4;background:rgba(60,30,10,.6);border:2px solid #ffb36a;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}',
+        '@media (orientation: landscape) and (max-height: 500px){#dtBtn{left:calc(254px + env(safe-area-inset-left));bottom:auto;top:calc(80px + env(safe-area-inset-top));width:58px;height:30px;border-radius:9px;font-size:9.5px}}',
+        '#dtBtn.hidden{display:none}',
+        '#dtPanel{position:fixed;z-index:30;left:50%;top:50%;transform:translate(-50%,-50%);width:min(360px,calc(100vw - 32px));box-sizing:border-box;display:none;font:600 12px/1.4 ui-monospace,Menlo,monospace;color:#f4e8dc;background:rgba(18,12,8,.92);border:1px solid #ffb36a;border-radius:14px;padding:14px}',
+        '#dtPanel h3{margin:0 0 10px;font-size:14px;letter-spacing:.14em;color:#ffb36a}',
+        '#dtPanel .trip{display:flex;align-items:center;gap:10px;padding:9px 10px;margin:6px 0;border-radius:10px;background:rgba(255,255,255,.06);cursor:pointer}',
+        '#dtPanel .trip:hover{background:rgba(255,179,106,.18)}#dtPanel .trip b{display:block;letter-spacing:.08em}#dtPanel .trip small{opacity:.75}',
+        '#dtPanel .ok{margin-left:auto;font-weight:800;color:#7dff9a;white-space:nowrap}',
+        '#dtPanel .close{margin-top:8px;text-align:center;padding:8px;border-radius:9px;background:rgba(255,255,255,.08);cursor:pointer}',
+        '#dtHud{position:fixed;z-index:13;left:50%;top:calc(96px + env(safe-area-inset-top));transform:translateX(-50%);display:none;pointer-events:none;font:800 13px/1.3 ui-monospace,Menlo,monospace;letter-spacing:.1em;color:#ffe2c4;background:rgba(30,14,4,.7);border:1px solid #ffb36a;border-radius:10px;padding:6px 14px;text-align:center}',
+        '#dtStamp{position:fixed;z-index:40;left:50%;top:38%;pointer-events:none;display:none;font:900 clamp(30px,8vw,64px)/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#ff4a2e;border:6px double #ff4a2e;border-radius:14px;padding:12px 22px;background:rgba(255,240,225,.12);text-align:center;transform:translate(-50%,-50%) rotate(-9deg);text-shadow:0 0 12px rgba(255,90,40,.5)}',
+        '#dtStamp small{display:block;font-size:.3em;letter-spacing:.2em;margin-top:8px}',
+        '#dtStamp.go{display:block;animation:dtStamp 3.8s ease-out forwards}',
+        '@keyframes dtStamp{0%{opacity:0;transform:translate(-50%,-50%) rotate(-9deg) scale(2.6)}12%{opacity:1;transform:translate(-50%,-50%) rotate(-9deg) scale(1)}80%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%) rotate(-9deg) scale(1)}}'
+      ].join('\n');
+      document.head.appendChild(css);
+      DT.btn = document.createElement('div'); DT.btn.id = 'dtBtn'; DT.btn.className = 'hidden'; DT.btn.textContent = 'TRIPS';
+      DT.btn.addEventListener('click', function(e) { e.preventDefault(); dtPanel(DT.panel.style.display !== 'block'); });
+      document.body.appendChild(DT.btn);
+      DT.panel = document.createElement('div'); DT.panel.id = 'dtPanel'; document.body.appendChild(DT.panel);
+      DT.panel.addEventListener('click', function(e) {
+        var el = e.target.closest('[data-trip]');
+        if (el) { var t = dtTrip(el.getAttribute('data-trip')); qolNavSet(t.x, t.z, t.name, t.color); dtPanel(false); samToast('DAY TRIP · ' + t.goal.toUpperCase() + ' — HYPER (9) TO GO', t.color, 3); return; }
+        if (e.target.closest('.close')) dtPanel(false);
+      });
+      DT.hud = document.createElement('div'); DT.hud.id = 'dtHud'; document.body.appendChild(DT.hud);
+      DT.stamp = document.createElement('div'); DT.stamp.id = 'dtStamp'; document.body.appendChild(DT.stamp);
+    })();
+    function dtPanel(open) {
+      if (!open) { DT.panel.style.display = 'none'; return; }
+      DT.panel.innerHTML = '<h3>DAY TRIPS</h3>' + DT_TRIPS.map(function(t) {
+        var d = DT.done[t.id], ok = d ? '✓ DONE' + (d.best ? ' ' + d.best.toFixed(1) + 's' : '') : '';
+        return '<div class="trip" data-trip="' + t.id + '"><div><b style="color:' + t.color + '">' + t.name + '</b><small>' + t.goal + ' · ' +
+          mapFmtDist(Math.hypot(t.x - position.x, t.z - position.z)) + '</small></div><span class="ok">' + ok + '</span></div>';
+      }).join('') + '<div class="close">CLOSE</div>';
+      DT.panel.style.display = 'block';
+    }
+    function dtComplete(id, extra) {
+      var t = dtTrip(id), prev = DT.done[id], rec = { at: Date.now() };
+      if (extra && extra.time) rec.best = prev && prev.best ? Math.min(prev.best, extra.time) : extra.time;
+      DT.done[id] = rec; dtSave();
+      DT.stamp.innerHTML = 'TRIP COMPLETE<small>' + t.name + (extra && extra.time ? ' · ' + extra.time.toFixed(1) + ' s' : '') + (prev ? '' : ' · NEW') + '</small>';
+      DT.stamp.classList.remove('go'); void DT.stamp.offsetWidth; DT.stamp.classList.add('go');
+      samToast('TRIP COMPLETE · ' + t.name, t.color, 3);
+      if (typeof qolSay === 'function') qolSay('trip complete', 660);
+    }
+    function dtMapPointers(pointers) {
+      var nt = dtNavTrip();
+      DT_TRIPS.forEach(function(t) { if (t !== nt) pointers.push({ x: t.x, z: t.z, color: t.color, text: t.name }); });
+    }
+    function dtUpdate(dt) {
+      DT.t += dt;
+      DT.btn.classList.toggle('hidden', !started);
+      if (DT.radar) DT.radar.rotation.y = DT.t * 0.9;
+      var arctic = dtNear(position.x, position.z, DT_SITES.arctic, 4000), canyon = dtNear(position.x, position.z, DT_SITES.canyon, 9000), crater = dtNear(position.x, position.z, DT_SITES.crater, 9000);
+      if (!started || crashing || ejecting) { if (DT.run) { DT.run = null; DT.hud.style.display = 'none'; } return; }
+      // the landings: rolled out (or settled) on the spot
+      if ((arctic || crater) && wasGrounded && speed < 45 && (DT.chkT -= dt) <= 0) {
+        DT.chkT = 1;
+        var id = arctic ? 'arctic' : 'crater', st = REG_STRIPS.filter(function(s) { return s.kind === 'trip' && dtNear(position.x, position.z, s, 5000); })[0];
+        var hit = arctic ? (st && Math.abs(position.x - st.x) < st.W / 2 + 6 && Math.abs(position.z - st.z) < st.L / 2 + 10)
+                         : Math.hypot(position.x - DT_SITES.crater.x, position.z - DT_SITES.crater.z) < DT_SITES.crater.inner;
+        if (hit && DT.landed !== id) { DT.landed = id; dtComplete(id); }
+      }
+      if (!wasGrounded) DT.landed = null;
+      // the canyon run
+      DT.gates.forEach(function(g, i) {
+        var col = !DT.run ? (i === 0 ? 0x7dff9a : 0xffa040) : i < DT.run.next ? 0x555555 : i === DT.run.next ? 0x7dff9a : 0xffa040;
+        g.m.material.color.setHex(col);
+      });
+      if (!canyon) { if (DT.run) { DT.run = null; DT.hud.style.display = 'none'; samToast('CANYON RUN ABANDONED', '#ffb36a', 1.6); } return; }
+      var idx = DT.run ? DT.run.next : 0, g = DT.gates[idx];
+      var rx = position.x - g.x, ry = position.y - g.y, rz = position.z - g.z;
+      var along = rx * g.tx + rz * g.tz, lat = Math.hypot(rx * g.tz - rz * g.tx, ry);
+      var crossed = DT.prevIdx === idx && DT.prevAlong < 0 && along >= 0;
+      DT.prevIdx = idx; DT.prevAlong = along;
+      if (crossed && lat < 34) {
+        if (!DT.run) { DT.run = { next: 0, t0: elapsedSeconds }; samToast('CANYON RUN — GO!', '#7dff9a', 1.4); }
+        DT.run.next++; DT.prevIdx = -1; samBeep(1320, 0.06, 0.1);
+        if (DT.run.next >= DT.gates.length) {
+          var tt = elapsedSeconds - DT.run.t0; DT.run = null; DT.hud.style.display = 'none';
+          if (tt <= DT_LIMIT) dtComplete('canyon', { time: tt }); else samToast('ALL GATES — BUT ' + tt.toFixed(1) + ' s IS OVER 2:30', '#ffb36a', 3);
+          return;
+        }
+      } else if (crossed && DT.run) {
+        samToast('MISSED GATE ' + (idx + 1) + ' — RUN RESET', '#ff6a4a', 2.2); DT.run = null; DT.hud.style.display = 'none'; DT.prevIdx = -1;
+      }
+      if (DT.run) {
+        var el = elapsedSeconds - DT.run.t0;
+        DT.hud.style.display = 'block';
+        DT.hud.innerHTML = 'CANYON RUN · GATE ' + (DT.run.next + 1) + '/' + DT.gates.length + ' · ' + el.toFixed(1) + ' s' + (el > DT_LIMIT ? ' · OVER TIME' : '');
+      }
+    }
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
