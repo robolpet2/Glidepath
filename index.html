@@ -2019,6 +2019,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     // the whole airport complex — runway, taxiway, apron, terminal, landside — sits on one graded
     // platform (local to the runway centre: +x east toward the terminal, +z north)
     var AIRPORT_PAD = { x0: -80, x1: 450, z0: -480, z1: 480 };
+    // the graded building site for the home base, west of the runway (see BASE BUILDING)
+    var BASE_AREA = { x0: -660, x1: -24, z0: -420, z1: 470, y: 6, blend: 110 };
     var RUNWAY_LANDING_MARGIN = 18;  // extra forgiving margin (beyond the paved edges) that still counts as "on the runway"
     var SAFE_DESCENT_RATE = -30;     // m/s — gentler than this over the runway = landing, not a crash
     var PLANE_GROUND_OFFSET = 1.0;   // plane's origin is at the fuselage center, but the wheels sit ~1 unit below it — this lifts the model so the wheels touch the ground/runway instead of sinking into it
@@ -2188,6 +2190,15 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           var wst = 1 - wsd / 220; wst = wst * wst * (3 - 2 * wst);
           naturalHeight = naturalHeight * (1 - wst) + WS.y * wst;
         }
+      }
+
+      // the home-base building site west of the runway: graded flat at the airfield's level
+      var bax = x - RUNWAY_CENTER_X, baz = z - RUNWAY_CENTER_Z;
+      var bad = Math.hypot(Math.max(0, BASE_AREA.x0 - bax, bax - BASE_AREA.x1), Math.max(0, BASE_AREA.z0 - baz, baz - BASE_AREA.z1));
+      if (bad < BASE_AREA.blend) {
+        var bat = 1 - bad / BASE_AREA.blend; bat = bat * bat * (3 - 2 * bat);
+        bat *= 1 - riverCarveBlend(x, z);
+        naturalHeight = naturalHeight * (1 - bat) + BASE_AREA.y * bat;
       }
 
       // Distance from the runway pad's paved edge (0 = under/at the pad itself).
@@ -2438,6 +2449,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var reach = Math.hypot(s[4] / 2 + 60, s[5] / 2 + 150) + 230;
       REG_STRIPS.push({ name: s[0], kind: 'trip', x: s[1].x, z: s[1].z, y: s[6], ux: s[2], uz: s[3], L: s[4], W: s[5], apron: 150, reach2: reach * reach });
     });
+    // the home base's crosswind runway: graded from the start, usable only once it's built
+    REG_STRIPS.push({ name: 'CROSSWIND 09/27', kind: 'base', locked: true, x: RUNWAY_CENTER_X - 340, z: RUNWAY_CENTER_Z - 360, y: 6, ux: 1, uz: 0, L: 600, W: 30, apron: 20, reach2: Math.pow(Math.hypot(360, 50) + 230, 2) });
     function regArcticW(x, z) { return z > -12500 ? 0 : gfxSmoothstepJS(-12500, -15500, z); }
     function regDesertW(x, z) {
       if (x < 11500) return 0;
@@ -2567,6 +2580,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     })();
     // no forest trees on the city, the highway corridor (incl. embankments), the airfield or the SAM base
     function treeBlockedAt(wx, wz) {
+      if (wx - RUNWAY_CENTER_X > BASE_AREA.x0 - 30 && wx - RUNWAY_CENTER_X < BASE_AREA.x1 && wz - RUNWAY_CENTER_Z > BASE_AREA.z0 - 30 && wz - RUNWAY_CENTER_Z < BASE_AREA.z1 + 30) return true;
       if (OLD_STRIP) {
         var obx = wx - OLD_STRIP.x, obz = wz - OLD_STRIP.z;
         if (Math.abs(obx * OLD_STRIP.ux + obz * OLD_STRIP.uz) < OLD_STRIP.L / 2 + 90 && Math.abs(-obx * OLD_STRIP.uz + obz * OLD_STRIP.ux) < 110) return true;
@@ -2599,6 +2613,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function worldLandable(x, z, margin) {
       for (var wli = 0; wli < WAR_STRIPS.length + REG_STRIPS.length; wli++) {
         var WL = wli < WAR_STRIPS.length ? WAR_STRIPS[wli] : REG_STRIPS[wli - WAR_STRIPS.length], wlx = x - WL.x, wlz = z - WL.z;
+        if (WL.locked) continue;
         if (Math.abs(wlx * WL.ux + wlz * WL.uz) < WL.L / 2 + (margin || 0) && Math.abs(-wlx * WL.uz + wlz * WL.ux) < WL.W / 2 + (margin || 0)) return true;
       }
       if (OLD_STRIP) {
@@ -8878,7 +8893,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var CV_WIRE_HALF = 17;
     var CV_RUNOUT = 88;                       // metres of cable payout to a stop
     var CV_CATS = [ { v: 9, u0: 55, u1: 150 }, { v: -8, u0: 55, u1: 150 } ];
-    var CV_GLIDE_DEG = 3.5, CV_GLIDE_AIM_S = 66;
+    var CV_GLIDE_DEG = 3.5, CV_GLIDE_AIM_S = 94;   // fly the ball and the wheels meet the deck at ~68 m: the hook takes the 3-wire
 
     var carrierGroup = new THREE.Group();
     carrierGroup.position.set(CARRIER.x, 0, CARRIER.z);
@@ -9344,6 +9359,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var cvLastHud = '';
     function carrierUpdate(dt) {
       var ud = carrierGroup.userData;
+      if (typeof cv2Move === 'function') cv2Move(dt);
       if (cvLaunchGrace > 0) cvLaunchGrace -= dt;
       if (ud.radar) ud.radar.rotation.y += dt * 1.4;
       var night = typeof cityNightFactor === 'function' ? cityNightFactor() : 0;
@@ -9368,15 +9384,18 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       cvHook.visible = cvHookEligible() && cvHookAngle > 0.03;
 
       // --- trap: the hook sweeps across a cable while rolling out on the angled deck ---
-      if (!cvState.arrest && !cvState.cat && hookWant && overDeck && aboveDeck < 2.5 && Math.abs(land.lat) < CV_WIRE_HALF &&
-          speed > 12 && aligned > 0.85 && cvState.prevHookS !== null) {
+      if (!cvState.arrest && !cvState.cat && hookWant && overDeck && aboveDeck < 0.45 && Math.abs(land.lat) < CV_WIRE_HALF &&
+          speed > 12 && aligned > 0.85 && cvState.prevHookS !== null && !cvState.skip) {
         for (var wi = 0; wi < CV_WIRES.length; wi++) {
           if (cvState.prevHookS < CV_WIRES[wi] && hookS >= CV_WIRES[wi]) {
+            // now and then the hook bounces over the wires — a hook skip, and a bolter
+            if (Math.random() < 0.04) { cvState.skip = true; samToast('HOOK SKIP!', '#4aa3ff', 1.8); break; }
             cvState.arrest = { wire: wi, v0: speed, decel: Math.max(9, speed * speed / (2 * CV_RUNOUT)) };
             cvState.wire = wi;
             cvState.bolterWarned = true;
             var grade = wi === 2 ? 'OK 3-WIRE' : wi === 1 ? 'FAIR 2-WIRE' : wi === 3 ? '4-WIRE — LATE' : '1-WIRE — SHORT';
             samToast('TRAP! ' + grade, wi === 2 ? '#7dff8a' : '#ffd36a', 2.6);
+            if (typeof cv2OnTrap === 'function') cv2OnTrap(wi + 1);
             if (typeof cameraShake === 'function') cameraShake(0.4);
             break;
           }
@@ -9402,8 +9421,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (!cvState.arrest && cvState.onDeck && hookWant && hookS > CV_WIRES[3] + 8 && speed > 20 && !cvState.bolterWarned) {
         cvState.bolterWarned = true;
         samToast('BOLTER! BOLTER! — power up, go around', '#ff7a5a', 3);
+        if (typeof cv2OnBolter === 'function') cv2OnBolter(cvState.skip ? 'HOOK SKIP' : '');
       }
-      if (!wasGrounded && (position.y - CARRIER.deckY) > 25) cvState.bolterWarned = false;
+      if (!wasGrounded && (position.y - CARRIER.deckY) > 25) { cvState.bolterWarned = false; cvState.skip = false; }
 
       // --- wire visuals: the caught cable is dragged into a V behind the hook ---
       if (cvState.wireHold > 0) { cvState.wireHold -= dt; if (cvState.wireHold <= 0) cvState.wire = -1; }
@@ -9504,6 +9524,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // --- meatball + HUD approach cues ---
       var lens = ud.lens, hud = '';
       var toAim = CV_GLIDE_AIM_S - land.s, hAbove = position.y - CARRIER.deckY;
+      if (typeof cv2Approach === 'function') cv2Approach(dt, land, toAim, hAbove, aligned, dist);
       if (!wasGrounded && toAim > 25 && toAim < 3000 && Math.abs(land.lat) < 400 && aligned > 0.5 && !crashing) {
         var gs = THREE.MathUtils.radToDeg(Math.atan2(hAbove, toAim));
         var err = gs - CV_GLIDE_DEG;
@@ -13964,7 +13985,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       'background:rgba(20,6,4,.72);border:1px solid rgba(255,90,60,.7);color:#ffd3c4;display:none;max-width:92vw;text-shadow:0 0 6px rgba(255,60,30,.6)';
     document.body.appendChild(nukeHudEl);
     var nukeYieldEl = document.createElement('div');
-    nukeYieldEl.style.cssText = 'position:fixed;z-index:12;left:calc(170px + env(safe-area-inset-left));bottom:calc(296px + env(safe-area-inset-bottom));height:34px;padding:0 10px;box-sizing:border-box;border-radius:11px;' +
+    nukeYieldEl.style.cssText = 'position:fixed;z-index:12;left:calc(170px + env(safe-area-inset-left));bottom:calc(342px + env(safe-area-inset-bottom));height:34px;padding:0 10px;box-sizing:border-box;border-radius:11px;' +
       'display:none;align-items:center;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.06em;color:#ffd3c4;background:rgba(40,8,4,.66);border:2px solid #ff5a4a;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent';
     nukeYieldEl.addEventListener('click', function(e) {
       e.preventDefault();
@@ -13974,7 +13995,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     });
     document.body.appendChild(nukeYieldEl);
     var nukeTimerEl = nukeYieldEl.cloneNode(false);
-    nukeTimerEl.style.bottom = 'calc(342px + env(safe-area-inset-bottom))';
+    nukeTimerEl.style.bottom = 'calc(388px + env(safe-area-inset-bottom))';
     nukeTimerEl.addEventListener('click', function(e) {
       e.preventDefault();
       if (NUKE.state === 'falling') { samToast('⏱ TIMER IS SET — WEAPON ALREADY AWAY', '#ff7a5a', 1.6); return; }
@@ -16048,6 +16069,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         ctx.fillStyle = '#ff8a2a'; ctx.beginPath(); ctx.arc(q.x, q.y, 3.4, 0, Math.PI * 2); ctx.fill();
       });
       nukeMinimap(ctx, toS, scale);
+      if (typeof baseMinimap === 'function') baseMinimap(ctx, toS, scale);
+      if (typeof csgMinimap === 'function') csgMinimap(ctx, toS, scale);
       cmdMinimap(ctx, toS, exp);
       navyMap(ctx, toS, exp, inView, label, rot);
       aarMap(ctx, toS, exp, inView, label, rot);
@@ -16610,7 +16633,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (clearance >= CRASH_BUFFER) {
             wasGrounded = false; // cleared the ground — now flying
           }
-        } else if (clearance < CRASH_BUFFER && !(cvLaunchGrace > 0 && isOverCarrierDeck(position.x, position.z))) {
+        } else if (clearance < CRASH_BUFFER && !(cvLaunchGrace > 0 && isOverCarrierDeck(position.x, position.z)) &&
+                   // over the carrier a jet flies all the way down to the deck: the hook needs to meet it on the glide path
+                   !(isOverCarrierDeck(position.x, position.z) && !isHelicopterMode && clearance > 0.6 && position.y > CARRIER.deckY && verticalSpeed > SAFE_DESCENT_RATE)) {
           // helicopters can set down anywhere on dry land at a safe descent rate — jets are
           // restricted to paved surfaces they can actually roll out on: the runway, or the
           // highway running out to the city, which is flat and wide enough to serve as a
@@ -16881,6 +16906,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       dtUpdate(dt);
       wx2Update(dt);
       wlUpdate(dt);
+      cv2Frame(dt);
+      baseUpdate(dt);
+      csgUpdate(dt);
       hyUpdate(dt);
       qolbUpdate(dt);
       qolcUpdate(dt);
@@ -23513,14 +23541,15 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function regStripAt(x, z) {
       for (var i = 0; i < REG_STRIPS.length; i++) {
         var st = REG_STRIPS[i], dx = x - st.x, dz = z - st.z, v = -dx * st.uz + dz * st.ux;
+        if (st.locked) continue;
         if (Math.abs(dx * st.ux + dz * st.uz) < st.L / 2 + 30 && v > -st.W / 2 - 20 && v < st.W / 2 + st.apron) return st;
       }
       return null;
     }
     (function regBuild() {
-      REG_STRIPS.forEach(function(st) { if (st.kind === 'trip') return; if (st.kind === 'arctic') regBuildNorthreach(st); else regBuildDustSea(st); });
+      REG_STRIPS.forEach(function(st) { if (st.kind === 'trip' || st.kind === 'base') return; if (st.kind === 'arctic') regBuildNorthreach(st); else regBuildDustSea(st); });
       regBuildKaela();
-      REG_STRIPS.forEach(function(st) { if (st.kind !== 'trip') WAYPOINTS.push({ name: st.kind === 'arctic' ? 'NORTHREACH' : 'DUST SEA', x: st.x, z: st.z, color: st.kind === 'arctic' ? '#cfe6ff' : '#f0c88a', icon: 'field' }); });
+      REG_STRIPS.forEach(function(st) { if (st.kind !== 'trip' && st.kind !== 'base') WAYPOINTS.push({ name: st.kind === 'arctic' ? 'NORTHREACH' : 'DUST SEA', x: st.x, z: st.z, color: st.kind === 'arctic' ? '#cfe6ff' : '#f0c88a', icon: 'field' }); });
       WAYPOINTS.push({ name: 'MT. KAELA', x: REG_VOLC.x, z: REG_VOLC.z, color: '#ff8a4a', icon: 'volcano' });
     })();
 
@@ -24177,7 +24206,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         f.push({ name: 'CARRIER', x: c.x, z: c.z, y: CARRIER.deckY, ux: CV_F.x, uz: CV_F.z, L: 300, gs: 3.5, oneWay: true, carrier: true });
       }
       if (OLD_STRIP && (!WAR.on || WAR.sectors.some(function(s) { return s.type === 'field' && !s.strip && s.owner === 'blue'; }))) f.push({ name: 'OLD STRIP', x: OLD_STRIP.x, z: OLD_STRIP.z, y: OLD_STRIP.y, ux: OLD_STRIP.ux, uz: OLD_STRIP.uz, L: OLD_STRIP.L, gs: 3 });
-      REG_STRIPS.forEach(function(s) { f.push({ name: s.name, x: s.x, z: s.z, y: s.y, ux: s.ux, uz: s.uz, L: s.L, gs: 3 }); });
+      REG_STRIPS.forEach(function(s) { if (!s.locked) f.push({ name: s.name, x: s.x, z: s.z, y: s.y, ux: s.ux, uz: s.uz, L: s.L, gs: 3 }); });
       if (WAR.on) WAR.sectors.forEach(function(s) { if (s.owner === 'blue' && s.strip) f.push({ name: s.name, x: s.strip.x, z: s.strip.z, y: s.strip.y, ux: s.strip.ux, uz: s.strip.uz, L: s.strip.L, gs: 3 }); });
       return f;
     }
@@ -26418,6 +26447,964 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         });
       }
       for (var key in WL.sp) { var S = WL.sp[key]; S.mesh.count = S.n; S.mesh.instanceMatrix.needsUpdate = true; S.anim.needsUpdate = true; }
+    }
+
+    /* ============================================================
+       CARRIER OPS — the supercarrier is a working warship now
+       · UNDERWAY: CV-71 steams a racetrack south of the coast at ~22 knots, with a churning wake,
+         a bow wave and two escorting destroyers. Everything on the deck — you, the parked jets,
+         the air wing — rides with her.
+       · SEA STATE: the deck heaves, pitches and rolls with the weather. In a storm the ramp can
+         come up several metres to meet you.
+       · MARSHAL checks you in inside 12 km (Case I by day, Case III at night or in weather, with the
+         base recovery course), and the deck closes while the ship is turning.
+       · PADDLES (the LSO) talks you down: call the ball, then "power", "you're high", "right for
+         lineup", "easy with it"… and "WAVE OFF" if it's unsafe — fly it anyway and it's a cut pass.
+         An AoA indexer on the HUD tells you if you're on speed.
+       · Every pass is GRADED like the real thing (_OK_, OK, (OK) fair, — no grade, B bolter,
+         WO wave-off, C cut) with the LSO's shorthand comments, and posted on your GREENIE BOARD.
+       · Hit the ramp and you die. Hooks skip now and then — that's a bolter.
+       ============================================================ */
+    var CV2 = {
+      // the racetrack: two straight legs and two half-circle turns
+      cx: -250, cz: 3350, L: 5600, R: 450, v: 11.5, s: 2800,
+      heave: 0, pitch: 0, roll: 0, t: 0, yawRate: 0, base: CARRIER.deckY,
+      prev: null, escorts: [], wake: null, helo: null,
+      lso: null, radio: [], said: {}, greenie: [], boardEl: null, radioEl: null, idxEl: null
+    };
+    try { CV2.greenie = JSON.parse(localStorage.getItem('gp-greenie-v1') || '[]') || []; } catch (e) { CV2.greenie = []; }
+    function cv2Pose(s) {
+      var L = CV2.L, R = CV2.R, cx = CV2.cx, cz = CV2.cz, tot = 2 * L + 2 * Math.PI * R;
+      s = ((s % tot) + tot) % tot;
+      var x, z, dx, dz, th;
+      if (s < L) { x = cx - L / 2 + s; z = cz - R; dx = 1; dz = 0; }
+      else if (s < L + Math.PI * R) { th = (s - L) / R; x = cx + L / 2 + R * Math.sin(th); z = cz - R * Math.cos(th); dx = Math.cos(th); dz = Math.sin(th); }
+      else if (s < 2 * L + Math.PI * R) { var u = s - L - Math.PI * R; x = cx + L / 2 - u; z = cz + R; dx = -1; dz = 0; }
+      else { th = (s - 2 * L - Math.PI * R) / R; x = cx - L / 2 - R * Math.sin(th); z = cz + R * Math.cos(th); dx = -Math.cos(th); dz = -Math.sin(th); }
+      return { x: x, z: z, yaw: Math.atan2(dx, dz) };
+    }
+    function cv2Brc() { return Math.round(((Math.atan2(CV_F.x, -CV_F.z) * 180 / Math.PI) + 360) % 360); }
+    // ---- radio: the ship's own lines (works in free flight too) ----
+    function cv2Say(who, msg, col, voice) {
+      CV2.radio.push({ t: 6, html: '<b style="color:' + (col || '#9fd0ff') + '">' + who + ':</b> ' + msg });
+      if (CV2.radio.length > 4) CV2.radio.shift();
+      cv2RadioRender();
+      if (voice && typeof qolSay === 'function') qolSay(voice);
+    }
+    function cv2RadioRender() { CV2.radioEl.innerHTML = CV2.radio.map(function(r) { return '<div style="opacity:' + Math.min(1, r.t / 1.5).toFixed(2) + '">' + r.html + '</div>'; }).join(''); CV2.radioEl.style.display = CV2.radio.length ? 'block' : 'none'; }
+    (function cv2Build() {
+      var css = document.createElement('style');
+      css.textContent = '#cvRadio{position:fixed;z-index:12;left:calc(250px + env(safe-area-inset-left));top:calc(150px + env(safe-area-inset-top));max-width:min(380px,calc(100vw - 520px));display:none;pointer-events:none;' +
+        'font:600 12px/1.45 ui-monospace,Menlo,monospace;color:#e6f2ff;background:rgba(6,14,24,.6);border-left:3px solid #5aa8ff;border-radius:6px;padding:6px 10px}' +
+        '#cvIdx{position:fixed;z-index:12;left:50%;top:44%;transform:translate(150px,-50%);display:none;pointer-events:none;text-align:center;font:900 22px/1 ui-monospace,monospace}' +
+        '#cvIdx small{display:block;font-size:10px;letter-spacing:.12em;margin-top:3px}' +
+        '#cvBoard{position:fixed;z-index:12;right:calc(16px + env(safe-area-inset-right));top:calc(302px + env(safe-area-inset-top));display:none;pointer-events:none;' +
+        'font:700 11px/1.3 ui-monospace,Menlo,monospace;color:#e6f2ff;background:rgba(6,14,24,.72);border:1px solid rgba(120,180,255,.4);border-radius:8px;padding:7px 9px}' +
+        '#cvBoard .row{display:flex;gap:3px;margin-top:5px}#cvBoard .sq{width:20px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#111;font-weight:900}' +
+        '@media (orientation: landscape) and (max-height: 500px){#cvRadio{top:auto;bottom:calc(120px + env(safe-area-inset-bottom))}#cvBoard{top:calc(60px + env(safe-area-inset-top))}}';
+      document.head.appendChild(css);
+      CV2.radioEl = document.createElement('div'); CV2.radioEl.id = 'cvRadio'; document.body.appendChild(CV2.radioEl);
+      CV2.idxEl = document.createElement('div'); CV2.idxEl.id = 'cvIdx'; document.body.appendChild(CV2.idxEl);
+      CV2.boardEl = document.createElement('div'); CV2.boardEl.id = 'cvBoard'; document.body.appendChild(CV2.boardEl);
+      carrierGroup.rotation.order = 'YXZ';
+      // ---- the wake: a long churned trail behind the stern plus the two Kelvin arms, and a bow wave ----
+      var cv = document.createElement('canvas'); cv.width = 128; cv.height = 512;
+      var c = cv.getContext('2d');
+      for (var i = 0; i < 2600; i++) {
+        var y = Math.random() * 512, cxp = 64 + (Math.random() - 0.5) * (40 + y * 0.16);
+        c.fillStyle = 'rgba(255,255,255,' + (0.05 + Math.random() * 0.25) * (1 - y / 600) + ')';
+        c.beginPath(); c.arc(cxp, y, 1 + Math.random() * 3, 0, Math.PI * 2); c.fill();
+      }
+      var tex = new THREE.CanvasTexture(cv); tex.wrapT = THREE.RepeatWrapping;
+      function wakeMesh(w, len, op) {
+        var g = new THREE.PlaneGeometry(w, len); g.rotateX(-Math.PI / 2); g.translate(0, 0, -len / 2);
+        var m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: op, depthWrite: false, fog: true }));
+        m.renderOrder = 1; return m;
+      }
+      function makeWake(scale) {
+        var g = new THREE.Group();
+        var main = wakeMesh(70 * scale, 1100 * scale, 0.62); g.add(main);
+        [-1, 1].forEach(function(s) { var arm = wakeMesh(16 * scale, 650 * scale, 0.32); arm.rotation.y = s * 0.34; g.add(arm); });
+        scene.add(g);
+        return { g: g, main: main };
+      }
+      CV2.wake = makeWake(1);
+      CV2.bow = [];
+      for (var b = 0; b < 10; b++) {
+        var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeGlowTexture, color: 0xf4f8fa, transparent: true, opacity: 0.55, depthWrite: false, fog: true }));
+        scene.add(sp); CV2.bow.push({ s: sp, side: b % 2 ? 1 : -1, k: Math.floor(b / 2) });
+      }
+      // ---- two escorting destroyers, in station on the carrier ----
+      var grey = new THREE.MeshStandardMaterial({ color: 0x6f777f, roughness: 0.7, metalness: 0.2 }), dark = new THREE.MeshStandardMaterial({ color: 0x3b4046, roughness: 0.7, metalness: 0.2 });
+      function destroyer() {
+        var g = new THREE.Group(), D = WATER_LEVEL;
+        var hull = new THREE.Shape(); hull.moveTo(-7, -70); hull.lineTo(7, -70); hull.lineTo(8, 30); hull.quadraticCurveTo(6, 62, 0, 82); hull.quadraticCurveTo(-6, 62, -8, 30); hull.closePath();
+        var hg = new THREE.ExtrudeGeometry(hull, { depth: 9, bevelEnabled: false }); hg.rotateX(-Math.PI / 2); hg.translate(0, D - 3, 0);
+        g.add(new THREE.Mesh(hg, grey));
+        var sup = new THREE.Mesh(new THREE.BoxGeometry(11, 9, 34), grey); sup.position.set(0, D + 10.5, 6); g.add(sup);
+        var br = new THREE.Mesh(new THREE.BoxGeometry(12, 4, 10), dark); br.position.set(0, D + 16.5, 18); g.add(br);
+        var mast = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.9, 18, 6), dark); mast.position.set(0, D + 26, 8); g.add(mast);
+        var funnel = new THREE.Mesh(new THREE.BoxGeometry(5, 7, 8), dark); funnel.position.set(0, D + 18, -10); g.add(funnel);
+        var gun = new THREE.Mesh(new THREE.BoxGeometry(4, 2.5, 5), grey); gun.position.set(0, D + 7.3, 52); g.add(gun);
+        var barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 7, 6), dark); barrel.rotation.x = Math.PI / 2 - 0.1; barrel.position.set(0, D + 7.8, 57); g.add(barrel);
+        var heli = new THREE.Mesh(new THREE.BoxGeometry(13, 0.4, 18), dark); heli.position.set(0, D + 6.2, -58); g.add(heli);
+        g.traverse(function(o) { if (o.isMesh) o.castShadow = true; });
+        scene.add(g);
+        return { g: g, wake: makeWake(0.35) };
+      }
+      [{ u: -1700, v: 900 }, { u: 2300, v: -1100 }].forEach(function(st) { var d = destroyer(); d.u = st.u; d.v = st.v; CV2.escorts.push(d); });
+      // ---- the plane-guard helicopter, hovering off the starboard quarter during flight ops ----
+      try {
+        var hm = awCloneBody(heliBody, new Map([[matWhite, AWM.navy], [matRed, awMat(0xd9641c, 0.6, 0.1)], [matWingWhite, AWM.navyWing]]));
+        hm.scale.setScalar(1.4); scene.add(hm); CV2.helo = hm;
+      } catch (e) { CV2.helo = null; }
+      CV2.prev = { x: CARRIER.x, z: CARRIER.z, yaw: CARRIER.yaw };
+      // put her on the track
+      var p0 = cv2Pose(CV2.s); CARRIER.x = p0.x; CARRIER.z = p0.z; CARRIER.yaw = p0.yaw; cv2ApplyPose(0);
+      CV2.prev = { x: CARRIER.x, z: CARRIER.z, yaw: CARRIER.yaw };
+    })();
+    function cv2ApplyPose(dt) {
+      CV_F.x = Math.sin(CARRIER.yaw); CV_F.z = Math.cos(CARRIER.yaw);
+      CV_S.x = -Math.cos(CARRIER.yaw); CV_S.z = Math.sin(CARRIER.yaw);
+      carrierGroup.position.set(CARRIER.x, CV2.heave, CARRIER.z);
+      carrierGroup.rotation.set(CV2.pitch, CARRIER.yaw, CV2.roll);
+      CARRIER.deckY = CV2.base + CV2.heave;
+      window.__carrierOutlineWorld = CV_DECK.map(function(p) { return carrierToWorld(p[0], p[1]); });
+      // wake trails the stern; escorts keep station
+      var st = carrierToWorld(-170, 0);
+      CV2.wake.g.position.set(st.x, WATER_LEVEL + 0.25, st.z); CV2.wake.g.rotation.y = CARRIER.yaw;
+      CV2.wake.main.material.map.offset.y = (CV2.t * 0.012) % 1;
+      CV2.escorts.forEach(function(E, i) {
+        var w = carrierToWorld(E.u, E.v);
+        E.g.position.set(w.x, Math.sin(CV2.t * 0.7 + i * 2) * CV2.heave * 0.6, w.z);
+        E.g.rotation.set(Math.sin(CV2.t * 0.55 + i) * CV2.pitch * 2.5, CARRIER.yaw, Math.sin(CV2.t * 0.45 + i) * CV2.roll * 2);
+        var es = carrierToWorld(E.u - 72, E.v);
+        E.wake.g.position.set(es.x, WATER_LEVEL + 0.2, es.z); E.wake.g.rotation.y = CARRIER.yaw;
+      });
+      CV2.bow.forEach(function(B) {
+        var w = carrierToWorld(162 - B.k * 22, B.side * (10 + B.k * 6));
+        var pulse = 0.5 + 0.5 * Math.sin(CV2.t * 1.3 + B.k);
+        B.s.position.set(w.x, WATER_LEVEL + 1.5 + pulse * 1.5, w.z);
+        var sz = 14 + B.k * 8 + pulse * 6; B.s.scale.set(sz, sz * 0.45, 1);
+        B.s.material.opacity = 0.5 - B.k * 0.08;
+      });
+      if (CV2.helo) {
+        var hw = carrierToWorld(-120 + Math.sin(CV2.t * 0.2) * 20, 260);
+        CV2.helo.position.set(hw.x, CARRIER.deckY + 55 + Math.sin(CV2.t * 0.9) * 2, hw.z);
+        CV2.helo.rotation.set(0, CARRIER.yaw + Math.PI, Math.sin(CV2.t * 0.6) * 0.04);
+      }
+    }
+    var _cv2V = new THREE.Vector3();
+    // steam along the track, move the deck with the sea, and carry everything that's on it
+    function cv2Move(dt) {
+      CV2.t += dt;
+      CV2.s += CV2.v * dt;
+      var P = cv2Pose(CV2.s), prev = CV2.prev;
+      // sea state from the weather: calm = a gentle swell, storm = the deck moves metres
+      var sea = typeof currentWind === 'number' ? currentWind : 0;
+      CV2.heave = (0.25 + 1.9 * sea) * Math.sin(CV2.t * 0.68) + (0.1 + 0.6 * sea) * Math.sin(CV2.t * 1.31 + 1);
+      CV2.pitch = (0.0025 + 0.011 * sea) * Math.sin(CV2.t * 0.52 + 0.7);
+      CV2.roll = (0.002 + 0.012 * sea) * Math.sin(CV2.t * 0.41 + 2.1);
+      var dyaw = Math.atan2(Math.sin(P.yaw - prev.yaw), Math.cos(P.yaw - prev.yaw));
+      CV2.yawRate = dt > 0 ? dyaw / dt : 0;
+      CARRIER.x = P.x; CARRIER.z = P.z; CARRIER.yaw = P.yaw;
+      cv2ApplyPose(dt);
+      // carry: anything resting on the deck moves (and turns) with the ship
+      var c = Math.cos(dyaw), s = Math.sin(dyaw);
+      function carry(p) {
+        var rx = p.x - prev.x, rz = p.z - prev.z;
+        p.x = P.x + rx * c + rz * s; p.z = P.z - rx * s + rz * c;
+      }
+      var onDeck = !crashing && !cvState.cat && (cvState.arrest || (wasGrounded && isOverCarrierDeck(position.x, position.z) && position.y < CARRIER.deckY + 4));
+      if (onDeck) {
+        carry(position); heading += dyaw;
+        position.y = Math.max(position.y, CARRIER.deckY + PLANE_GROUND_OFFSET);
+        if (wasGrounded && !cvState.arrest) position.y = CARRIER.deckY + PLANE_GROUND_OFFSET;
+        carry(camPos);
+        plane.position.copy(position);
+      }
+      if (typeof AW !== 'undefined' && AW.list) AW.list.forEach(function(a) {
+        if (!a.alive || a.state === 'catwait' || a.state === 'cat' || a.state === 'stroke') return;
+        if (Math.abs(a.pos.y - (prev.deckY || CARRIER.deckY) - PLANE_GROUND_OFFSET) > 4 || !isOverCarrierDeck(a.pos.x, a.pos.z)) return;
+        carry(a.pos); a.heading += dyaw; a.pos.y = CARRIER.deckY + PLANE_GROUND_OFFSET;
+        if (a.mesh) { a.mesh.position.copy(a.pos); a.mesh.rotation.y = a.heading; }
+      });
+      CV2.prev = { x: P.x, z: P.z, yaw: P.yaw, deckY: CARRIER.deckY };
+      for (var i = CV2.radio.length - 1; i >= 0; i--) { CV2.radio[i].t -= dt; if (CV2.radio[i].t <= 0) { CV2.radio.splice(i, 1); cv2RadioRender(); } }
+      if (CV2.radio.length && Math.random() < dt * 4) cv2RadioRender();
+    }
+    // ---- Marshal, Paddles and the grade ----
+    var CV2_GRADE = {
+      '_OK_': { col: '#2ecc40', pts: 5, txt: 'OK — UNDERLINE' }, 'OK': { col: '#2ecc40', pts: 4, txt: 'OK' }, '(OK)': { col: '#ffdc00', pts: 3, txt: 'FAIR' },
+      'B': { col: '#4aa3ff', pts: 2.5, txt: 'BOLTER' }, '—': { col: '#a0622d', pts: 2, txt: 'NO GRADE' }, 'WO': { col: '#bbbbbb', pts: 1, txt: 'WAVE-OFF' }, 'C': { col: '#ff4136', pts: 0, txt: 'CUT' }
+    };
+    function cv2Vapp() { return TAKEOFF_SPEED * 1.28; }
+    function cv2Post(g, comments, wire) {
+      CV2.greenie.push({ g: g, c: comments, w: wire, at: Date.now() });
+      if (CV2.greenie.length > 12) CV2.greenie.shift();
+      try { localStorage.setItem('gp-greenie-v1', JSON.stringify(CV2.greenie)); } catch (e) {}
+      var G = CV2_GRADE[g];
+      cv2Say('PADDLES', '<span style="color:' + G.col + '">' + g + '</span>' + (wire ? ' · ' + wire + '-wire' : '') + (comments ? ' · ' + comments : ''), G.col);
+      samToast('LSO GRADE: ' + G.txt + (wire ? ' · ' + wire + '-WIRE' : ''), G.col, 3.2);
+      CV2.boardT = 12;
+    }
+    function cv2BoardRender() {
+      var gpa = CV2.greenie.length ? CV2.greenie.reduce(function(a, p) { return a + CV2_GRADE[p.g].pts; }, 0) / CV2.greenie.length : 0;
+      if (!CV2.greenie.length) { CV2.boardEl.innerHTML = 'GREENIE BOARD<div style="opacity:.75;margin-top:4px">no graded passes yet</div>'; return; }
+      CV2.boardEl.innerHTML = 'GREENIE BOARD · GPA ' + gpa.toFixed(2) + '<div class="row">' + CV2.greenie.map(function(p) {
+        var G = CV2_GRADE[p.g];
+        return '<div class="sq" style="background:' + G.col + (p.g === '_OK_' ? ';box-shadow:inset 0 -3px 0 #0b5' : '') + '">' + (p.w || '') + '</div>';
+      }).join('') + '</div>' + (CV2.greenie.length ? '<div style="margin-top:4px;opacity:.8">LAST: ' + CV2.greenie[CV2.greenie.length - 1].g + ' ' + (CV2.greenie[CV2.greenie.length - 1].c || '') + '</div>' : '');
+    }
+    // runs inside carrierUpdate with the approach geometry already worked out
+    function cv2Approach(dt, land, toAim, hAbove, aligned, dist) {
+      var L = CV2.lso;
+      // Marshal check-in
+      if (dist < 12000 && dist > 3000 && !wasGrounded && !CV2.said.marshal && cvHookEligible()) {
+        CV2.said.marshal = true;
+        var case3 = (typeof cityNightFactor === 'function' && cityNightFactor() > 0.5) || currentRainIntensity > 0.4 || currentFogDensity > 0.003;
+        cv2Say('MARSHAL', 'CV-71, ' + (case3 ? 'CASE III — fly the needles' : 'CASE I recovery') + ', BRC ' + String(cv2Brc()).padStart(3, '0') + ', expect 3-wire. Deck is moving ' + (CV2.heave > 1 || (currentWind || 0) > 0.4 ? 'a lot' : 'gently') + '.', '#ffd27a');
+      }
+      if (dist > 15000) CV2.said.marshal = false;
+      var inGroove = !wasGrounded && toAim > -40 && toAim < 1600 && Math.abs(land.lat) < 300 && aligned > 0.6 && !crashing && cvHookEligible();
+      if (!inGroove) {
+        // passed the ship without trapping after a wave-off / or broke off
+        if (L && !wasGrounded && (toAim < -60 || dist > 3500)) {
+          if (L.waveoff && !L.graded) cv2Post('WO', L.waveWhy || '', 0);
+          CV2.lso = null;
+        }
+        CV2.idxEl.style.display = 'none';
+        return;
+      }
+      if (!L) L = CV2.lso = { segs: { X: 0, IM: 0, IC: 0, AR: 0 }, notes: [], callT: 1.2, ball: 0, waveoff: false, graded: false };
+      var seg = toAim > 900 ? 'X' : toAim > 450 ? 'IM' : toAim > 150 ? 'IC' : 'AR';
+      var gs = THREE.MathUtils.radToDeg(Math.atan2(hAbove, Math.max(toAim, 1)));
+      var err = gs - CV_GLIDE_DEG, lat = land.lat, vA = cv2Vapp(), sp = speed / vA - 1;
+      // AoA indexer: on speed is the doughnut
+      var idx = sp > 0.07 ? ['▼', 'FAST', '#ffd36a'] : sp < -0.07 ? ['▲', 'SLOW', '#ff6a4a'] : ['●', 'ON SPEED', '#7dff8a'];
+      CV2.idxEl.style.display = 'block'; CV2.idxEl.style.color = idx[2];
+      CV2.idxEl.innerHTML = idx[0] + '<small>' + idx[1] + ' · ' + Math.round(vA * 3.6) + '</small>';
+      // log deviations by segment: 1 = a little, 2 = a lot
+      function note(code, big) {
+        var k = code + seg, cur = L.notes.filter(function(n) { return n.k === k; })[0];
+        if (!cur) L.notes.push({ k: k, code: code, seg: seg, big: big ? 2 : 1 });
+        else if (big) cur.big = 2;
+      }
+      if (err > 0.6) note('HI', err > 1.2); else if (err < -0.6) note('LO', err < -1.1);
+      if (lat > 4) note('LUR', lat > 9); else if (lat < -4) note('LUL', lat < -9);   // lined up right/left of centreline
+      if (sp > 0.07) note('F', sp > 0.14); else if (sp < -0.07) note('SLO', sp < -0.14);
+      // the calls
+      if (!L.ball && toAim < 1300) {
+        L.ball = 1;
+        cv2Say('PADDLES', '"' + (PLANE_NAMES_SHORT() || 'Hornet') + ', three-quarter mile, call the ball."', '#9fd0ff');
+        setTimeout(function() { cv2Say('YOU', '"' + (PLANE_NAMES_SHORT() || 'Hornet') + ' ball, ' + (fuel / 10).toFixed(1) + '."', '#cfe8ff'); setTimeout(function() { cv2Say('PADDLES', '"Roger ball."', '#9fd0ff'); }, 900); }, 900);
+      }
+      L.callT -= dt;
+      if (L.ball && L.callT <= 0 && !L.waveoff) {
+        var call = null, voice = null;
+        if (err < -1.1) { call = '"Power! Power!"'; voice = 'power'; }
+        else if (err < -0.6) { call = '"You\'re a little low."'; }
+        else if (err > 1.1) { call = '"You\'re high, ease it down."'; }
+        else if (lat < -5) { call = '"Right for lineup."'; voice = 'right for lineup'; }
+        else if (lat > 5) { call = '"Come left."'; voice = 'come left'; }
+        else if (sp > 0.1) { call = '"Easy with it — you\'re fast."'; }
+        else if (sp < -0.1) { call = '"You\'re slow — a little power."'; }
+        if (call) { cv2Say('PADDLES', call, '#9fd0ff', voice); L.callT = 1.7; }
+      }
+      // wave-off: unsafe in close, a fouled deck, or the ship turning
+      var fouled = typeof AW !== 'undefined' && ((AW.wire && (AW.wire.hold || 0) > 0) || AW.list.some(function(a) { return a.alive && a.state === 'trap'; }));
+      var turning = Math.abs(CV2.yawRate) > 0.004;
+      if (!L.waveoff && toAim < 420 && toAim > 20 && (err < -1.6 || err > 2.4 || Math.abs(lat) > 14 || fouled || turning)) {
+        L.waveoff = true; L.waveWhy = fouled ? 'FOUL DECK' : turning ? 'SHIP TURNING' : err < -1.6 ? 'LOW' : err > 2.4 ? 'HIGH' : 'LINEUP';
+        cv2Say('PADDLES', '"WAVE OFF, WAVE OFF!" (' + L.waveWhy + ')', '#ff6a4a', 'wave off, wave off');
+        samToast('WAVE OFF — FULL POWER, CLIMB', '#ff4b3a', 2.4);
+      }
+      if (L.waveoff) carrierGroup.userData.lens.waveOffMat.color.setHex(Math.floor(CV2.t * 5) % 2 ? 0xff1a1a : 0x330000);
+      // ramp strike: too low crossing the round-down at the stern
+      if (land.s > -25 && land.s < 3 && Math.abs(lat) < 22 && position.y < CARRIER.deckY + 0.9 && !wasGrounded && !crashing) {
+        samToast('RAMP STRIKE', '#ff3b30', 3);
+        cv2Say('PADDLES', '"Ramp strike! Ramp strike!"', '#ff4b3a', 'ramp strike');
+        cv2Post('C', 'RAMP', 0);
+        CV2.lso = null;
+        triggerCrash(false);
+      }
+    }
+    function PLANE_NAMES_SHORT() {
+      var n = { interceptor: 'Interceptor', voyager: 'Voyager', rocket: 'Rocket', stealth: 'Nighthawk', seaplane: 'Albatross' }[selectedPlaneType];
+      return n || 'Hornet';
+    }
+    // called by carrierUpdate at the moment the hook catches a wire (or skips)
+    function cv2OnTrap(wire) {
+      var L = CV2.lso;
+      if (!L) { cv2Post(wire === 3 ? 'OK' : '(OK)', '', wire); return; }
+      L.graded = true;
+      var d = 0, comments = [];
+      L.notes.forEach(function(n) {
+        var w = (n.seg === 'IC' || n.seg === 'AR') ? 1.5 : 1;
+        d += n.big * w;
+        comments.push((n.big > 1 ? n.code : '(' + n.code + ')') + n.seg);
+      });
+      var g;
+      if (L.waveoff) { g = 'C'; comments.unshift('LANDED ON WAVE-OFF'); }
+      else if (wire === 1 || d >= 7) g = '—';
+      else if (d >= 3) g = '(OK)';
+      else if (wire === 3 && d === 0) g = '_OK_';
+      else g = 'OK';
+      cv2Post(g, comments.slice(0, 5).join(' '), wire);
+      CV2.lso = null;
+    }
+    function cv2OnBolter(why) {
+      cv2Say('PADDLES', '"Bolter, bolter, bolter!"' + (why ? ' (' + why + ')' : ''), '#4aa3ff', 'bolter');
+      if (CV2.lso) { CV2.lso.graded = true; cv2Post('B', why || '', 0); CV2.lso = null; }
+    }
+    function cv2Frame(dt) {
+      // greenie board on deck (and for a while after a pass)
+      if (CV2.boardT > 0) CV2.boardT -= dt;
+      var show = started && (cvState.onDeck || CV2.boardT > 0);
+      if (show && !CV2.boardShown) cv2BoardRender();
+      CV2.boardShown = show;
+      CV2.boardEl.style.display = show ? 'block' : 'none';
+      if (!started) { CV2.radioEl.style.display = 'none'; CV2.idxEl.style.display = 'none'; }
+    }
+
+    /* ============================================================
+       BASE BUILDING — spend your coins on the home field (BASE button)
+       West of runway 18/36 the engineers have graded a site. Build on it:
+         · SAM BATTERIES (2): radar-guided missiles that kill cruise missiles and enemy aircraft out to 7 km
+           (10 km with the search radar)
+         · CIWS GUNS (3): radar-laid gatlings that hose anything inside 2 km
+         · SEARCH RADAR: early warning of raids, raiders on the chart from far out, longer SAM range
+         · MAINTENANCE HANGAR: stop at home and the crew restores your airframe completely
+         · FUEL FARM: triple-speed refuelling at home
+         · CROSSWIND RUNWAY 09/27: a second runway for when the wind is across 18/36
+       Once you've built anything, the enemy notices: every 6-9 minutes a wave of CRUISE MISSILES
+       comes in low for the base. Your defences (and you) can shoot them down; a missile that gets
+       through knocks out a building until you pay to repair it. A DRILL button sends one now.
+       Everything you build is saved in this browser.
+       ============================================================ */
+    var BASE_KEY = 'gp-base-v1';
+    var BASE = { built: {}, dmg: {}, objs: {}, btn: null, panel: null, raidT: 420, wave: 0, missiles: [], shots: [], tracers: null, warnT: 0, t: 0, hangarSaid: 0, radarSaid: false };
+    var BASE_DEFS = [
+      { id: 'sam1', kind: 'sam', name: 'SAM BATTERY A', cost: 1500, x: -200, z: -180 },
+      { id: 'sam2', kind: 'sam', name: 'SAM BATTERY B', cost: 1500, x: -200, z: 330 },
+      { id: 'ciws1', kind: 'ciws', name: 'CIWS GUN 1', cost: 800, x: -95, z: -110 },
+      { id: 'ciws2', kind: 'ciws', name: 'CIWS GUN 2', cost: 800, x: -95, z: 190 },
+      { id: 'ciws3', kind: 'ciws', name: 'CIWS GUN 3', cost: 800, x: -330, z: 80 },
+      { id: 'radar', kind: 'radar', name: 'SEARCH RADAR', cost: 1000, x: -440, z: 160 },
+      { id: 'hangar', kind: 'hangar', name: 'MAINTENANCE HANGAR', cost: 1200, x: -540, z: 340 },
+      { id: 'fuel', kind: 'fuel', name: 'FUEL FARM', cost: 600, x: -560, z: -140 },
+      { id: 'xwind', kind: 'runway', name: 'CROSSWIND RUNWAY 09/27', cost: 2000, x: -340, z: -360 }
+    ];
+    try { var _bs = JSON.parse(localStorage.getItem(BASE_KEY) || 'null'); if (_bs) { BASE.built = _bs.built || {}; BASE.dmg = _bs.dmg || {}; } } catch (e) {}
+    function baseSave() { try { localStorage.setItem(BASE_KEY, JSON.stringify({ built: BASE.built, dmg: BASE.dmg })); } catch (e) {} }
+    function baseDef(id) { for (var i = 0; i < BASE_DEFS.length; i++) if (BASE_DEFS[i].id === id) return BASE_DEFS[i]; return null; }
+    function baseLive(id) { return BASE.built[id] && !BASE.dmg[id]; }
+    function baseAny(kind) { return BASE_DEFS.some(function(d) { return d.kind === kind && baseLive(d.id); }); }
+    function baseW(d) { return { x: RUNWAY_CENTER_X + d.x, z: RUNWAY_CENTER_Z + d.z }; }
+    var BASE_M = {
+      sand: new THREE.MeshStandardMaterial({ color: 0x8a8370, roughness: 0.9 }), olive: new THREE.MeshStandardMaterial({ color: 0x55603f, roughness: 0.75, metalness: 0.2 }),
+      white: new THREE.MeshStandardMaterial({ color: 0xe9ecef, roughness: 0.5, metalness: 0.1 }), dark: new THREE.MeshStandardMaterial({ color: 0x2b3036, roughness: 0.6, metalness: 0.4 }),
+      grey: new THREE.MeshStandardMaterial({ color: 0x7c848c, roughness: 0.6, metalness: 0.4 })
+    };
+    function baseBox(w, h, d, m, x, y, z) { var b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x || 0, y || 0, z || 0); b.castShadow = b.receiveShadow = true; return b; }
+    function baseCyl(r0, r1, h, m, x, y, z, seg) { var b = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, h, seg || 12), m); b.position.set(x || 0, y || 0, z || 0); b.castShadow = true; return b; }
+    // ---- the buildings ----
+    function baseModel(d) {
+      var g = new THREE.Group(), o = { g: g };
+      // every site gets a concrete pad and a ring of sandbags
+      g.add(baseBox(d.kind === 'hangar' ? 46 : d.kind === 'fuel' ? 40 : 22, 0.3, d.kind === 'hangar' ? 46 : d.kind === 'fuel' ? 30 : 22, BASE_M.grey, 0, 0.15, 0));
+      if (d.kind === 'sam') {
+        for (var k = 0; k < 10; k++) { var a = k / 10 * Math.PI * 2; g.add(baseBox(3, 1.2, 1.2, BASE_M.sand, Math.cos(a) * 10, 0.9, Math.sin(a) * 10)).rotation.y = -a; }
+        var mount = new THREE.Group(); mount.position.y = 1.2; g.add(mount);
+        mount.add(baseCyl(1.6, 2, 1.2, BASE_M.olive, 0, 0.6, 0));
+        var rack = new THREE.Group(); rack.position.y = 2.2; mount.add(rack);
+        rack.add(baseBox(4.2, 0.4, 6.4, BASE_M.olive, 0, 0, 0));
+        [-1.2, 1.2].forEach(function(x) { [0.45, 1.25].forEach(function(y) { var t = baseCyl(0.38, 0.38, 6, BASE_M.white, x, y, 0.4, 10); t.rotation.x = Math.PI / 2; rack.add(t); }); });
+        rack.rotation.x = -0.6;
+        o.mount = mount; o.rack = rack; o.cd = 0;
+        // its fire-control radar
+        g.add(baseBox(2.4, 2.2, 2.4, BASE_M.olive, -6.5, 1.4, -6.5));
+        var fc = baseBox(2.6, 1.8, 0.25, BASE_M.dark, -6.5, 3.4, -6.5); g.add(fc); o.fc = fc;
+      } else if (d.kind === 'ciws') {
+        g.add(baseCyl(1.4, 1.8, 3, BASE_M.grey, 0, 1.5, 0));
+        var tur = new THREE.Group(); tur.position.y = 3.2; g.add(tur);
+        tur.add(baseCyl(1.1, 1.3, 1.4, BASE_M.white, 0, 0.7, 0));
+        var dome = new THREE.Mesh(new THREE.SphereGeometry(1.15, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), BASE_M.white); dome.position.y = 1.4; dome.scale.y = 1.9; tur.add(dome);
+        var gun = new THREE.Group(); gun.position.set(0, 0.9, 0.9); tur.add(gun);
+        for (var bb = 0; bb < 6; bb++) { var br = baseCyl(0.07, 0.07, 2.6, BASE_M.dark, Math.cos(bb) * 0.18, Math.sin(bb) * 0.18, 1.3, 6); br.rotation.x = Math.PI / 2; gun.add(br); }
+        o.tur = tur; o.gun = gun; o.heat = 0;
+        o.flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, color: 0xffd080, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending })); o.flash.scale.set(4, 4, 1); gun.add(o.flash); o.flash.position.z = 2.8;
+      } else if (d.kind === 'radar') {
+        for (var l = 0; l < 4; l++) { var la = l / 4 * Math.PI * 2 + Math.PI / 4; g.add(baseCyl(0.2, 0.35, 22, BASE_M.grey, Math.cos(la) * 2.4, 11, Math.sin(la) * 2.4, 5)); }
+        g.add(baseBox(6, 1, 6, BASE_M.grey, 0, 22.5, 0));
+        var head = new THREE.Group(); head.position.y = 23.5; g.add(head);
+        var ant = baseBox(12, 4.2, 0.6, BASE_M.white, 0, 2.4, 0); ant.rotation.x = -0.25; head.add(ant);
+        head.add(baseCyl(0.5, 0.5, 2, BASE_M.dark, 0, 0.8, 0));
+        g.add(baseBox(8, 3.5, 5, BASE_M.olive, 7, 1.9, 0));
+        o.head = head;
+      } else if (d.kind === 'hangar') {
+        var hg = warHangarModel(34, 40); hg.traverse(function(c) { if (c.isMesh && c.material === SAM_M.roof) c.material = BASE_M.grey; });
+        g.add(warBake(hg));
+      } else if (d.kind === 'fuel') {
+        [[-12, -6], [0, -6], [12, -6], [-6, 7], [6, 7]].forEach(function(p) { var t = stBuildFuelTank(); t.position.set(p[0], 0, p[1]); g.add(t); });
+      } else if (d.kind === 'runway') {
+        g = o.g = new THREE.Group();
+        var st = BASE.strip;
+        regStripRibbon(st, '#3a3d40', 'rgba(240,240,240,.85)');
+        o.ribbon = scene.children[scene.children.length - 1];
+        return o;
+      }
+      return o;
+    }
+    // the crosswind runway reserves its graded strip from the start; it's only usable once built
+    BASE.strip = REG_STRIPS.filter(function(s) { return s.kind === 'base'; })[0];
+    function basePlace(d) {
+      if (BASE.objs[d.id]) return;
+      var o = baseModel(d), w = baseW(d);
+      if (d.kind !== 'runway') { o.g.position.set(w.x, getTerrainHeight(w.x, w.z), w.z); o.g.rotation.y = Math.PI / 2; scene.add(o.g); }
+      o.mats = []; (o.ribbon || o.g).traverse(function(c) { if (c.isMesh) o.mats.push([c, c.material]); });
+      BASE.objs[d.id] = o;
+      if (d.kind === 'runway' && BASE.strip) BASE.strip.locked = false;
+      baseShowDamage(d.id);
+    }
+    function baseShowDamage(id) {
+      var o = BASE.objs[id]; if (!o) return;
+      o.mats.forEach(function(e) { e[0].material = BASE.dmg[id] ? SAM_M.charred : e[1]; });
+      if (baseDef(id).kind === 'runway' && BASE.strip) BASE.strip.locked = !!BASE.dmg[id];
+    }
+    BASE_DEFS.forEach(function(d) { if (BASE.built[d.id]) basePlace(d); });
+    // ---- UI ----
+    (function baseUi() {
+      var css = document.createElement('style');
+      css.textContent = '#baseBtn{position:fixed;z-index:12;left:calc(170px + env(safe-area-inset-left));bottom:calc(296px + env(safe-area-inset-bottom));width:64px;height:34px;box-sizing:border-box;border-radius:11px;display:flex;align-items:center;justify-content:center;' +
+        'font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#d6f5d0;background:rgba(14,40,14,.6);border:2px solid #7dd36a;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}' +
+        '#baseBtn.hidden{display:none}@media (orientation: landscape) and (max-height: 500px){#baseBtn{left:calc(318px + env(safe-area-inset-left));bottom:auto;top:calc(80px + env(safe-area-inset-top));height:30px;font-size:9.5px}}' +
+        '#basePanel{position:fixed;z-index:30;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;box-sizing:border-box;display:none;' +
+        'font:600 12px/1.4 ui-monospace,Menlo,monospace;color:#e6f2e2;background:rgba(10,18,10,.94);border:1px solid #7dd36a;border-radius:14px;padding:14px}' +
+        '#basePanel h3{margin:0 0 4px;font-size:14px;letter-spacing:.14em;color:#9be37a}#basePanel .it{display:flex;align-items:center;gap:8px;padding:8px 10px;margin:5px 0;border-radius:10px;background:rgba(255,255,255,.06)}' +
+        '#basePanel .it b{display:block;letter-spacing:.06em}#basePanel .it small{opacity:.7}#basePanel button{margin-left:auto;font:800 11px ui-monospace,monospace;padding:7px 10px;border-radius:8px;border:1px solid #7dd36a;background:rgba(125,211,106,.15);color:#d6f5d0;cursor:pointer;white-space:nowrap}' +
+        '#basePanel button:disabled{opacity:.4;cursor:default}#basePanel .st{margin-left:auto;color:#7dff9a;font-weight:800}#basePanel .row2{display:flex;gap:8px;margin-top:10px}#basePanel .row2 button{margin:0;flex:1}';
+      document.head.appendChild(css);
+      BASE.btn = document.createElement('div'); BASE.btn.id = 'baseBtn'; BASE.btn.className = 'hidden'; BASE.btn.textContent = 'BASE';
+      BASE.btn.addEventListener('click', function(e) { e.preventDefault(); basePanel(BASE.panel.style.display !== 'block'); });
+      document.body.appendChild(BASE.btn);
+      BASE.panel = document.createElement('div'); BASE.panel.id = 'basePanel'; document.body.appendChild(BASE.panel);
+      BASE.panel.addEventListener('click', function(e) {
+        var b = e.target.closest('button'); if (!b) return;
+        var act = b.getAttribute('data-a'), id = b.getAttribute('data-id');
+        if (act === 'close') { basePanel(false); return; }
+        if (act === 'drill') { BASE.raidT = 15; basePanel(false); samToast('DRILL — A RAID WILL BE LAUNCHED AT THE BASE IN 15 s', '#ffd27a', 2.6); return; }
+        var d = baseDef(id); if (!d) return;
+        var price = act === 'repair' ? Math.round(d.cost * 0.3) : d.cost;
+        if (coins < price) { samToast('NOT ENOUGH COINS — ◆' + price + ' NEEDED', '#ff7a5a', 2); return; }
+        coins -= price; lastCoinSaveAt = -999; maybeSaveCoins(elapsedSeconds);
+        if (act === 'repair') { BASE.dmg[id] = false; baseShowDamage(id); samToast(d.name + ' REPAIRED', '#7dff9a', 2); }
+        else { BASE.built[id] = true; basePlace(d); samToast(d.name + ' BUILT', '#7dff9a', 2.2); if (BASE.raidT > 420) BASE.raidT = 420; }
+        baseSave(); basePanel(true);
+      });
+    })();
+    var BASE_INFO = { sam: 'Missiles · 7 km (10 km w/ radar)', ciws: 'Gatling · 2 km', radar: 'Early warning · raiders on the chart', hangar: 'Full airframe repair at home', fuel: '3× refuelling at home', runway: '600 m · east-west' };
+    function basePanel(open) {
+      if (!open) { BASE.panel.style.display = 'none'; return; }
+      var n = BASE_DEFS.filter(function(d) { return BASE.built[d.id]; }).length;
+      BASE.panel.innerHTML = '<h3>HOME BASE</h3><div style="opacity:.8">◆ ' + Math.floor(coins) + ' coins · ' + n + '/' + BASE_DEFS.length + ' built' +
+        (n ? ' · next raid ~' + Math.max(0, Math.round(BASE.raidT / 60)) + ' min' : '') + '</div>' +
+        BASE_DEFS.map(function(d) {
+          var r = '<div class="it"><div><b>' + d.name + '</b><small>' + BASE_INFO[d.kind] + '</small></div>';
+          if (!BASE.built[d.id]) r += '<button data-a="build" data-id="' + d.id + '"' + (coins < d.cost ? ' disabled' : '') + '>BUILD ◆' + d.cost + '</button>';
+          else if (BASE.dmg[d.id]) r += '<button data-a="repair" data-id="' + d.id + '"' + (coins < d.cost * 0.3 ? ' disabled' : '') + '>REPAIR ◆' + Math.round(d.cost * 0.3) + '</button>';
+          else r += '<span class="st">✓ ONLINE</span>';
+          return r + '</div>';
+        }).join('') + '<div class="row2">' + (n ? '<button data-a="drill">RAID DRILL</button>' : '') + '<button data-a="close">CLOSE</button></div>';
+      BASE.panel.style.display = 'block';
+    }
+    // ---- the enemy's answer: cruise missiles, low and fast ----
+    function baseMissileModel() {
+      var g = new THREE.Group();
+      var body = baseCyl(0.32, 0.32, 6, BASE_M.dark, 0, 0, 0, 10); body.rotation.x = Math.PI / 2; g.add(body);
+      var nose = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.1, 10), BASE_M.grey); nose.rotation.x = Math.PI / 2; nose.position.z = 3.55; g.add(nose);
+      g.add(baseBox(3.2, 0.08, 0.8, BASE_M.dark, 0, 0, 0.4));
+      g.add(baseBox(0.08, 1.2, 0.6, BASE_M.dark, 0, 0.5, -2.7)); g.add(baseBox(1.4, 0.08, 0.6, BASE_M.dark, 0, 0, -2.7));
+      var fl = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, color: 0xffb060, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })); fl.scale.set(3, 3, 1); fl.position.z = -3.4; g.add(fl);
+      return g;
+    }
+    function baseLaunchRaid() {
+      BASE.wave++;
+      var n = Math.min(6, 1 + Math.floor(BASE.wave / 2) + (Math.random() < 0.5 ? 1 : 0));
+      var from = Math.random() * Math.PI * 2, built = BASE_DEFS.filter(function(d) { return BASE.built[d.id] && !BASE.dmg[d.id]; });
+      for (var i = 0; i < n; i++) {
+        var a = from + (Math.random() - 0.5) * 0.5, r = 15000 + i * 400;
+        var tgt = built.length ? built[Math.floor(Math.random() * built.length)] : null;
+        var tw = tgt ? baseW(tgt) : { x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z };
+        var x = tw.x + Math.sin(a) * r, z = tw.z + Math.cos(a) * r;
+        var g = baseMissileModel();
+        var t = stAddTarget({ kind: 'missile', label: 'CRUISE MISSILE', group: g, hitR: 4, maxHp: 30, bounty: 120 });
+        var M = { t: t, g: g, pos: new THREE.Vector3(x, Math.max(getTerrainHeight(x, z), WATER_LEVEL) + 60, z), tgt: tgt, tx: tw.x, tz: tw.z, v: 235, smokeT: 0 };
+        g.position.copy(M.pos); t.center.copy(M.pos);
+        BASE.missiles.push(M);
+      }
+      BASE.radarSaid = false;
+      if (baseAny('radar')) {
+        var deg = Math.round(((from * 180 / Math.PI) % 360 + 360) % 360);
+        samToast('RADAR: VAMPIRES INBOUND — ' + n + ' CRUISE MISSILE' + (n > 1 ? 'S' : '') + ' BEARING ' + String(Math.round(((Math.atan2(Math.sin(from), -Math.cos(from)) * 180 / Math.PI) + 360) % 360)).padStart(3, '0'), '#ff9a7a', 3.5);
+        if (typeof qolSay === 'function') qolSay('vampires inbound');
+      }
+    }
+    function baseExplode(M, hitBase) {
+      triggerMissileBlast(M.pos.clone());
+      var dd = M.pos.distanceTo(position);
+      if (dd < 3000) playMissileImpactSound();
+      if (dd < 45 && started && !crashing) pvpDamage(50 * (1 - dd / 45), null);
+      scene.remove(M.g);
+      var i = strikeTargets.indexOf(M.t); if (i >= 0) strikeTargets.splice(i, 1);
+      if (hitBase && M.onHit) { M.onHit(M); return; }
+      if (hitBase) {
+        if (M.tgt && BASE.built[M.tgt.id] && !BASE.dmg[M.tgt.id]) {
+          BASE.dmg[M.tgt.id] = true; baseShowDamage(M.tgt.id); baseSave();
+          samToast('BASE HIT — ' + M.tgt.name + ' KNOCKED OUT', '#ff4b3a', 3);
+          stIgniteFire(M.pos.clone(), 10, 60);
+        } else samToast('MISSILE IMPACT ON THE FIELD', '#ff7a5a', 2);
+      }
+    }
+    // ---- our defences: SAM shots and CIWS bursts ----
+    var _bV = new THREE.Vector3(), _bV2 = new THREE.Vector3();
+    function baseThreats() {
+      var list = [];
+      BASE.missiles.forEach(function(M) { if (M.t.alive) list.push({ pos: M.pos, M: M }); });
+      if (typeof RA !== 'undefined' && RA.list) RA.list.forEach(function(b) { if (b.alive && b.state !== 'down' && b.state !== 'roll') list.push({ pos: b.pos, B: b }); });
+      return list;
+    }
+    function baseKill(th, dmg) {
+      if (th.M) { if (th.M.t.alive) { arsHit(th.M.t, dmg, true, false); if (!th.M.t.alive) samToast('SPLASH — CRUISE MISSILE DOWN', '#7dff9a', 1.6); } }
+      else if (th.B) raHit(th.B, dmg, 'sam');
+    }
+    function baseFireSam(o, from, th) {
+      var s = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, color: 0xffe0a0, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+      s.scale.set(5, 5, 1); scene.add(s);
+      var dir = _bV.copy(th.pos).sub(from).normalize();
+      BASE.shots.push({ s: s, pos: from.clone(), vel: dir.clone().multiplyScalar(80).add(new THREE.Vector3(0, 60, 0)), th: th, life: 0, smokeT: 0 });
+      if (from.distanceTo(position) < 3000) playMissileLaunchSound();
+    }
+    function baseDefend(dt) {
+      var threats = baseThreats();
+      var samR = baseAny('radar') ? 10000 : 7000;
+      BASE_DEFS.forEach(function(d) {
+        var o = BASE.objs[d.id]; if (!o || BASE.dmg[d.id]) return;
+        var w = baseW(d), gy = getTerrainHeight(w.x, w.z);
+        if (d.kind === 'radar') { o.head.rotation.y += dt * 1.9; return; }
+        if (d.kind === 'sam') {
+          o.fc.rotation.y += dt * 3;
+          var best = null, bd = samR;
+          threats.forEach(function(th) { var dd = Math.hypot(th.pos.x - w.x, th.pos.z - w.z); if (dd < bd && !BASE.shots.some(function(S) { return S.th.pos === th.pos; })) { bd = dd; best = th; } });
+          o.cd -= dt;
+          if (best) {
+            var want = Math.atan2(best.pos.x - w.x, best.pos.z - w.z) - o.g.rotation.y;
+            o.mount.rotation.y += Math.atan2(Math.sin(want - o.mount.rotation.y), Math.cos(want - o.mount.rotation.y)) * Math.min(1, dt * 3);
+            if (o.cd <= 0) { o.cd = 4.5; baseFireSam(o, _bV2.set(w.x, gy + 5, w.z).clone(), best); }
+          }
+        }
+        if (d.kind === 'ciws') {
+          var tg = null, td = 2000;
+          threats.forEach(function(th) { var dd = th.pos.distanceTo(_bV2.set(w.x, gy + 4, w.z)); if (dd < td) { td = dd; tg = th; } });
+          o.flash.material.opacity = 0;
+          if (tg) {
+            var yaw = Math.atan2(tg.pos.x - w.x, tg.pos.z - w.z) - o.g.rotation.y, el = Math.atan2(tg.pos.y - gy - 4, Math.hypot(tg.pos.x - w.x, tg.pos.z - w.z));
+            o.tur.rotation.y = yaw; o.gun.rotation.x = -el; o.gun.rotation.z += dt * 40;
+            o.flash.material.opacity = Math.random() < 0.6 ? 1 : 0.3;
+            // tracers walk onto the target; hits come in as the range closes
+            if (Math.random() < dt * 30) {
+              var from2 = _bV2.set(w.x, gy + 5, w.z).clone(), to = tg.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 14));
+              baseTracer(from2, to);
+            }
+            if (Math.random() < dt * (2.2 - td / 1200)) baseKill(tg, 18);
+            if (Math.random() < dt * 8 && w && Math.hypot(position.x - w.x, position.z - w.z) < 2500 && typeof wNoise === 'function') wNoise(0.12, 0.05, 'bandpass', 1400, 1.2, 0.005);
+          }
+        }
+      });
+      // SAMs in flight: boost, then proportional-ish homing
+      for (var i = BASE.shots.length - 1; i >= 0; i--) {
+        var S = BASE.shots[i]; S.life += dt;
+        var tgtPos = S.th.pos, alive = S.th.M ? S.th.M.t.alive : (S.th.B && S.th.B.alive && S.th.B.state !== 'down');
+        if (alive) {
+          var want2 = _bV.copy(tgtPos).sub(S.pos).normalize().multiplyScalar(720);
+          S.vel.lerp(want2, Math.min(1, dt * (S.life < 0.8 ? 1.5 : 5)));
+        } else S.vel.y -= 9.8 * dt;
+        S.pos.addScaledVector(S.vel, dt); S.s.position.copy(S.pos);
+        if ((S.smokeT -= dt) <= 0) { S.smokeT = 0.04; samEmitSmoke(S.pos, _bV.set(0, 0.5, 0), 4, 2.5, 0.5, 0.92); }
+        var hit = alive && S.pos.distanceTo(tgtPos) < 28;
+        if (hit || S.life > 14 || S.pos.y < Math.max(getTerrainHeight(S.pos.x, S.pos.z), WATER_LEVEL)) {
+          if (hit) { triggerMissileBlast(S.pos.clone()); if (Math.random() < 0.85) baseKill(S.th, S.th.M ? 1e6 : 220); }
+          scene.remove(S.s); BASE.shots.splice(i, 1);
+        }
+      }
+    }
+    // a pool of tracer streaks
+    (function() {
+      var N = 60, geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 6), 3));
+      BASE.tracers = { m: new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0.9, fog: true })), n: N, i: 0, life: new Float32Array(N) };
+      BASE.tracers.m.frustumCulled = false; scene.add(BASE.tracers.m);
+    })();
+    function baseTracer(a, b) {
+      var T = BASE.tracers, arr = T.m.geometry.attributes.position.array, k = T.i; T.i = (T.i + 1) % T.n;
+      var mid = a.clone().lerp(b, 0.25 + Math.random() * 0.6), end = a.clone().lerp(b, Math.min(1, mid.distanceTo(a) / a.distanceTo(b) + 0.06));
+      arr.set([mid.x, mid.y, mid.z, end.x, end.y, end.z], k * 6); T.life[k] = 0.12;
+      T.m.geometry.attributes.position.needsUpdate = true;
+    }
+    function baseMinimap(ctx, toS, scale) {
+      var radar = baseAny('radar');
+      BASE.missiles.forEach(function(M) {
+        if (!M.t.alive) return;
+        if (!radar && Math.hypot(M.pos.x - position.x, M.pos.z - position.z) > 3000) return;
+        var p = toS(M.pos.x, M.pos.z);
+        ctx.fillStyle = '#ff4b3a'; ctx.beginPath(); ctx.moveTo(p.x, p.y - 4); ctx.lineTo(p.x + 3.5, p.y + 3); ctx.lineTo(p.x - 3.5, p.y + 3); ctx.closePath(); ctx.fill();
+      });
+      if (radar && typeof RA !== 'undefined' && RA.list) RA.list.forEach(function(b) {
+        if (!b.alive || b.state === 'down') return;
+        var p = toS(b.pos.x, b.pos.z); ctx.strokeStyle = '#ff7a5a'; ctx.lineWidth = 1.2; ctx.strokeRect(p.x - 3, p.y - 3, 6, 6);
+      });
+    }
+    function baseUpdate(dt) {
+      BASE.t += dt;
+      var n = BASE_DEFS.filter(function(d) { return BASE.built[d.id]; }).length;
+      BASE.btn.classList.toggle('hidden', !started);
+      if (!started || (typeof HY !== 'undefined' && HY.on)) return;
+      // raids, once there's something worth hitting
+      if (n > 0 && (BASE.raidT -= dt) <= 0) { BASE.raidT = 360 + Math.random() * 180; baseLaunchRaid(); }
+      for (var i = BASE.missiles.length - 1; i >= 0; i--) {
+        var M = BASE.missiles[i];
+        if (!M.t.alive) { baseExplode(M, false); BASE.missiles.splice(i, 1); continue; }
+        if (M.follow) { M.tx = CARRIER.x; M.tz = CARRIER.z; }
+        var dx = M.tx - M.pos.x, dz = M.tz - M.pos.z, d = Math.hypot(dx, dz);
+        // sea-skimming, terrain-following, a pop-up at the end
+        var gnd = Math.max(getTerrainHeight(M.pos.x + dx / d * 200, M.pos.z + dz / d * 200), getTerrainHeight(M.pos.x, M.pos.z), WATER_LEVEL);
+        var wantY = gnd + (d < 1200 ? 20 + (d / 1200) * 180 : 45);
+        if (d < 400) wantY = M.follow ? CARRIER.deckY + 4 : getTerrainHeight(M.tx, M.tz) + 2;
+        M.pos.x += dx / d * M.v * dt; M.pos.z += dz / d * M.v * dt;
+        M.pos.y += (wantY - M.pos.y) * Math.min(1, dt * 1.6);
+        M.g.position.copy(M.pos); M.g.rotation.set(-(wantY - M.pos.y) * 0.01, Math.atan2(dx, dz), 0);
+        M.t.center.copy(M.pos);
+        if ((M.smokeT -= dt) <= 0) { M.smokeT = 0.06; samEmitSmoke(M.pos, _bV.set(0, 0.2, 0), 2.5, 1.6, 0.35, 0.9); }
+        if (!BASE.radarSaid && d < 3500) { BASE.radarSaid = true; if (!baseAny('radar')) samToast('INCOMING! MISSILES ON THE BASE', '#ff4b3a', 2.4); }
+        if (d < (M.follow ? 70 : 25)) { baseExplode(M, true); BASE.missiles.splice(i, 1); }
+      }
+      baseDefend(dt);
+      var T = BASE.tracers, arr = T.m.geometry.attributes.position.array, dirty = false;
+      for (var k = 0; k < T.n; k++) if (T.life[k] > 0) { T.life[k] -= dt; if (T.life[k] <= 0) { arr.fill(0, k * 6, k * 6 + 6); dirty = true; } }
+      if (dirty) T.m.geometry.attributes.position.needsUpdate = true;
+      // services at home: hangar repairs, the fuel farm pumps fast
+      var atHome = wasGrounded && !crashing && Math.abs(speed) < 3 && (isOverRunway(position.x, position.z, 60) || isOnAirportPavement(position.x, position.z) ||
+        (BASE.strip && !BASE.strip.locked && regStripAt(position.x, position.z) === BASE.strip) ||
+        (position.x - RUNWAY_CENTER_X > -700 && position.x - RUNWAY_CENTER_X < 0 && Math.abs(position.z - RUNWAY_CENTER_Z) < 500));
+      if (atHome && baseLive('fuel') && fuel < FUEL_MAX) { fuel = Math.min(FUEL_MAX, fuel + FUEL_REFILL_RATE * 2 * dt); if (fuel >= FUEL_MAX) outOfFuel = false; }
+      if (atHome && baseLive('hangar') && kj.stats && kj.stats.wear) {
+        var key = kjVehKey(), w0 = kj.stats.wear[key];
+        if (w0 !== undefined && w0 < 1) {
+          kj.stats.wear[key] = Math.min(1, w0 + dt * 0.12);
+          if (BASE.t - BASE.hangarSaid > 20) { BASE.hangarSaid = BASE.t; samToast('HANGAR CREW ON IT — RESTORING THE AIRFRAME', '#7dff9a', 2.2); }
+          if (kj.stats.wear[key] >= 1) kjSave();
+        }
+      }
+    }
+
+    /* ============================================================
+       CARRIER STRIKE GROUP 7 — the carrier never sails alone
+         CV-71           the supercarrier and her air wing
+         CG-62 CAPE HOLLIS   Ticonderoga-class guided-missile cruiser: twin Aegis deckhouses,
+                         fore and aft missile cells, two 5-inch guns — the group's air-defence commander
+         DESRON 21       three Arleigh Burke-class destroyers: DDG-118 MARROW, DDG-121 KESTREL,
+                         DDG-124 HALVARD — the outer screen
+         T-AOE 8 SUPPLY HALE fast combat support ship — fuel, ammunition and stores, UNREP rigs
+         SSN-796 TARPON  attack submarine scouting ahead; surfaces now and then
+       Each ship keeps a formation station on the carrier, steering and sailing like a ship (they
+       lag through the turns and catch up). The Aegis ships shoot down anything coming at the group:
+       Standard missiles out to 15 km, Phalanx inside 2. Every 8-11 minutes, while you're near the
+       group, the enemy throws a salvo of anti-ship missiles at the carrier; a hit sets the flight
+       deck on fire and closes it for a minute.
+       ============================================================ */
+    var CSG = { ships: [], raidT: 300, deckFireT: 0, fires: [], said: {}, t: 0 };
+    var CSG_M = {
+      haze: new THREE.MeshStandardMaterial({ color: 0x7c848d, roughness: 0.62, metalness: 0.25 }),
+      deck: new THREE.MeshStandardMaterial({ color: 0x484d53, roughness: 0.85, metalness: 0.1 }),
+      dark: new THREE.MeshStandardMaterial({ color: 0x2b2f34, roughness: 0.6, metalness: 0.35 }),
+      boot: new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.7 }),
+      spy: new THREE.MeshStandardMaterial({ color: 0x3d4248, roughness: 0.45, metalness: 0.5 }),
+      white: new THREE.MeshStandardMaterial({ color: 0xe8eaec, roughness: 0.5 }),
+      red: new THREE.MeshStandardMaterial({ color: 0x7a2a22, roughness: 0.7 })
+    };
+    // ---- building blocks (ship frame: x = starboard, y = up from the waterline, z = forward) ----
+    function csgBox(g, w, h, d, m, x, y, z, ry) { var b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); if (ry) b.rotation.y = ry; b.castShadow = true; b.receiveShadow = true; g.add(b); return b; }
+    function csgCyl(g, r0, r1, h, m, x, y, z, seg) { var c = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, h, seg || 12), m); c.position.set(x, y, z); c.castShadow = true; g.add(c); return c; }
+    // the hull: a plan-view outline with a fine bow and a transom stern, extruded up from the keel
+    function csgHull(g, len, beam, free, draft, bow) {
+      var h = len / 2, b = beam / 2, s = new THREE.Shape();
+      s.moveTo(-b * 0.86, -h); s.lineTo(b * 0.86, -h);
+      s.bezierCurveTo(b, -h * 0.6, b, h * 0.2, b * 0.96, h - bow);
+      s.quadraticCurveTo(b * 0.55, h - bow * 0.2, 0, h);
+      s.quadraticCurveTo(-b * 0.55, h - bow * 0.2, -b * 0.96, h - bow);
+      s.bezierCurveTo(-b, h * 0.2, -b, -h * 0.6, -b * 0.86, -h);
+      function slab(y0, y1, m, sc) {
+        var geo = new THREE.ExtrudeGeometry(s, { depth: y1 - y0, bevelEnabled: false, curveSegments: 10 });
+        geo.rotateX(-Math.PI / 2); geo.translate(0, y0, 0); if (sc) geo.scale(sc, 1, 1);
+        var mm = new THREE.Mesh(geo, m); mm.castShadow = true; mm.receiveShadow = true; g.add(mm); return mm;
+      }
+      slab(-draft, 0.6, CSG_M.boot, 0.97);          // below and at the waterline
+      slab(0.6, free, CSG_M.haze);                  // topsides
+      var dk = slab(free, free + 0.25, CSG_M.deck);  // the weather deck
+      return dk;
+    }
+    // an Aegis SPY array: the octagonal face on a deckhouse
+    function csgSpy(g, x, y, z, yaw, r) {
+      var p = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.35, 8), CSG_M.spy);
+      p.rotation.set(Math.PI / 2 - 0.18, 0, Math.PI / 8); var w = new THREE.Group(); w.add(p); w.position.set(x, y, z); w.rotation.y = yaw; g.add(w);
+    }
+    function csgVls(g, x, y, z, rows, cols) {
+      csgBox(g, cols * 1.1 + 0.6, 0.5, rows * 1.1 + 0.6, CSG_M.dark, x, y + 0.25, z);
+      for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++) csgBox(g, 0.85, 0.12, 0.85, CSG_M.haze, x + (c - (cols - 1) / 2) * 1.1, y + 0.56, z + (r - (rows - 1) / 2) * 1.1);
+    }
+    function csgGun(g, x, y, z, yaw) {
+      var t = new THREE.Group(); t.position.set(x, y, z); t.rotation.y = yaw || 0; g.add(t);
+      csgCyl(t, 2.2, 2.4, 0.6, CSG_M.haze, 0, 0.3, 0, 16);
+      var house = csgBox(t, 3.4, 2.2, 4.4, CSG_M.haze, 0, 1.6, 0.2); house.scale.set(1, 1, 1);
+      csgBox(t, 2.6, 1.0, 1.6, CSG_M.haze, 0, 2.2, 2.4);
+      var br = csgCyl(t, 0.18, 0.24, 7.5, CSG_M.dark, 0, 1.9, 5.6, 8); br.rotation.x = Math.PI / 2 - 0.06;
+      return t;
+    }
+    function csgCiws(g, x, y, z) {
+      var t = new THREE.Group(); t.position.set(x, y, z); g.add(t);
+      csgCyl(t, 1.0, 1.2, 1.6, CSG_M.haze, 0, 0.8, 0);
+      var d = new THREE.Mesh(new THREE.SphereGeometry(0.9, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), CSG_M.white); d.position.y = 2.6; d.scale.y = 1.8; t.add(d);
+      csgCyl(t, 0.75, 0.85, 1.2, CSG_M.white, 0, 2.0, 0);
+      var gun = new THREE.Group(); gun.position.set(0, 1.9, 0.6); t.add(gun);
+      for (var i = 0; i < 6; i++) { var b = csgCyl(gun, 0.05, 0.05, 2.2, CSG_M.dark, Math.cos(i) * 0.14, Math.sin(i) * 0.14, 1.1, 5); b.rotation.x = Math.PI / 2; }
+      return { t: t, gun: gun };
+    }
+    function csgMast(g, x, y, z, h, rake) {
+      var m = new THREE.Group(); m.position.set(x, y, z); m.rotation.x = -(rake || 0); g.add(m);
+      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function(o) { var l = csgCyl(m, 0.12, 0.22, h, CSG_M.haze, o[0] * 1.1, h / 2, o[1] * 1.1, 5); l.rotation.z = -o[0] * 0.04; l.rotation.x = o[1] * 0.04; });
+      for (var k = 1; k < 4; k++) csgBox(m, 2.6 - k * 0.3, 0.2, 2.6 - k * 0.3, CSG_M.haze, 0, h * k / 4, 0);
+      csgBox(m, 4.5, 0.25, 0.4, CSG_M.dark, 0, h * 0.82, 0);                       // yardarm
+      csgCyl(m, 0.5, 0.5, 1.2, CSG_M.white, 0, h + 0.6, 0, 10);                     // radome
+      return m;
+    }
+    function csgHelo(g, z, len, beam, y) {
+      csgBox(g, beam * 0.92, 0.12, len, CSG_M.deck, 0, y + 0.06, z);
+      var ring = new THREE.Mesh(new THREE.RingGeometry(3.2, 3.6, 28), new THREE.MeshBasicMaterial({ color: 0xe8e8e0 })); ring.rotation.x = -Math.PI / 2; ring.position.set(0, y + 0.14, z); g.add(ring);
+      csgBox(g, 0.25, 0.02, len * 0.9, new THREE.MeshBasicMaterial({ color: 0xe8e8e0 }), 0, y + 0.14, z);
+    }
+    // hull numbers painted on both bows
+    function csgNumber(g, txt, len, free, beam) {
+      var cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+      var c = cv.getContext('2d'); c.fillStyle = '#ffffff'; c.font = 'bold 96px Arial'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.strokeStyle = '#222'; c.lineWidth = 6; c.strokeText(txt, 128, 68); c.fillText(txt, 128, 68);
+      var tex = new THREE.CanvasTexture(cv), m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, fog: true });
+      [-1, 1].forEach(function(s) {
+        var p = new THREE.Mesh(new THREE.PlaneGeometry(7, 3.5), m);
+        p.position.set(s * (beam / 2 * 0.86 + 0.05), free * 0.62, len / 2 - len * 0.16); p.rotation.y = s * Math.PI / 2; g.add(p);
+      });
+    }
+    // ---- the ships ----
+    function csgCruiser(num) {
+      var g = new THREE.Group(), L = 173, B = 16.8, F = 7.2;
+      csgHull(g, L, B, F, 6.5, 30);
+      var D = F + 0.25, ciws = [];
+      csgGun(g, 0, D, 62, 0); csgGun(g, 0, D, -62, Math.PI);
+      csgVls(g, 0, D, 47, 8, 8); csgVls(g, 0, D, -46, 8, 8);
+      // forward deckhouse with two arrays, aft deckhouse with two more
+      csgBox(g, 13, 6, 26, CSG_M.haze, 0, D + 3, 22); csgBox(g, 11, 4, 16, CSG_M.haze, 0, D + 8, 24); csgBox(g, 9, 3, 6, CSG_M.dark, 0, D + 11.5, 29);
+      csgSpy(g, 4.6, D + 7.5, 28.5, 0.9, 3.3); csgSpy(g, -4.6, D + 7.5, 28.5, -0.9, 3.3);
+      csgBox(g, 12, 6, 30, CSG_M.haze, 0, D + 3, -24); csgBox(g, 10, 4, 12, CSG_M.haze, 0, D + 8, -30);
+      csgSpy(g, 4.6, D + 7.5, -34.5, Math.PI - 0.9, 3.3); csgSpy(g, -4.6, D + 7.5, -34.5, Math.PI + 0.9, 3.3);
+      // twin uptakes, two masts
+      csgBox(g, 5, 7, 6, CSG_M.haze, 0, D + 9.5, 6); csgBox(g, 5.4, 0.6, 6.4, CSG_M.dark, 0, D + 13.2, 6);
+      csgBox(g, 5, 6, 6, CSG_M.haze, 0, D + 9, -10); csgBox(g, 5.4, 0.6, 6.4, CSG_M.dark, 0, D + 12.2, -10);
+      csgMast(g, 0, D + 13, 16, 20, 0.08); csgMast(g, 0, D + 10, -18, 16, 0.08);
+      ciws.push(csgCiws(g, 0, D + 6, 36)); ciws.push(csgCiws(g, 0, D + 6, -40));
+      csgHelo(g, -76, 20, B, D);
+      csgNumber(g, num, L, F, B);
+      return { g: g, len: L, ciws: ciws, aegis: true };
+    }
+    function csgDestroyer(num) {
+      var g = new THREE.Group(), L = 155, B = 20, F = 7.6;
+      csgHull(g, L, B, F, 6.3, 34);
+      var D = F + 0.25, ciws = [];
+      csgGun(g, 0, D, 56, 0);
+      csgVls(g, 0, D, 42, 4, 8); csgVls(g, 0, D, -42, 8, 8);
+      // the deckhouse: sloped faces carrying all four arrays
+      csgBox(g, 15, 6.5, 40, CSG_M.haze, 0, D + 3.25, 10);
+      csgBox(g, 13, 5, 18, CSG_M.haze, 0, D + 9, 18); csgBox(g, 10, 2.8, 6, CSG_M.dark, 0, D + 12.4, 24);
+      csgSpy(g, 5.4, D + 8.5, 26.5, 0.8, 3.4); csgSpy(g, -5.4, D + 8.5, 26.5, -0.8, 3.4);
+      csgSpy(g, 5.4, D + 8.5, 9.5, Math.PI - 0.8, 3.4); csgSpy(g, -5.4, D + 8.5, 9.5, Math.PI + 0.8, 3.4);
+      csgMast(g, 0, D + 11.5, 14, 17, 0.2);
+      // two raked funnels
+      [-2, -16].forEach(function(z) { var f = csgBox(g, 6, 7, 7, CSG_M.haze, 0, D + 9, z); f.rotation.x = 0.08; csgBox(g, 6.2, 0.6, 7.2, CSG_M.dark, 0, D + 12.6, z - 0.4); });
+      csgBox(g, 14, 5.5, 14, CSG_M.haze, 0, D + 2.75, -55);       // hangars
+      ciws.push(csgCiws(g, 0, D + 5.5, -26));
+      csgHelo(g, -68, 18, B, D);
+      csgNumber(g, num, L, F, B);
+      return { g: g, len: L, ciws: ciws, aegis: true };
+    }
+    function csgSupply(num) {
+      var g = new THREE.Group(), L = 229, B = 33, F = 10;
+      csgHull(g, L, B, F, 11, 40);
+      var D = F + 0.25;
+      csgBox(g, 26, 12, 22, CSG_M.haze, 0, D + 6, 88); csgBox(g, 22, 4, 12, CSG_M.haze, 0, D + 14, 90); csgBox(g, 20, 2.4, 6, CSG_M.dark, 0, D + 17, 94);
+      csgMast(g, 0, D + 16, 88, 14, 0.05);
+      // UNREP kingposts with their hose rigs
+      [55, 25, -5].forEach(function(z) {
+        [-1, 1].forEach(function(s) { csgCyl(g, 0.5, 0.7, 22, CSG_M.haze, s * 9, D + 11, z, 8); });
+        csgBox(g, 20, 1.2, 1.2, CSG_M.haze, 0, D + 21.5, z);
+        [-1, 1].forEach(function(s) { var boom = csgCyl(g, 0.25, 0.25, 14, CSG_M.dark, s * 13, D + 16, z, 6); boom.rotation.z = s * 1.0; });
+      });
+      // cargo deck, aft house, funnel and hangar
+      csgBox(g, 28, 3, 50, CSG_M.deck, 0, D + 1.5, 25);
+      csgBox(g, 28, 12, 34, CSG_M.haze, 0, D + 6, -62); csgBox(g, 12, 9, 10, CSG_M.haze, 0, D + 16, -60); csgBox(g, 12.4, 0.8, 10.4, CSG_M.dark, 0, D + 20.8, -60);
+      csgHelo(g, -96, 26, B, D);
+      csgNumber(g, num, L, F, B);
+      return { g: g, len: L, ciws: [csgCiws(g, 0, D + 12, 82)], aegis: false };
+    }
+    function csgSub(num) {
+      var g = new THREE.Group(), body = new THREE.Group(); g.add(body);
+      var hull = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.2, 100, 20), CSG_M.boot);
+      hull.rotation.x = Math.PI / 2; body.add(hull);
+      var nose = new THREE.Mesh(new THREE.SphereGeometry(5.2, 20, 12), CSG_M.boot); nose.position.z = 50; nose.scale.z = 1.6; body.add(nose);
+      var tail = new THREE.Mesh(new THREE.ConeGeometry(5.2, 22, 20), CSG_M.boot); tail.rotation.x = -Math.PI / 2; tail.position.z = -61; body.add(tail);
+      var sail = csgBox(body, 3, 8, 12, CSG_M.boot, 0, 8, 22); sail.scale.set(1, 1, 1);
+      csgBox(body, 13, 0.35, 2.2, CSG_M.boot, 0, 9.5, 24);                               // sail planes
+      csgBox(body, 0.4, 7, 4, CSG_M.boot, 0, 4, -66); csgBox(body, 12, 0.4, 4, CSG_M.boot, 0, 0, -66);
+      csgCyl(body, 0.18, 0.18, 4, CSG_M.dark, 0.6, 13.5, 24, 6); csgCyl(body, 0.25, 0.25, 3, CSG_M.dark, -0.6, 13, 22, 6);
+      return { g: g, len: 115, body: body, ciws: [], aegis: false, sub: true };
+    }
+    // formation: stations on the carrier (u ahead, v to starboard)
+    var CSG_ORDER = [
+      { kind: 'cg', name: 'CG-62 CAPE HOLLIS', num: '62', u: 1300, v: -850 },
+      { kind: 'ddg', name: 'DDG-118 MARROW', num: '118', u: 2900, v: 1300 },
+      { kind: 'ddg', name: 'DDG-121 KESTREL', num: '121', u: 2500, v: -900 },
+      { kind: 'ddg', name: 'DDG-124 HALVARD', num: '124', u: -2400, v: 350 },
+      { kind: 'aoe', name: 'T-AOE 8 SUPPLY HALE', num: '8', u: -1600, v: 1700 },
+      { kind: 'ssn', name: 'SSN-796 TARPON', num: '796', u: 4800, v: 500 }
+    ];
+    var _csgV = new THREE.Vector3();
+    (function csgBuild() {
+      // the strike group replaces the carrier's two placeholder escorts
+      if (typeof CV2 !== 'undefined') { CV2.escorts.forEach(function(E) { scene.remove(E.g); scene.remove(E.wake.g); }); CV2.escorts = []; }
+      CSG_ORDER.forEach(function(o, i) {
+        var S = o.kind === 'cg' ? csgCruiser(o.num) : o.kind === 'ddg' ? csgDestroyer(o.num) : o.kind === 'aoe' ? csgSupply(o.num) : csgSub(o.num);
+        S.kind = o.kind; S.name = o.name; S.u = o.u; S.v = o.v; S.i = i;
+        var w = carrierToWorld(o.u, o.v);
+        S.pos = new THREE.Vector3(w.x, 0, w.z); S.yaw = CARRIER.yaw; S.speed = CV2.v; S.cd = Math.random() * 3; S.ph = Math.random() * 6;
+        S.g.traverse(function(c) { c.frustumCulled = true; });
+        scene.add(S.g);
+        // its own wake
+        var wk = new THREE.Mesh(CV2.wake.main.geometry, CV2.wake.main.material); wk.scale.set(S.sub ? 0.25 : 0.4, 1, S.sub ? 0.3 : 0.55); scene.add(wk); S.wake = wk;
+        CSG.ships.push(S);
+      });
+    })();
+    function csgStation(S) {
+      var w = carrierToWorld(S.u, S.v);
+      // never station a ship on the shoals: pull it in toward the carrier until there's water
+      for (var k = 0; k < 6 && getTerrainHeight(w.x, w.z) > WATER_LEVEL - 12; k++) w = carrierToWorld(S.u * (1 - (k + 1) * 0.15), S.v * (1 - (k + 1) * 0.15));
+      return w;
+    }
+    // ---- defending the group: Standard missiles and Phalanx, through the base's fire-control code ----
+    function csgDefend(dt) {
+      var threats = baseThreats().filter(function(th) { return Math.hypot(th.pos.x - CARRIER.x, th.pos.z - CARRIER.z) < 22000; });
+      if (!threats.length) return;
+      CSG.ships.forEach(function(S) {
+        var p = S.pos;
+        if (S.aegis) {
+          S.cd -= dt;
+          var best = null, bd = 15000;
+          threats.forEach(function(th) { var d = Math.hypot(th.pos.x - p.x, th.pos.z - p.z); if (d < bd && !BASE.shots.some(function(sh) { return sh.th.pos === th.pos; })) { bd = d; best = th; } });
+          if (best && S.cd <= 0) {
+            S.cd = S.kind === 'cg' ? 2.2 : 3.2;
+            // vertical launch out of the cells
+            baseFireSam(null, _csgV.set(p.x + Math.sin(S.yaw) * 40, WATER_LEVEL + 10, p.z + Math.cos(S.yaw) * 40).clone(), best);
+            BASE.shots[BASE.shots.length - 1].vel.set(0, 90, 0);
+            if (!CSG.said[S.name] || CSG.t - CSG.said[S.name] > 8) { CSG.said[S.name] = CSG.t; cv2Say(S.name.split(' ').slice(1).join(' '), '"Birds away!"', '#7fd0ff'); }
+          }
+        }
+        S.ciws.forEach(function(C) {
+          var tg = null, td = 2000;
+          threats.forEach(function(th) { var d = th.pos.distanceTo(_csgV.set(p.x, WATER_LEVEL + 15, p.z)); if (d < td) { td = d; tg = th; } });
+          if (!tg) return;
+          C.t.getWorldPosition(_csgV);
+          C.t.rotation.y = Math.atan2(tg.pos.x - _csgV.x, tg.pos.z - _csgV.z) - S.yaw; C.gun.rotation.z += dt * 40;
+          C.gun.rotation.x = -Math.atan2(tg.pos.y - _csgV.y, Math.hypot(tg.pos.x - _csgV.x, tg.pos.z - _csgV.z));
+          if (Math.random() < dt * 30) baseTracer(_csgV.clone().add(new THREE.Vector3(0, 2, 0)), tg.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 12)));
+          if (Math.random() < dt * (2.4 - td / 1100)) baseKill(tg, 18);
+        });
+      });
+    }
+    // ---- the enemy's answer to a carrier: anti-ship missile salvoes ----
+    function csgLaunchRaid() {
+      var n = 3 + Math.floor(Math.random() * 4), from = (Math.random() - 0.5) * 2.2;   // out of the open sea to the south
+      for (var i = 0; i < n; i++) {
+        var a = from + (Math.random() - 0.5) * 0.35, r = 24000 + i * 600;
+        var x = CARRIER.x + Math.sin(a) * r, z = CARRIER.z + Math.cos(a) * r;
+        var g = baseMissileModel();
+        var t = stAddTarget({ kind: 'missile', label: 'ANTI-SHIP MISSILE', group: g, hitR: 4, maxHp: 30, bounty: 150 });
+        var M = { t: t, g: g, pos: new THREE.Vector3(x, WATER_LEVEL + 20, z), tgt: null, tx: CARRIER.x, tz: CARRIER.z, v: 260, smokeT: 0, follow: true, onHit: csgCarrierHit };
+        g.position.copy(M.pos); t.center.copy(M.pos);
+        BASE.missiles.push(M);
+      }
+      var brg = String(Math.round(((Math.atan2(Math.sin(from), -Math.cos(from)) * 180 / Math.PI) + 360) % 360)).padStart(3, '0');
+      cv2Say('CAPE HOLLIS', '"Vampire, vampire! ' + n + ' inbound, bearing ' + brg + ', sea-skimmers. All units, weapons free."', '#ff9a7a', 'vampire vampire');
+      samToast('STRIKE GROUP UNDER ATTACK — ' + n + ' ANTI-SHIP MISSILES', '#ff7a5a', 3);
+    }
+    function csgCarrierHit(M) {
+      CSG.deckFireT = 60;
+      samToast('CARRIER HIT — FLIGHT DECK FIRE, DECK CLOSED', '#ff3b30', 3.2);
+      cv2Say('CV-71', '"We\'ve been hit! Fire on the flight deck — the deck is foul, hold your landing."', '#ff6a4a', 'carrier hit');
+      for (var i = 0; i < 4; i++) { var w = carrierToWorld(-60 + Math.random() * 160, (Math.random() - 0.5) * 50); stIgniteFire(new THREE.Vector3(w.x, CARRIER.deckY + 1, w.z), 14, 60); }
+    }
+    function csgMinimap(ctx, toS, scale) {
+      CSG.ships.forEach(function(S) {
+        if (S.sub && !S.surfaced) return;
+        var p = toS(S.pos.x, S.pos.z);
+        ctx.save(); ctx.translate(p.x, p.y);
+        ctx.fillStyle = S.kind === 'ssn' ? '#7fb8ff' : '#5aa8ff'; ctx.strokeStyle = 'rgba(0,0,0,.6)';
+        ctx.beginPath(); ctx.arc(0, 0, S.kind === 'aoe' ? 3 : 2.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+      });
+    }
+    function csgUpdate(dt) {
+      CSG.t += dt;
+      CSG.ships.forEach(function(S, i) {
+        // sail to the station: steer for it when out of position, then hold the carrier's course and speed
+        var w = csgStation(S), dx = w.x - S.pos.x, dz = w.z - S.pos.z, d = Math.hypot(dx, dz);
+        var wantYaw = d > 160 ? Math.atan2(dx, dz) : CARRIER.yaw;
+        var dy = Math.atan2(Math.sin(wantYaw - S.yaw), Math.cos(wantYaw - S.yaw));
+        S.yaw += THREE.MathUtils.clamp(dy, -0.035 * dt, 0.035 * dt);
+        var wantV = d > 160 ? Math.min(17, CV2.v + d * 0.01) : CV2.v + (d - 0) * 0.004 * Math.cos(Math.atan2(dx, dz) - S.yaw);
+        S.speed += THREE.MathUtils.clamp(wantV - S.speed, -0.6 * dt, 0.4 * dt);
+        S.pos.x += Math.sin(S.yaw) * S.speed * dt; S.pos.z += Math.cos(S.yaw) * S.speed * dt;
+        // the sea moves them too; the submarine comes up for a while and goes back down
+        var sea = typeof currentWind === 'number' ? currentWind : 0, heave = (0.25 + 1.6 * sea) * Math.sin(CSG.t * 0.75 + S.ph);
+        var y = heave;
+        if (S.sub) {
+          var cyc = (CSG.t * 0.004 + S.ph * 0.1) % 1; S.surfaced = cyc < 0.45;
+          var target = S.surfaced ? -1.5 : -16; S.depth = S.depth === undefined ? target : S.depth + (target - S.depth) * Math.min(1, dt * 0.05);
+          y = S.depth + (S.surfaced ? heave * 0.4 : 0);
+        }
+        S.g.position.set(S.pos.x, WATER_LEVEL + y, S.pos.z);
+        S.g.rotation.set(Math.sin(CSG.t * 0.6 + S.ph) * (0.004 + 0.016 * sea), S.yaw, Math.sin(CSG.t * 0.47 + S.ph) * (0.005 + 0.02 * sea) - dy * 2.5);
+        var st = S.len / 2 + 2;
+        S.wake.position.set(S.pos.x - Math.sin(S.yaw) * st, WATER_LEVEL + 0.22, S.pos.z - Math.cos(S.yaw) * st);
+        S.wake.rotation.y = S.yaw; S.wake.visible = !S.sub || S.depth > -6;
+      });
+      if (!started || (typeof HY !== 'undefined' && HY.on)) return;
+      // attacks on the group come only while you're around to see them
+      var near = Math.hypot(position.x - CARRIER.x, position.z - CARRIER.z) < 20000;
+      if (near && (CSG.raidT -= dt) <= 0) { CSG.raidT = 480 + Math.random() * 180; csgLaunchRaid(); }
+      csgDefend(dt);
+      // a burning deck: the LSO waves everyone off until the crews have it out
+      if (CSG.deckFireT > 0) {
+        CSG.deckFireT -= dt;
+        if (CSG.lsoT === undefined || (CSG.lsoT -= dt) <= 0) {
+          CSG.lsoT = 1;
+          if (CV2.lso && !CV2.lso.waveoff) { CV2.lso.waveoff = true; CV2.lso.waveWhy = 'DECK FIRE'; cv2Say('PADDLES', '"Wave off — deck\'s foul, fire on the deck!"', '#ff6a4a', 'wave off'); }
+        }
+        if (CSG.deckFireT <= 0) cv2Say('CV-71', '"Fire\'s out. Deck is clear — resume recovery."', '#7dff9a');
+      }
     }
 
     /* ============================================================
