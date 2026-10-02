@@ -2213,8 +2213,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       return naturalHeight;
     }
-    // pick the hostile base site once: on the far side of the airport from the city, ~3 km
-    // out, on dry, reasonably level ground clear of the river and the coast
+    // pick the hostile base site once: on the far side of the airport from the city, 6-7.5 km
+    // out (well clear of the spawn: its flak reaches ~2.8 km), on dry, reasonably level ground
+    // clear of the river and the coast
     var SAM_BASE = null, SAM_BASE_FLAT_R = 260, SAM_BASE_BLEND_R = 620;
     var WAR_SITES = [], WAR_STRIPS = [];   // campaign sectors + the enemy's airfields (chosen below)
     var REG_STRIPS = [];                   // the far regions' airfields (chosen below)
@@ -2222,7 +2223,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     (function chooseSamBase() {
       function raw(x, z) { return Math.pow(fbm(x * 0.0009, z * 0.0009, 6), 2.2) * 300 - 40; }
       var away = Math.atan2(950, 1450) + Math.PI, best = null;
-      for (var r = 2600; r <= 3600; r += 200) {
+      for (var r = 6000; r <= 7600; r += 200) {
         for (var a = -70; a <= 70; a += 10) {
           var ang = away + a * Math.PI / 180;
           var bx = RUNWAY_CENTER_X + Math.cos(ang) * r, bz = RUNWAY_CENTER_Z + Math.sin(ang) * r;
@@ -2239,11 +2240,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           }
           if (wet) continue;
           var mean = sum / n, sd = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
-          var score = sd + Math.abs(r - 3000) * 0.01 + Math.abs(a) * 0.05;
+          var score = sd + Math.abs(r - 6600) * 0.01 + Math.abs(a) * 0.05;
           if (!best || score < best.score) best = { x: bx, z: bz, y: mean, score: score };
         }
       }
-      if (!best) best = { x: RUNWAY_CENTER_X - 2500, z: RUNWAY_CENTER_Z - 1700, y: 20, score: 0 };
+      if (!best) best = { x: RUNWAY_CENTER_X - 5400, z: RUNWAY_CENTER_Z - 3700, y: 20, score: 0 };
       best.y = Math.max(best.y, WATER_LEVEL + 10);
       SAM_BASE = best;
     })();
