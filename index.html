@@ -7754,18 +7754,35 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var birdFlocks = [];
     (function initBirds() {
       var birdMat = new THREE.MeshStandardMaterial({ color: 0x2a2c30, flatShading: true, roughness: 0.8, metalness: 0.0, side: THREE.DoubleSide });
+      // a herring gull: white body and head, grey mantle, black wingtips, a yellow bill; the wings
+      // hinge at the shoulder (and bend at the wrist) so they really flap
+      var gWhite = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.8, flatShading: true });
+      var gGrey = new THREE.MeshStandardMaterial({ color: 0x9aa3ab, roughness: 0.8, flatShading: true, side: THREE.DoubleSide });
+      var gBlack = new THREE.MeshStandardMaterial({ color: 0x1b1b1b, roughness: 0.8, flatShading: true, side: THREE.DoubleSide });
+      var gBill = new THREE.MeshStandardMaterial({ color: 0xe9c43a, roughness: 0.6 });
+      var gBody = new THREE.SphereGeometry(1, 10, 7); gBody.scale(0.11, 0.1, 0.3);
+      var gHead = new THREE.SphereGeometry(0.075, 8, 6);
+      var gBeak = new THREE.ConeGeometry(0.022, 0.09, 5); gBeak.rotateX(Math.PI / 2);
+      var gTail = new THREE.BoxGeometry(0.14, 0.015, 0.12);
+      var gInner = new THREE.BoxGeometry(0.34, 0.02, 0.2), gOuter = new THREE.BoxGeometry(0.3, 0.018, 0.15), gTip = new THREE.BoxGeometry(0.12, 0.016, 0.1);
       function buildBird() {
-        var geo = new THREE.BufferGeometry();
-        // simple gull silhouette: two wing triangles meeting at a center point, wingtips animated
-        var verts = new Float32Array([
-          0, 0, 0,   -0.9, 0, 0.35,   0, 0, -0.12,
-          0, 0, 0,    0, 0, -0.12,    0.9, 0, 0.35
-        ]);
-        geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-        geo.computeVertexNormals();
-        var mesh = new THREE.Mesh(geo, birdMat);
-        mesh.frustumCulled = false;
-        return mesh;
+        var g = new THREE.Group();
+        var body = new THREE.Mesh(gBody, gWhite); g.add(body);
+        var head = new THREE.Mesh(gHead, gWhite); head.position.set(0, 0.06, 0.28); g.add(head);
+        var beak = new THREE.Mesh(gBeak, gBill); beak.position.set(0, 0.05, 0.38); g.add(beak);
+        var tail = new THREE.Mesh(gTail, gWhite); tail.position.set(0, 0, -0.32); g.add(tail);
+        var wings = [];
+        [-1, 1].forEach(function(s) {
+          var sh = new THREE.Group(); sh.position.set(s * 0.06, 0.02, 0.02); g.add(sh);
+          var inner = new THREE.Mesh(gInner, gGrey); inner.position.set(s * 0.17, 0, 0); sh.add(inner);
+          var wr = new THREE.Group(); wr.position.set(s * 0.34, 0, 0); sh.add(wr);
+          var outer = new THREE.Mesh(gOuter, gGrey); outer.position.set(s * 0.15, 0, -0.02); outer.rotation.y = s * 0.25; wr.add(outer);
+          var tip = new THREE.Mesh(gTip, gBlack); tip.position.set(s * 0.34, 0, -0.08); tip.rotation.y = s * 0.4; wr.add(tip);
+          wings.push({ sh: sh, wr: wr, s: s });
+        });
+        g.userData.wings = wings;
+        g.frustumCulled = false;
+        return g;
       }
       var FLOCK_COUNT = 6, BIRDS_PER_FLOCK = 6;
       for (var f = 0; f < FLOCK_COUNT; f++) {
@@ -7775,7 +7792,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var birds = [];
         for (var b = 0; b < BIRDS_PER_FLOCK; b++) {
           var mesh = buildBird();
-          mesh.scale.setScalar(1.4 + Math.random() * 0.8);
+          mesh.scale.setScalar(1.7 + Math.random() * 0.6);
           scene.add(mesh);
           birds.push({
             mesh: mesh,
@@ -7834,7 +7851,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           }
           bird.mesh.position.set(bx, by, bz);
           bird.mesh.rotation.y = bird.sp && flock.scare > 0 ? Math.atan2(bird.sv.x, bird.sv.z) + Math.PI : headingAngle;
-          bird.mesh.rotation.z = Math.sin(elapsed * bird.flapSpeed * flap + bird.flapPhase) * 0.5 * (flap > 1 ? 1.4 : 1);
+          // gulls mostly glide on held wings, with bursts of flapping; scared ones flap hard
+          var gl = flap > 1 ? 1 : (Math.sin(elapsed * 0.4 + bird.flapPhase * 3) > 0.2 ? 0 : 1);
+          var fa = gl ? Math.sin(elapsed * bird.flapSpeed * flap + bird.flapPhase) * 0.6 * (flap > 1 ? 1.3 : 1) : 0.12 + Math.sin(elapsed * 0.8 + bird.flapPhase) * 0.03;
+          bird.mesh.rotation.z = gl ? 0 : Math.sin(elapsed * 0.3 + bird.flapPhase) * 0.25;
+          bird.mesh.userData.wings.forEach(function(w) { w.sh.rotation.z = w.s * fa; w.wr.rotation.z = gl ? -w.s * fa * 0.6 : -w.s * 0.22; });
         }
       }
     }
@@ -7945,7 +7966,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       _rainPrevCam.copy(cam); _rainHavePrev = true;
       if (!on) { rainShafts.forEach(function(m) { m.visible = false; }); return; }
-      var snowing = SEASON.snow > 0.5;
+      var snowing = SEASON.snow > 0.5 || (typeof wx2Snowy === 'function' && wx2Snowy(cam.x, cam.z));
       var fall = snowing ? 1.3 + intensity * 0.3 : 9 + intensity * 3;   // terminal velocity: raindrop vs snowflake, m/s
       var off = U.uOff.value;
       off.x = (off.x + windPush.x * dt * 1.4) % RAIN_BOX.x;
@@ -8369,6 +8390,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function updateWeather(dt) {
       updateSeason(dt);
       wxfUpdate(dt);
+      if (typeof wx2Target === 'function') wx2Target(dt);
       var f = Math.min(1, WEATHER_LERP_SPEED * dt);
       currentFogDensity += (weatherTarget.density - currentFogDensity) * f;
       currentRainIntensity += (weatherTarget.rain - currentRainIntensity) * f;
@@ -8411,6 +8433,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         sky.material.uniforms.topColor.value.lerp(_wxStormTop.clone().multiplyScalar(0.3 + dayL * 0.8), storm);
         sky.material.uniforms.bottomColor.value.lerp(scene.fog.color, storm * 0.9);
       }
+      if (typeof wx2Fog === 'function') wx2Fog();
 
       // in-scattering: the fog glows around the sun (golden at sunrise/sunset), or faintly
       // around the moon at night
@@ -16678,6 +16701,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       qolUpdate(dt);
       eiUpdate(dt);
       dtUpdate(dt);
+      wx2Update(dt);
+      wlUpdate(dt);
       hyUpdate(dt);
       qolbUpdate(dt);
       qolcUpdate(dt);
@@ -23893,6 +23918,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI * 2); ctx.fill();
       });
+      if (typeof wx2Map === 'function') wx2Map(ctx, toS, scale);
     }
     wxfEnable(true);
 
@@ -25292,7 +25318,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var d = DT.done[t.id], ok = d ? '✓ DONE' + (d.best ? ' ' + d.best.toFixed(1) + 's' : '') : '';
         return '<div class="trip" data-trip="' + t.id + '"><div><b style="color:' + t.color + '">' + t.name + '</b><small>' + t.goal + ' · ' +
           mapFmtDist(Math.hypot(t.x - position.x, t.z - position.z)) + '</small></div><span class="ok">' + ok + '</span></div>';
-      }).join('') + '<div class="close">CLOSE</div>';
+      }).join('') + '<div style="margin:10px 2px 0;opacity:.85">WILDLIFE LOG · ' + wlLogCount() + ' species spotted' + (Object.keys(WL.log).length ? ' — ' + Object.keys(WL.log).map(function(k) { return WL_NAMES[k]; }).join(', ') : '') + '</div><div class="close">CLOSE</div>';
       DT.panel.style.display = 'block';
     }
     function dtComplete(id, extra) {
@@ -25350,6 +25376,870 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         DT.hud.style.display = 'block';
         DT.hud.innerHTML = 'CANYON RUN · GATE ' + (DT.run.next + 1) + '/' + DT.gates.length + ' · ' + el.toFixed(1) + ' s' + (el > DT_LIMIT ? ' · OVER TIME' : '');
       }
+    }
+
+    /* ============================================================
+       MORE WEATHER — on top of the fronts, the rain and the storms
+       · WATERSPOUTS drop out of thunderstorms over the sea: a twisting grey funnel from the cloud
+         base to a ring of spray. Keep clear — inside ~70 m it throws you about and tears at the airframe.
+       · RAINBOWS hang on a rain shower when the sun is low behind you (and a fainter second bow outside it).
+       · DUST STORMS roll across the Dust Sea: a brown wall of dust that swallows the light, the
+         horizon and the runway, with sand streaming past the canopy.
+       · In the far north the showers fall as SNOW whatever the season.
+       · A WIND readout under the flight panel gives direction and speed, and the crosswind when you're low.
+       ============================================================ */
+    var WX2 = { spouts: [], dust: null, dustI: 0, bow: null, bowA: 0, hud: null, hudT: 0, hurtT: 0, said: {} };
+    (function wx2Build() {
+      // ---- waterspout funnels ----
+      var cv = document.createElement('canvas'); cv.width = 64; cv.height = 256;
+      var c = cv.getContext('2d');
+      for (var i = 0; i < 90; i++) { c.fillStyle = 'rgba(225,230,235,' + (0.08 + Math.random() * 0.25) + ')'; c.fillRect(Math.random() * 64, 0, 1 + Math.random() * 3, 256); }
+      var tex = new THREE.CanvasTexture(cv); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(3, 2);
+      var prof = [];
+      for (var k = 0; k <= 16; k++) { var t = k / 16; prof.push(new THREE.Vector2(3.5 + 6 * t + Math.pow(t, 5) * 70, t)); }
+      var geo = new THREE.LatheGeometry(prof, 28);
+      for (var s = 0; s < 2; s++) {
+        var g = new THREE.Group();
+        var funnel = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, color: 0x9aa3ab, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, fog: true }));
+        var core = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x4f565d, transparent: true, opacity: 0.35, depthWrite: false, fog: true }));
+        core.scale.set(0.55, 1, 0.55);
+        g.add(core); g.add(funnel);
+        var spray = [];
+        for (var j = 0; j < 14; j++) {
+          var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeGlowTexture, color: 0xdfe6ea, transparent: true, opacity: 0.6, depthWrite: false, fog: true }));
+          g.add(sp); spray.push({ m: sp, a: j / 14 * Math.PI * 2, r: 14 + Math.random() * 18, h: Math.random() * 18, s: 18 + Math.random() * 16 });
+        }
+        g.visible = false; scene.add(g);
+        WX2.spouts.push({ g: g, funnel: funnel, core: core, spray: spray, on: false, x: 0, z: 0, t: 0, life: 0, base: 1200, cell: null, wob: Math.random() * 6 });
+      }
+      // ---- the rainbow: a band at 42° round the antisolar point, red outside, violet in, and a faint
+      //      reversed secondary at 51° — drawn as a ring facing you on the rain ----
+      var bowMat = new THREE.ShaderMaterial({
+        uniforms: { uA: { value: 0 }, uHorizon: { value: 0 } },
+        vertexShader: [
+          'varying vec2 vUv; varying float vY;',
+          '#include <common>', '#include <logdepthbuf_pars_vertex>',
+          'void main(){ vUv = uv; vec4 wp = modelMatrix * vec4(position,1.0); vY = wp.y;',
+          '  gl_Position = projectionMatrix * viewMatrix * wp;', '  #include <logdepthbuf_vertex>', '}'
+        ].join('\n'),
+        fragmentShader: [
+          'uniform float uA; uniform float uHorizon; varying vec2 vUv; varying float vY;',
+          '#include <common>', '#include <logdepthbuf_pars_fragment>',
+          'vec3 spec(float t){ return clamp(vec3(abs(t*6.0-3.0)-1.0, 2.0-abs(t*6.0-2.0), 2.0-abs(t*6.0-4.0)), 0.0, 1.0); }',
+          'void main(){', '  #include <logdepthbuf_fragment>',
+          '  float r = length(vUv - 0.5) * 2.0;',            // 0 centre .. 1 outer edge of the quad
+          '  float deg = degrees(atan(r * 1.4826));',
+          '  float p = clamp((deg - 40.4) / 2.2, 0.0, 1.0), s = clamp((53.6 - deg) / 3.4, 0.0, 1.0);',
+          '  float bp = smoothstep(40.2, 40.9, deg) * (1.0 - smoothstep(42.1, 42.8, deg));',
+          '  float bs = smoothstep(50.0, 50.8, deg) * (1.0 - smoothstep(53.2, 54.0, deg)) * 0.38;',
+          '  vec3 col = spec(0.8 - p * 0.8) * bp + spec(0.8 - s * 0.8) * bs;',
+          '  float inner = (1.0 - smoothstep(30.0, 40.5, deg)) * smoothstep(5.0, 30.0, deg) * 0.07;',   // the brighter sky inside the bow
+          '  float a = (max(bp, bs) * 0.55 + inner) * uA * smoothstep(uHorizon - 8.0, uHorizon + 25.0, vY);',
+          '  if (a < 0.002) discard;',
+          '  gl_FragColor = vec4(col + vec3(inner * 4.0), a);', '}'
+        ].join('\n'),
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+      });
+      WX2.bow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), bowMat);
+      WX2.bow.frustumCulled = false; WX2.bow.visible = false; WX2.bow.renderOrder = 2;
+      scene.add(WX2.bow);
+      // ---- the dust storm: a wall of billowing brown cloud along its leading edge ----
+      var dg = new THREE.Group(), puffs = [];
+      for (var d = 0; d < 34; d++) {
+        var sp2 = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeGlowTexture, color: new THREE.Color(0.55, 0.38, 0.22), transparent: true, opacity: 0.92, depthWrite: false, fog: true }));
+        dg.add(sp2); puffs.push({ m: sp2, a: (d / 34 - 0.5) * 2.4, h: Math.random(), s: 380 + Math.random() * 420, r: Math.random() });
+      }
+      dg.visible = false; scene.add(dg);
+      WX2.dust = { g: dg, puffs: puffs, on: false, x: 0, z: 0, dir: 0, r: 3200, t: 0, cool: 40 };
+      // sand streaming past: a cloud of points that wraps round the camera
+      var N = 1400, pp = new Float32Array(N * 3);
+      for (var q = 0; q < N; q++) { pp[q * 3] = Math.random(); pp[q * 3 + 1] = Math.random(); pp[q * 3 + 2] = Math.random(); }
+      WX2.sandBase = pp.slice();
+      var sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(pp, 3));
+      WX2.sand = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xc9a06a, size: 0.35, transparent: true, opacity: 0, depthWrite: false, fog: true }));
+      WX2.sand.frustumCulled = false; scene.add(WX2.sand);
+      WX2.sandOff = new THREE.Vector3();
+      // the wind readout
+      var css = document.createElement('style');
+      css.textContent = '#wx2Wind{position:fixed;z-index:12;right:calc(16px + env(safe-area-inset-right));top:calc(302px + env(safe-area-inset-top));display:none;align-items:center;gap:8px;' +
+        'font:700 11px/1.25 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#d8eefc;background:rgba(10,18,26,.62);border:1px solid rgba(160,210,240,.35);border-radius:10px;padding:5px 10px;pointer-events:none}' +
+        '#wx2Wind svg{width:22px;height:22px;flex:none}#wx2Wind small{display:block;color:#ffd27a}' +
+        '@media (orientation: landscape) and (max-height: 500px){#wx2Wind{top:auto;bottom:calc(8px + env(safe-area-inset-bottom));right:calc(240px + env(safe-area-inset-right))}}';
+      document.head.appendChild(css);
+      WX2.hud = document.createElement('div'); WX2.hud.id = 'wx2Wind';
+      WX2.hud.innerHTML = '<svg viewBox="-12 -12 24 24"><circle r="10.5" fill="none" stroke="rgba(160,210,240,.45)"/><path id="wx2Arrow" d="M0,-8 L4,2 L1,1 L1,8 L-1,8 L-1,1 L-4,2 Z" fill="#9fe0ff"/></svg><div id="wx2Txt"></div>';
+      document.body.appendChild(WX2.hud);
+    })();
+    // rain or snow up north
+    function wx2Snowy(x, z) { return regArcticW(x, z) > 0.5; }
+    // ---- dust storms: only with live (FRONTS) weather, only out in the Dust Sea ----
+    function wx2DustStep(dt) {
+      var D = WX2.dust, dw = regDesertW(position.x, position.z);
+      if (!D.on) {
+        D.cool -= dt;
+        if (WXF.on && dw > 0.3 && D.cool <= 0 && started) {
+          // it builds upwind and rolls through
+          D.on = true; D.t = 0; D.dir = Math.random() * Math.PI * 2; D.r = 2600 + Math.random() * 1400;
+          var back = D.dir + Math.PI, dist = 7000 + Math.random() * 3000;
+          D.x = position.x + Math.sin(back) * dist + (Math.random() - 0.5) * 3000; D.z = position.z + Math.cos(back) * dist + (Math.random() - 0.5) * 3000;
+          D.g.visible = true;
+        }
+        WX2.dustI += (0 - WX2.dustI) * Math.min(1, dt * 0.4);
+        return;
+      }
+      D.t += dt;
+      var vx = Math.sin(D.dir) * 16, vz = Math.cos(D.dir) * 16;
+      D.x += vx * dt; D.z += vz * dt;
+      var d = Math.hypot(position.x - D.x, position.z - D.z);
+      if (d > 16000 || D.t > 900) { D.on = false; D.g.visible = false; D.cool = 240 + Math.random() * 300; return; }
+      // the wall's billows sit on the leading arc and churn
+      var ga = Math.max(getTerrainHeight(D.x, D.z), WATER_LEVEL);
+      D.g.position.set(D.x, ga, D.z);
+      D.puffs.forEach(function(p, i) {
+        var a = D.dir + p.a, rr = D.r * (0.8 + p.r * 0.25);
+        var h = p.s * (0.35 + p.h * 0.7) + Math.sin(WX2.t * 0.2 + i) * 30;
+        p.m.position.set(Math.sin(a) * rr, h, Math.cos(a) * rr);
+        p.m.scale.set(p.s * 1.6, p.s * 1.3, 1);
+        p.m.material.rotation = WX2.t * 0.03 * (i % 2 ? 1 : -1) + i;
+      });
+      var I = 1 - gfxSmoothstepJS(D.r * 0.6, D.r * 1.05, d);
+      WX2.dustI += (I - WX2.dustI) * Math.min(1, dt * 0.6);
+      if (WX2.dustI > 0.3 && !WX2.said.dust) { WX2.said.dust = true; samToast('DUST STORM — VISIBILITY ZERO', '#e0b070', 2.6); }
+      if (WX2.dustI < 0.1) WX2.said.dust = false;
+    }
+    // called by updateWeather right after the fronts have set the target
+    function wx2Target(dt) {
+      WX2.t = (WX2.t || 0) + dt;
+      wx2DustStep(dt);
+      var I = WX2.dustI;
+      if (I > 0.01) {
+        var A = weatherTarget, M = {};
+        ['density', 'layer', 'layerH', 'banks', 'rain', 'dim', 'wind'].forEach(function(k) { M[k] = A[k]; });
+        M.density = A.density + (0.0075 - A.density) * I; M.layer = A.layer + (0.012 - A.layer) * I; M.layerH = A.layerH + (260 - A.layerH) * I;
+        M.dim = A.dim + (0.5 - A.dim) * I; M.wind = A.wind + (0.85 - A.wind) * I; M.rain = A.rain * (1 - I); M.banks = A.banks;
+        M.lightning = A.lightning && I < 0.3;
+        weatherTarget = M;
+      }
+    }
+    var _wx2Dust = new THREE.Color(0.62, 0.44, 0.26);
+    // called after the sky and fog colours are set for the frame
+    function wx2Fog() {
+      var I = WX2.dustI;
+      if (I < 0.01) return;
+      var dayL = THREE.MathUtils.clamp(hemiLight.intensity / 0.62, 0.1, 1);
+      var c = _wx2Dust.clone().multiplyScalar(0.35 + dayL * 0.7);
+      scene.fog.color.lerp(c, I * 0.9);
+      sky.material.uniforms.bottomColor.value.lerp(c, I * 0.85);
+      sky.material.uniforms.topColor.value.lerp(c, I * 0.55);
+    }
+    // ---- waterspouts ----
+    function wx2Spouts(dt) {
+      WX2.spouts.forEach(function(S, idx) {
+        if (!S.on) {
+          if (!WXF.on) return;
+          // a storm cell over open water, not already hosting one, now and then grows a spout
+          var cell = WXF.cells[idx % WXF.cells.length];
+          if (!cell || !cell.grp.visible || cell.kind !== 'storm' || cell.age < 20) return;
+          var sx = cell.x + (Math.random() - 0.5) * cell.r * 0.6, sz = cell.z + (Math.random() - 0.5) * cell.r * 0.6;
+          if (getTerrainHeight(sx, sz) > WATER_LEVEL - 4 || Math.random() > dt * 0.02) return;
+          S.on = true; S.cell = cell; S.ox = sx - cell.x; S.oz = sz - cell.z; S.t = 0; S.life = 100 + Math.random() * 80; S.base = cell.base || 1250;
+          S.g.visible = true;
+          return;
+        }
+        S.t += dt;
+        var c = S.cell;
+        if (S.t > S.life || !c.grp.visible || !WXF.on) { S.on = false; S.g.visible = false; return; }
+        S.ox += Math.sin(S.t * 0.07 + S.wob) * 3 * dt; S.oz += Math.cos(S.t * 0.05 + S.wob) * 3 * dt;
+        S.x = c.x + S.ox; S.z = c.z + S.oz;
+        if (getTerrainHeight(S.x, S.z) > WATER_LEVEL - 1) { S.t = Math.max(S.t, S.life - 8); }      // they die on landfall
+        var grow = Math.min(1, S.t / 12) * Math.min(1, (S.life - S.t) / 10);
+        S.g.position.set(S.x, WATER_LEVEL, S.z);
+        S.funnel.scale.set(grow, S.base, grow); S.core.scale.set(0.55 * grow, S.base, 0.55 * grow);
+        S.funnel.rotation.y += dt * 2.2; S.core.rotation.y -= dt * 1.4;
+        // the funnel leans and snakes a little
+        S.g.rotation.z = Math.sin(S.t * 0.13 + S.wob) * 0.06; S.g.rotation.x = Math.cos(S.t * 0.11 + S.wob) * 0.05;
+        S.funnel.material.map.offset.x = (S.t * 0.6) % 1; S.funnel.material.map.offset.y = (S.t * -0.25) % 1;
+        S.spray.forEach(function(p) {
+          p.a += dt * 1.6;
+          p.m.position.set(Math.sin(p.a) * p.r * grow, 6 + p.h, Math.cos(p.a) * p.r * grow);
+          p.m.scale.set(p.s * grow, p.s * 0.8 * grow, 1);
+        });
+        // inside it: violent, and it hurts
+        var d = Math.hypot(position.x - S.x, position.z - S.z);
+        if (d < 1500 && !WX2.said['spout' + idx]) { WX2.said['spout' + idx] = true; samToast('WATERSPOUT AHEAD — KEEP CLEAR', '#cfe3ff', 2.6); }
+        if (d > 3000) WX2.said['spout' + idx] = false;
+        if (started && !crashing && !ejecting && !wasGrounded && grow > 0.5 && d < 70 && position.y < S.base) {
+          var k = 1 - d / 70;
+          fxShake = Math.max(fxShake, 0.9 * k);
+          rollAngle += (Math.random() - 0.5) * 2.4 * k * dt * 6;
+          heading += 1.6 * k * dt;
+          position.y += 14 * k * dt;
+          position.x += (S.z - position.z) / Math.max(d, 1) * 18 * k * dt; position.z -= (S.x - position.x) / Math.max(d, 1) * 18 * k * dt;
+          if ((WX2.hurtT -= dt) <= 0) {
+            WX2.hurtT = 0.8;
+            if (typeof kjWear === 'function') kjWear(0.03 * k, 'waterspout');
+            if (k > 0.6 && Math.random() < 0.25) wreckDamage('waterspout');
+          }
+        }
+      });
+    }
+    function wx2Map(ctx, toS, scale) {
+      WX2.spouts.forEach(function(S) {
+        if (!S.on) return;
+        var p = toS(S.x, S.z);
+        ctx.strokeStyle = 'rgba(255,90,90,0.9)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); for (var a = 0; a < 12; a += 0.4) { var r = 1 + a * 0.6; ctx.lineTo(p.x + Math.cos(a + WX2.t * 3) * r, p.y + Math.sin(a + WX2.t * 3) * r); } ctx.stroke();
+      });
+      var D = WX2.dust;
+      if (D.on) {
+        var q = toS(D.x, D.z), R = D.r * scale, g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, R);
+        g.addColorStop(0, 'rgba(200,140,70,0.4)'); g.addColorStop(1, 'rgba(200,140,70,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, R, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    // ---- rainbows ----
+    var _wx2A = new THREE.Vector3();
+    function wx2Rainbow(dt) {
+      var L = sunDirNorm, want = 0;
+      if (WXF.on && L.y > 0.02 && L.y < 0.62 && WX2.dustI < 0.1 && currentRainIntensity < 0.5) {
+        // a shower somewhere opposite the sun, not too far, while you're in the dry or the drizzle
+        var ax = -L.x, az = -L.z, al = Math.hypot(ax, az) || 1; ax /= al; az /= al;
+        WXF.cells.forEach(function(c) {
+          if (!c.grp.visible) return;
+          var dx = c.x - position.x, dz = c.z - position.z, d = Math.hypot(dx, dz);
+          if (d > 14000) return;
+          var dot = (dx * ax + dz * az) / Math.max(d, 1), edge = Math.max(0, d - c.r);
+          var w = gfxSmoothstepJS(0.45, 0.85, dot) * (1 - gfxSmoothstepJS(2000, 9000, edge)) * (d > c.r * 0.3 ? 1 : 0.3);
+          if (w > want) want = w;
+        });
+        want *= gfxSmoothstepJS(0.02, 0.1, L.y) * (1 - gfxSmoothstepJS(0.45, 0.62, L.y));
+      }
+      WX2.bowA += (want - WX2.bowA) * Math.min(1, dt * 0.35);
+      var B = WX2.bow;
+      B.visible = WX2.bowA > 0.01;
+      if (!B.visible) return;
+      // centred on the antisolar point, 1.9 km out, sized so the quad covers 56° of radius
+      var cam = camera.position, D = 1900;
+      _wx2A.copy(L).multiplyScalar(-D).add(cam);
+      B.position.copy(_wx2A);
+      B.lookAt(cam);
+      var R = D * Math.tan(56 * Math.PI / 180);
+      B.scale.set(R * 2, R * 2, 1);
+      B.material.uniforms.uA.value = WX2.bowA * 0.9;
+      B.material.uniforms.uHorizon.value = cam.y - D * 0.01;
+    }
+    // ---- sand streaming past the canopy ----
+    function wx2Sand(dt) {
+      var I = WX2.dustI, m = WX2.sand.material;
+      m.opacity = Math.min(0.85, I * 1.1);
+      WX2.sand.visible = I > 0.02;
+      if (!WX2.sand.visible) return;
+      var box = 70, cam = camera.position, off = WX2.sandOff, D = WX2.dust;
+      off.x += Math.sin(D.dir) * 24 * dt; off.z += Math.cos(D.dir) * 24 * dt; off.y -= 2 * dt;
+      var pa = WX2.sand.geometry.attributes.position.array, b = WX2.sandBase;
+      for (var i = 0; i < pa.length; i += 3) {
+        pa[i] = cam.x + ((((b[i] * box + off.x - cam.x) % box) + box) % box) - box / 2;
+        pa[i + 1] = cam.y + ((((b[i + 1] * box + off.y - cam.y) % box) + box) % box) - box / 2;
+        pa[i + 2] = cam.z + ((((b[i + 2] * box + off.z - cam.z) % box) + box) % box) - box / 2;
+      }
+      WX2.sand.geometry.attributes.position.needsUpdate = true;
+    }
+    // ---- the wind readout ----
+    function wx2Hud(dt) {
+      if ((WX2.hudT -= dt) > 0) return;
+      WX2.hudT = 0.25;
+      var w = Math.hypot(windPush.x, windPush.z), show = started && !isCarMode && w > 1.2 && !(typeof HY !== 'undefined' && HY.on);
+      WX2.hud.style.display = show ? 'flex' : 'none';
+      if (!show) return;
+      // windPush is where the air is going; pilots name the wind by where it comes from
+      var from = (Math.atan2(-windPush.x, windPush.z) * 180 / Math.PI + 360) % 360;
+      var rel = Math.atan2(windPush.x, windPush.z) - Math.atan2(-Math.sin(heading), -Math.cos(heading));
+      document.getElementById('wx2Arrow').setAttribute('transform', 'rotate(' + (-rel * 180 / Math.PI).toFixed(0) + ')');
+      var kt = w * 1.944, fx = -Math.sin(heading), fz = -Math.cos(heading);
+      var cross = windPush.x * -fz + windPush.z * fx, head = -(windPush.x * fx + windPush.z * fz);
+      var txt = 'WIND ' + String(Math.round(from / 10) * 10 || 360).padStart(3, '0') + '° ' + Math.round(kt) + ' KT';
+      var agl = typeof kjAgl === 'function' ? kjAgl() : 999;
+      if (agl < 400) txt += '<small>' + (head >= 0 ? 'HEAD ' : 'TAIL ') + Math.round(Math.abs(head) * 1.944) + ' · X ' + Math.round(Math.abs(cross) * 1.944) + (cross > 0 ? ' L' : ' R') + '</small>';
+      document.getElementById('wx2Txt').innerHTML = txt;
+    }
+    function wx2Update(dt) {
+      if (!started) { WX2.hud.style.display = 'none'; return; }
+      wx2Spouts(dt);
+      wx2Rainbow(dt);
+      wx2Sand(dt);
+      wx2Hud(dt);
+    }
+
+    /* ============================================================
+       WILDLIFE — animals that live in the world around you
+       Every species is one instanced mesh built from primitives, each part tagged with a joint
+       (legs, neck, tail, wings, flukes) and a pivot. A small vertex-shader rig swings those joints
+       per instance — walk, gallop, graze, flap, glide, swim — so a whole herd costs one draw call.
+         · DEER graze the meadows in herds, heads down, and bolt in a gallop from a low aircraft
+         · CAMELS walk in caravans across the Dust Sea's sand
+         · POLAR BEARS prowl the north and SEALS haul out on the frozen flats (they flop about if you buzz them)
+         · HUMPBACK WHALES cruise offshore: they blow, arch, throw their flukes up and dive — and sometimes breach
+         · DOLPHIN pods porpoise along in leaping arcs
+         · GEESE migrate high in V formations, honking; fly through one and it's a BIRD STRIKE
+         · EAGLES ride thermals over sunlit land — circle with them and the rising air lifts you too
+       New species you get a good look at go in your WILDLIFE LOG (shown in the TRIPS panel).
+       ============================================================ */
+    var WL = { t: 0, sp: {}, herds: [], pods: [], whales: [], vees: [], thermals: [], log: {}, spawnT: 0, strikeT: 0, varioT: 0, lift: 0 };
+    var WL_KEY = 'gp-wild-v1';
+    var WL_NAMES = { deer: 'RED DEER', camel: 'CAMEL', bear: 'POLAR BEAR', seal: 'HARBOUR SEAL', whale: 'HUMPBACK WHALE', dolphin: 'DOLPHIN', goose: 'GREYLAG GOOSE', eagle: 'SEA EAGLE', gull: 'HERRING GULL' };
+    try { WL.log = JSON.parse(localStorage.getItem(WL_KEY) || '{}') || {}; } catch (e) { WL.log = {}; }
+    var WL_U = { uWlT: { value: 0 } };
+    // ---- the rig: joint types (aRigT) and how they move, all in the vertex shader ----
+    //   1/2 legs (opposite phase)  3 head+neck (graze dip, bob)  4 tail (swish)
+    //   5/6 left/right wing (flap, or held for a glide)  7 flukes (swim stroke)  8 rear body (half stroke)
+    var WL_RIG_GLSL = [
+      'uniform float uWlT;',
+      'attribute float aRigT; attribute vec3 aPiv; attribute vec4 iAnim;',
+      'mat3 wlRx(float a){ float c=cos(a), s=sin(a); return mat3(1.,0.,0., 0.,c,s, 0.,-s,c); }',
+      'mat3 wlRy(float a){ float c=cos(a), s=sin(a); return mat3(c,0.,-s, 0.,1.,0., s,0.,c); }',
+      'mat3 wlRz(float a){ float c=cos(a), s=sin(a); return mat3(c,s,0., -s,c,0., 0.,0.,1.); }',
+      'mat3 wlJoint(){',
+      '  float ph = uWlT * iAnim.y + iAnim.x, amp = iAnim.z, k = iAnim.w;',
+      '  if (aRigT < 0.5) return mat3(1.0);',
+      '  if (aRigT < 1.5) return wlRx(sin(ph) * 0.62 * amp);',
+      '  if (aRigT < 2.5) return wlRx(sin(ph + 3.14159) * 0.62 * amp);',
+      '  if (aRigT < 3.5) return wlRx(k * 0.95 + sin(ph * 2.0) * 0.06 * amp + sin(uWlT * 1.7 + iAnim.x) * 0.04 * k);',
+      '  if (aRigT < 4.5) return wlRy(sin(uWlT * 2.3 + iAnim.x * 3.0) * 0.35 + sin(ph) * 0.2 * amp);',
+      '  float flap = mix(sin(ph) * 0.85 * amp + 0.1, 0.06 + sin(uWlT * 0.9 + iAnim.x) * 0.03, k);',
+      '  if (aRigT < 5.5) return wlRz(-flap);',
+      '  if (aRigT < 6.5) return wlRz(flap);',
+      '  if (aRigT < 7.5) return wlRx(sin(ph) * 0.5 * amp + k);',
+      '  return wlRx(sin(ph - 0.6) * 0.18 * amp + k * 0.4);',
+      '}'
+    ].join('\n');
+    function wlMaterial(rough) {
+      var m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: rough || 0.85, metalness: 0, flatShading: false });
+      m.onBeforeCompile = function(sh) {
+        sh.uniforms.uWlT = WL_U.uWlT;
+        sh.vertexShader = WL_RIG_GLSL + '\n' + sh.vertexShader
+          .replace('#include <beginnormal_vertex>', 'mat3 wlM = wlJoint();\nvec3 objectNormal = wlM * vec3(normal);\n#ifdef USE_TANGENT\nvec3 objectTangent = vec3(tangent.xyz);\n#endif')
+          .replace('#include <begin_vertex>', 'vec3 transformed = wlM * (position - aPiv) + aPiv;');
+      };
+      return m;
+    }
+    // a part: geometry already in the animal's frame (+z forward, +y up, metres), its colour, joint and pivot
+    function wlP(geo, hex, rig, piv, pos, rot, scl) {
+      if (scl) geo.scale(scl[0], scl[1], scl[2]);
+      if (rot) geo.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rot[0], rot[1], rot[2])));
+      if (pos) geo.translate(pos[0], pos[1], pos[2]);
+      return { geo: geo, col: new THREE.Color(hex), rig: rig || 0, piv: piv || [0, 0, 0] };
+    }
+    function wlSph(r, w, h) { return new THREE.SphereGeometry(r, w || 12, h || 9); }
+    function wlCyl(r0, r1, len, seg) { return new THREE.CylinderGeometry(r0, r1, len, seg || 7); }
+    // a limb from a to b
+    function wlRod(a, b, r0, r1) {
+      var d = new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]), len = d.length();
+      var g = new THREE.CylinderGeometry(r1 === undefined ? r0 : r1, r0, len, 7);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize())));
+      g.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+      return g;
+    }
+    function wlMerge(parts) {
+      var P = [], N = [], C = [], R = [], V = [];
+      parts.forEach(function(p) {
+        var g = p.geo.index ? p.geo.toNonIndexed() : p.geo;
+        g.computeVertexNormals();
+        var pa = g.attributes.position.array, na = g.attributes.normal.array;
+        for (var i = 0; i < pa.length; i += 3) {
+          P.push(pa[i], pa[i + 1], pa[i + 2]); N.push(na[i], na[i + 1], na[i + 2]);
+          // a little shading variation so the hide doesn't read as flat plastic
+          var v = 0.9 + 0.1 * Math.sin(pa[i] * 9.1 + pa[i + 1] * 5.3 + pa[i + 2] * 7.7);
+          C.push(p.col.r * v, p.col.g * v, p.col.b * v);
+          R.push(p.rig); V.push(p.piv[0], p.piv[1], p.piv[2]);
+        }
+      });
+      var out = new THREE.BufferGeometry();
+      out.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+      out.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+      out.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+      out.setAttribute('aRigT', new THREE.Float32BufferAttribute(R, 1));
+      out.setAttribute('aPiv', new THREE.Float32BufferAttribute(V, 3));
+      return out;
+    }
+    // four legs with knees: front-left and back-right swing together, then the other pair
+    function wlLegs(parts, hex, hoof, hipY, fz, bz, sx, r, kneeBend) {
+      [[-sx, fz, 1], [sx, fz, 2], [-sx, bz, 2], [sx, bz, 1]].forEach(function(l) {
+        var kz = l[1] + (l[1] > 0 ? -kneeBend : kneeBend) * 0.4, ky = hipY * 0.48;
+        parts.push(wlP(wlRod([l[0], hipY + 0.05, l[1]], [l[0], ky, kz], r * 1.5, r), hex, l[2], [0, hipY, l[1]]));
+        parts.push(wlP(wlRod([l[0], ky, kz], [l[0], 0.06, l[1]], r, r * 0.8), hex, l[2], [0, hipY, l[1]]));
+        parts.push(wlP(wlCyl(r * 0.95, r * 1.1, 0.1, 6), hoof, l[2], [0, hipY, l[1]], [l[0], 0.05, l[1]]));
+      });
+    }
+    function wlBuildDeer() {
+      var hide = 0x8b5a32, dark = 0x5a3a20, cream = 0xe6d6b4, hoof = 0x2a2420, antler = 0xd9c9a6, p = [];
+      p.push(wlP(wlSph(1, 14, 10), hide, 0, null, [0, 1.12, 0], null, [0.3, 0.36, 0.78]));
+      p.push(wlP(wlSph(1, 10, 8), cream, 0, null, [0, 0.98, 0.05], null, [0.24, 0.24, 0.6]));            // pale belly
+      p.push(wlP(wlSph(1, 10, 8), cream, 0, null, [0, 1.17, -0.66], null, [0.22, 0.24, 0.16]));          // rump patch
+      p.push(wlP(wlSph(1, 10, 8), hide, 0, null, [0, 1.2, 0.5], null, [0.29, 0.34, 0.34]));              // shoulders
+      var nk = [0, 1.25, 0.6];
+      p.push(wlP(wlRod([0, 1.22, 0.6], [0, 1.66, 0.86], 0.15, 0.1), dark, 3, nk));                       // neck with a darker mane
+      p.push(wlP(wlSph(1, 10, 8), hide, 3, nk, [0, 1.74, 0.97], [0.5, 0, 0], [0.11, 0.12, 0.22]));       // head
+      p.push(wlP(wlSph(1, 8, 6), 0x1a1410, 3, nk, [0, 1.66, 1.17], null, [0.05, 0.045, 0.05]));          // nose
+      [-1, 1].forEach(function(s) {
+        p.push(wlP(new THREE.ConeGeometry(0.05, 0.17, 6), hide, 3, nk, [s * 0.09, 1.86, 0.92], [0, 0, s * -0.9]));   // ears
+        // antlers: a beam with three tines each side
+        p.push(wlP(wlRod([s * 0.05, 1.82, 0.95], [s * 0.22, 2.2, 0.86], 0.022, 0.016), antler, 3, nk));
+        p.push(wlP(wlRod([s * 0.22, 2.2, 0.86], [s * 0.3, 2.42, 0.78], 0.016, 0.01), antler, 3, nk));
+        p.push(wlP(wlRod([s * 0.12, 1.96, 0.92], [s * 0.16, 2.02, 1.08], 0.014, 0.008), antler, 3, nk));
+        p.push(wlP(wlRod([s * 0.2, 2.14, 0.87], [s * 0.26, 2.22, 1.02], 0.014, 0.008), antler, 3, nk));
+        p.push(wlP(wlRod([s * 0.27, 2.32, 0.81], [s * 0.38, 2.4, 0.9], 0.012, 0.007), antler, 3, nk));
+      });
+      p.push(wlP(wlSph(1, 8, 6), cream, 4, [0, 1.2, -0.72], [0, 1.16, -0.8], null, [0.06, 0.1, 0.06]));
+      wlLegs(p, hide, hoof, 0.95, 0.5, -0.55, 0.15, 0.045, 0.12);
+      return wlMerge(p);
+    }
+    function wlBuildCamel() {
+      var hide = 0xc19a64, dark = 0x9a744a, hoof = 0x5b4632, p = [];
+      p.push(wlP(wlSph(1, 14, 10), hide, 0, null, [0, 1.75, 0], null, [0.42, 0.45, 0.95]));
+      p.push(wlP(wlSph(1, 12, 9), dark, 0, null, [0, 2.2, -0.05], null, [0.32, 0.42, 0.45]));           // the hump
+      // a saddle blanket and a load on some: everyone gets a striped blanket
+      p.push(wlP(new THREE.BoxGeometry(0.9, 0.06, 0.5), 0xa8322a, 0, null, [0, 2.12, 0.42]));
+      var nk = [0, 1.9, 0.82];
+      p.push(wlP(wlRod([0, 1.95, 0.8], [0, 1.5, 1.45], 0.2, 0.13), hide, 3, nk));                        // the neck swoops forward and down
+      p.push(wlP(wlSph(0.14, 8, 6), hide, 3, nk, [0, 1.5, 1.45]));
+      p.push(wlP(wlRod([0, 1.5, 1.45], [0, 2.1, 1.85], 0.13, 0.1), hide, 3, nk));                        // and up to the head
+      p.push(wlP(wlSph(1, 10, 8), hide, 3, nk, [0, 2.18, 2.02], [0.35, 0, 0], [0.13, 0.14, 0.3]));
+      p.push(wlP(wlSph(1, 8, 6), dark, 3, nk, [0, 2.1, 2.28], null, [0.09, 0.08, 0.08]));                  // muzzle
+      [-1, 1].forEach(function(s) { p.push(wlP(wlSph(1, 6, 5), dark, 3, nk, [s * 0.09, 2.32, 1.92], null, [0.03, 0.06, 0.03])); });
+      p.push(wlP(wlRod([0, 1.85, -0.9], [0, 1.25, -1.0], 0.04, 0.02), dark, 4, [0, 1.85, -0.9]));
+      wlLegs(p, hide, hoof, 1.55, 0.62, -0.62, 0.22, 0.09, 0.1);
+      return wlMerge(p);
+    }
+    function wlBuildBear() {
+      var fur = 0xeee8d8, shade = 0xd6ceba, black = 0x111111, p = [];
+      p.push(wlP(wlSph(1, 14, 10), fur, 0, null, [0, 0.95, -0.1], null, [0.55, 0.58, 1.05]));
+      p.push(wlP(wlSph(1, 12, 9), shade, 0, null, [0, 1.0, 0.65], null, [0.48, 0.52, 0.5]));            // shoulders
+      var nk = [0, 1.0, 0.95];
+      p.push(wlP(wlRod([0, 1.0, 0.9], [0, 0.92, 1.4], 0.3, 0.22), fur, 3, nk));                          // long neck, low
+      p.push(wlP(wlSph(1, 12, 9), fur, 3, nk, [0, 0.92, 1.55], null, [0.2, 0.2, 0.3]));
+      p.push(wlP(wlSph(1, 8, 6), black, 3, nk, [0, 0.9, 1.85], null, [0.06, 0.05, 0.05]));
+      [-1, 1].forEach(function(s) {
+        p.push(wlP(wlSph(1, 6, 5), fur, 3, nk, [s * 0.13, 1.1, 1.45], null, [0.05, 0.05, 0.03]));
+        p.push(wlP(wlSph(1, 6, 5), black, 3, nk, [s * 0.08, 0.98, 1.7], null, [0.02, 0.02, 0.02]));
+      });
+      wlLegs(p, fur, shade, 0.75, 0.62, -0.7, 0.28, 0.12, 0.05);
+      return wlMerge(p);
+    }
+    function wlBuildSeal() {
+      var hide = 0x6f6c68, belly = 0xa9a39a, black = 0x111111, p = [];
+      p.push(wlP(wlSph(1, 14, 10), hide, 0, null, [0, 0.3, 0.1], null, [0.34, 0.3, 0.8]));
+      p.push(wlP(wlSph(1, 12, 8), belly, 0, null, [0, 0.2, 0.1], null, [0.3, 0.16, 0.72]));
+      p.push(wlP(wlSph(1, 12, 8), hide, 8, [0, 0.3, -0.4], [0, 0.26, -0.75], null, [0.24, 0.2, 0.45]));
+      p.push(wlP(new THREE.BoxGeometry(0.42, 0.04, 0.22), hide, 7, [0, 0.24, -1.05], [0, 0.22, -1.2]));   // hind flippers
+      var nk = [0, 0.4, 0.7];
+      p.push(wlP(wlSph(1, 12, 9), hide, 3, nk, [0, 0.5, 0.95], null, [0.18, 0.17, 0.22]));
+      [-1, 1].forEach(function(s) {
+        p.push(wlP(wlSph(1, 6, 5), black, 3, nk, [s * 0.09, 0.56, 1.1], null, [0.035, 0.035, 0.03]));
+        p.push(wlP(new THREE.BoxGeometry(0.22, 0.03, 0.12), hide, 0, null, [s * 0.32, 0.12, 0.45], [0, s * 0.5, s * -0.3]));
+      });
+      p.push(wlP(wlSph(1, 6, 5), black, 3, nk, [0, 0.5, 1.16], null, [0.04, 0.03, 0.03]));
+      return wlMerge(p);
+    }
+    function wlBuildWhale() {
+      var back = 0x262b33, belly = 0xbfc3c6, p = [];
+      p.push(wlP(wlSph(1, 18, 12), back, 0, null, [0, 0, 1.0], null, [1.55, 1.45, 5.2]));
+      p.push(wlP(wlSph(1, 14, 10), belly, 0, null, [0, -0.45, 1.7], null, [1.25, 1.0, 4.0]));            // pale grooved throat
+      // knobbly tubercles along the head
+      for (var i = 0; i < 6; i++) { var tz = 3.6 + i * 0.45, ty = 1.45 * Math.sqrt(Math.max(0, 1 - Math.pow((tz - 1.0) / 5.2, 2))) - 0.06; p.push(wlP(wlSph(0.13, 6, 4), back, 0, null, [(i % 2 ? 0.3 : -0.3), ty, tz])); }
+      p.push(wlP(wlSph(1, 14, 10), back, 8, [0, 0, -2.5], [0, 0.05, -4.2], null, [0.95, 0.9, 3.0]));       // tail stock
+      p.push(wlP(new THREE.ConeGeometry(0.35, 0.7, 6), back, 8, [0, 0, -2.5], [0, 0.95, -2.8], [-0.6, 0, 0]));    // small dorsal fin
+      // flukes: dark on top, white and mottled underneath
+      var fl = new THREE.Shape();
+      fl.moveTo(0, 0.3); fl.bezierCurveTo(1.2, 0.2, 2.6, -0.4, 3.3, -1.3); fl.bezierCurveTo(2.4, -1.1, 1.4, -0.9, 0.35, -1.0);
+      fl.lineTo(0, -0.7); fl.lineTo(-0.35, -1.0); fl.bezierCurveTo(-1.4, -0.9, -2.4, -1.1, -3.3, -1.3); fl.bezierCurveTo(-2.6, -0.4, -1.2, 0.2, 0, 0.3);
+      var fg = new THREE.ExtrudeGeometry(fl, { depth: 0.14, bevelEnabled: false });
+      fg.rotateX(Math.PI / 2); p.push(wlP(fg, back, 7, [0, 0, -6.6], [0, 0.07, -6.9]));
+      var fg2 = new THREE.ExtrudeGeometry(fl, { depth: 0.02, bevelEnabled: false });
+      fg2.rotateX(Math.PI / 2); p.push(wlP(fg2, belly, 7, [0, 0, -6.6], [0, -0.09, -6.9]));
+      // the long white pectoral fins
+      [-1, 1].forEach(function(s) {
+        p.push(wlP(wlSph(1, 10, 6), belly, 0, null, [s * 2.6, -0.75, 2.2], [0.1, s * 0.5, s * 0.35], [2.2, 0.12, 0.42]));
+      });
+      return wlMerge(p);
+    }
+    function wlBuildDolphin() {
+      var back = 0x5d6b78, belly = 0xd7dde2, p = [];
+      p.push(wlP(wlSph(1, 14, 10), back, 0, null, [0, 0, 0.2], null, [0.3, 0.32, 1.1]));
+      p.push(wlP(wlSph(1, 12, 8), belly, 0, null, [0, -0.1, 0.3], null, [0.25, 0.22, 0.95]));
+      p.push(wlP(wlRod([0, -0.05, 1.2], [0, -0.07, 1.55], 0.07, 0.045), back, 0));                       // the beak
+      p.push(wlP(new THREE.ConeGeometry(0.15, 0.4, 5), back, 0, null, [0, 0.42, -0.05], [-0.55, 0, 0]));
+      p.push(wlP(wlSph(1, 10, 8), back, 8, [0, 0, -0.5], [0, 0, -0.9], null, [0.18, 0.2, 0.55]));
+      p.push(wlP(new THREE.BoxGeometry(0.7, 0.04, 0.22), back, 7, [0, 0, -1.3], [0, 0, -1.45]));
+      [-1, 1].forEach(function(s) { p.push(wlP(new THREE.BoxGeometry(0.3, 0.03, 0.14), back, 0, null, [s * 0.3, -0.15, 0.55], [0.3, s * 0.4, s * -0.4])); });
+      return wlMerge(p);
+    }
+    // birds: body along +z, wings out along x hinged at the shoulder, feathered with a darker trailing edge
+    function wlWing(p, s, span, chord, inner, mid, tip, rig, slots) {
+      var piv = [s * 0.08, 0, 0.02];
+      p.push(wlP(new THREE.BoxGeometry(span * 0.5, 0.03, chord), inner, rig, piv, [s * (0.08 + span * 0.25), 0, 0]));
+      p.push(wlP(new THREE.BoxGeometry(span * 0.5, 0.025, chord * 0.32), mid, rig, piv, [s * (0.08 + span * 0.25), -0.005, -chord * 0.62]));
+      if (slots) {
+        // eagle-style slotted primaries: separate fingers at the tip
+        for (var i = 0; i < 5; i++) p.push(wlP(new THREE.BoxGeometry(span * 0.32, 0.02, chord * 0.14), tip, rig, piv, [s * (0.08 + span * 0.62), 0, chord * (0.35 - i * 0.2)], [0, s * (0.15 - i * 0.07), 0]));
+      } else {
+        p.push(wlP(new THREE.BoxGeometry(span * 0.36, 0.025, chord * 0.75), tip, rig, piv, [s * (0.08 + span * 0.66), 0, -chord * 0.08], [0, s * 0.18, 0]));
+      }
+    }
+    function wlBuildGoose() {
+      var body = 0x77706a, pale = 0xcfc8bd, black = 0x161616, p = [];
+      p.push(wlP(wlSph(1, 12, 8), body, 0, null, [0, 0, 0], null, [0.17, 0.17, 0.48]));
+      p.push(wlP(wlSph(1, 10, 6), pale, 0, null, [0, -0.06, -0.08], null, [0.13, 0.11, 0.36]));
+      p.push(wlP(wlRod([0, 0.04, 0.38], [0, 0.07, 0.85], 0.05, 0.04), black, 0));
+      p.push(wlP(wlSph(1, 8, 6), black, 0, null, [0, 0.08, 0.92], null, [0.055, 0.06, 0.09]));
+      [-1, 1].forEach(function(s) { p.push(wlP(wlSph(1, 6, 4), 0xf2f2f2, 0, null, [s * 0.04, 0.07, 0.9], null, [0.02, 0.03, 0.04])); });
+      p.push(wlP(new THREE.ConeGeometry(0.025, 0.09, 5), 0x2a2a2a, 0, null, [0, 0.07, 1.0], [Math.PI / 2, 0, 0]));
+      p.push(wlP(new THREE.BoxGeometry(0.18, 0.02, 0.16), 0xe8e4dc, 0, null, [0, 0.02, -0.5]));
+      wlWing(p, -1, 1.65, 0.32, body, 0x4c4741, 0x2f2c29, 5);
+      wlWing(p, 1, 1.65, 0.32, body, 0x4c4741, 0x2f2c29, 6);
+      return wlMerge(p);
+    }
+    function wlBuildEagle() {
+      var brown = 0x4a3220, dark = 0x2c1e14, white = 0xf4f1ea, yellow = 0xe8b830, p = [];
+      p.push(wlP(wlSph(1, 12, 8), brown, 0, null, [0, 0, 0], null, [0.2, 0.2, 0.5]));
+      p.push(wlP(wlSph(1, 10, 8), white, 0, null, [0, 0.04, 0.5], null, [0.12, 0.12, 0.16]));
+      p.push(wlP(new THREE.ConeGeometry(0.04, 0.16, 6), yellow, 0, null, [0, 0.02, 0.68], [Math.PI / 2 + 0.3, 0, 0]));
+      p.push(wlP(new THREE.BoxGeometry(0.38, 0.025, 0.36), white, 0, null, [0, 0, -0.62]));                // white tail fan
+      wlWing(p, -1, 2.1, 0.5, brown, dark, dark, 5, true);
+      wlWing(p, 1, 2.1, 0.5, brown, dark, dark, 6, true);
+      return wlMerge(p);
+    }
+    // ---- one instanced mesh per species, written each frame from its live agents ----
+    function wlSpecies(key, geo, max, rough, shadow) {
+      var g = geo;
+      var anim = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4); anim.setUsage(THREE.DynamicDrawUsage);
+      g.setAttribute('iAnim', anim);
+      var m = new THREE.InstancedMesh(g, wlMaterial(rough), max);
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.frustumCulled = false; m.castShadow = !!shadow; m.receiveShadow = false; m.count = 0;
+      scene.add(m);
+      WL.sp[key] = { mesh: m, anim: anim, n: 0, max: max };
+      return WL.sp[key];
+    }
+    var _wlM = new THREE.Matrix4(), _wlQ = new THREE.Quaternion(), _wlE = new THREE.Euler(0, 0, 0, 'YXZ'), _wlS = new THREE.Vector3(), _wlV = new THREE.Vector3();
+    function wlPut(key, a) {
+      var S = WL.sp[key]; if (S.n >= S.max) return;
+      _wlE.set(a.pitch || 0, a.yaw, a.roll || 0); _wlQ.setFromEuler(_wlE);
+      var sc = a.scale || 1; _wlS.set(sc, sc, sc);
+      _wlM.compose(_wlV.set(a.x, a.y, a.z), _wlQ, _wlS);
+      S.mesh.setMatrixAt(S.n, _wlM);
+      S.anim.setXYZW(S.n, a.ph || 0, a.freq || 0, a.amp || 0, a.k || 0);
+      S.n++;
+    }
+    (function wlBuild() {
+      wlSpecies('deer', wlBuildDeer(), 48, 0.9, true);
+      wlSpecies('camel', wlBuildCamel(), 24, 0.9, true);
+      wlSpecies('bear', wlBuildBear(), 6, 0.9, true);
+      wlSpecies('seal', wlBuildSeal(), 24, 0.6, true);
+      wlSpecies('whale', wlBuildWhale(), 6, 0.45);
+      wlSpecies('dolphin', wlBuildDolphin(), 24, 0.35);
+      wlSpecies('goose', wlBuildGoose(), 40, 0.9);
+      wlSpecies('eagle', wlBuildEagle(), 6, 0.9);
+      // whale blows: a tall puff of spray
+      WL.blowTex = makeRadialGlowTexture('255,255,255', '220,230,240');
+    })();
+    // ---- where things live ----
+    function wlLandOk(x, z, kind) {
+      var h = getTerrainHeight(x, z);
+      if (h < WATER_LEVEL + 3) return null;
+      var dw = regDesertW(x, z), aw = regArcticW(x, z);
+      if (kind === 'deer') {
+        if (dw > 0.05 || aw > 0.35 || h > 230 || riverCarveBlend(x, z) > 0) return null;
+        if (Math.hypot(x - RUNWAY_CENTER_X, z - RUNWAY_CENTER_Z) < 1600) return null;
+        if (window.__citySpot && Math.hypot(x - window.__citySpot.x, z - window.__citySpot.z) < (window.__citySpot.radius || 600) + 500) return null;
+        if (dtNear(x, z, REG_VOLC, REG_VOLC.r * 1.4)) return null;
+      } else if (kind === 'camel') { if (dw < 0.9 || h > 34) return null; }
+      else if (kind === 'bear' || kind === 'seal') { if (aw < 0.85) return null; if (kind === 'seal' && h > 90) return null; }
+      // level enough to stand around on
+      var s = Math.abs(getTerrainHeight(x + 8, z) - h) + Math.abs(getTerrainHeight(x, z + 8) - h);
+      return s < 4.5 ? h : null;
+    }
+    function wlRing(r0, r1) { var a = Math.random() * Math.PI * 2, r = r0 + Math.random() * (r1 - r0); return { x: position.x + Math.sin(a) * r, z: position.z + Math.cos(a) * r }; }
+    function wlSpawnHerd(kind) {
+      for (var tries = 0; tries < 14; tries++) {
+        var c = wlRing(700, 2600), h = wlLandOk(c.x, c.z, kind);
+        if (h === null) continue;
+        var n = kind === 'deer' ? 6 + Math.floor(Math.random() * 7) : kind === 'camel' ? 5 + Math.floor(Math.random() * 4) : kind === 'bear' ? 1 + (Math.random() < 0.4 ? 1 : 0) : 5 + Math.floor(Math.random() * 6);
+        var H = { kind: kind, x: c.x, z: c.z, dir: Math.random() * Math.PI * 2, flee: 0, a: [], t: 0 };
+        for (var i = 0; i < n; i++) {
+          var o = kind === 'camel' ? { u: 0, v: -i * 4.2 } : { u: (Math.random() - 0.5) * (kind === 'seal' ? 30 : 46), v: (Math.random() - 0.5) * (kind === 'seal' ? 30 : 46) };
+          H.a.push({ ou: o.u, ov: o.v, x: c.x, y: h, z: c.z, yaw: Math.random() * 6.28, ph: Math.random() * 6.28, k: Math.random(), kT: Math.random() * 5, walk: 0,
+                     scale: kind === 'deer' ? (i === 0 ? 1.12 : 0.82 + Math.random() * 0.2) : kind === 'seal' ? 0.85 + Math.random() * 0.35 : kind === 'bear' ? (i ? 0.7 : 1.05) : 0.95 + Math.random() * 0.1 });
+        }
+        WL.herds.push(H);
+        return true;
+      }
+      return false;
+    }
+    function wlSea(x, z, depth) { return getTerrainHeight(x, z) < WATER_LEVEL - depth; }
+    function wlSpawnWhale() {
+      for (var t = 0; t < 10; t++) {
+        var c = wlRing(900, 3800); if (!wlSea(c.x, c.z, 30)) continue;
+        var n = 1 + Math.floor(Math.random() * 3), dir = Math.random() * 6.28;
+        for (var i = 0; i < n; i++) WL.whales.push({ x: c.x + i * 30, z: c.z + i * 22, y: WATER_LEVEL - 25, yaw: dir, pitch: 0, roll: 0, state: 'rise', t: 0, blowT: 2 + Math.random() * 4, ph: Math.random() * 6, scale: i ? 0.75 : 1, spd: 3.2 });
+        return true;
+      }
+      return false;
+    }
+    function wlSpawnPod() {
+      for (var t = 0; t < 10; t++) {
+        var c = wlRing(500, 2600); if (!wlSea(c.x, c.z, 6)) continue;
+        var P = { x: c.x, z: c.z, dir: Math.random() * 6.28, a: [] }, n = 5 + Math.floor(Math.random() * 6);
+        for (var i = 0; i < n; i++) P.a.push({ ou: (Math.random() - 0.5) * 30, ov: (Math.random() - 0.5) * 40, off: Math.random(), rate: 0.28 + Math.random() * 0.1, splashed: false });
+        WL.pods.push(P);
+        return true;
+      }
+      return false;
+    }
+    function wlSpawnVee() {
+      var c = wlRing(2500, 3500), dir = Math.atan2(position.x - c.x, position.z - c.z) + (Math.random() - 0.5) * 1.6;
+      var gy = Math.max(getTerrainHeight(c.x, c.z), WATER_LEVEL);
+      var V = { x: c.x, z: c.z, y: Math.max(gy, WATER_LEVEL) + 220 + Math.random() * 260, dir: dir, spd: 17 + Math.random() * 3, a: [], honkT: 1 };
+      var n = 9 + Math.floor(Math.random() * 9);
+      for (var i = 0; i < n; i++) {
+        var row = Math.ceil(i / 2), side = i === 0 ? 0 : (i % 2 ? -1 : 1);
+        V.a.push({ ou: side * row * 3.3 + (Math.random() - 0.5) * 0.6, ov: -row * 2.6, oy: (Math.random() - 0.5) * 1.2, ph: Math.random() * 6.28, hit: false });
+      }
+      WL.vees.push(V);
+    }
+    function wlSpawnThermal() {
+      var day = dayTimeOfDay > 0.3 && dayTimeOfDay < 0.72 && currentRainIntensity < 0.15;
+      if (!day) return false;
+      for (var t = 0; t < 10; t++) {
+        var c = wlRing(800, 3000), h = getTerrainHeight(c.x, c.z);
+        if (h < WATER_LEVEL + 15) continue;
+        // sunlit slopes and the hot sand make the best thermals; the ice makes none
+        if (regArcticW(c.x, c.z) > 0.5) continue;
+        var T = { x: c.x, z: c.z, r: 110 + Math.random() * 60, base: h, top: h + 700 + Math.random() * 500, str: 2.2 + Math.random() * 1.8, age: 0, life: 240 + Math.random() * 240, eagles: [] };
+        var n = 1 + Math.floor(Math.random() * 2);
+        for (var i = 0; i < n; i++) T.eagles.push({ a: Math.random() * 6.28, r: 45 + Math.random() * 50, y: h + 140 + Math.random() * 250, w: 0.32 + Math.random() * 0.1, ph: Math.random() * 6.28, flapT: 0 });
+        WL.thermals.push(T);
+        return true;
+      }
+      return false;
+    }
+    // ---- the wildlife log ----
+    function wlSpot(kind, x, y, z, range) {
+      if (WL.log[kind]) return;
+      var cam = camera.position, dx = x - cam.x, dy = y - cam.y, dz = z - cam.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > range) return;
+      var e = camera.matrixWorld.elements, f = -(dx * e[8] + dy * e[9] + dz * e[10]) / Math.max(d, 1);
+      if (f < 0.75) return;
+      WL.log[kind] = Date.now();
+      try { localStorage.setItem(WL_KEY, JSON.stringify(WL.log)); } catch (er) {}
+      var n = Object.keys(WL.log).length, tot = Object.keys(WL_NAMES).length;
+      samToast('WILDLIFE SPOTTED · ' + WL_NAMES[kind] + ' (' + n + '/' + tot + ')', '#9be37a', 3);
+      samBeep(880, 0.05, 0.06); samBeep(1320, 0.07, 0.06);
+    }
+    function wlLogCount() { return Object.keys(WL.log).length + '/' + Object.keys(WL_NAMES).length; }
+    // ---- bird strike: a thump, feathers past the canopy and a smear on the glass ----
+    function wlBirdStrike(big) {
+      if (WL.strikeT > 0 || !started || crashing || ejecting || isCarMode) return;
+      WL.strikeT = 3;
+      samToast(big ? 'BIRD STRIKE — EAGLE' : 'BIRD STRIKE', '#ffb347', 2.4);
+      fxShake = Math.max(fxShake, big ? 0.5 : 0.3);
+      if (typeof wNoise === 'function') wNoise(0.25, 0.18, 'lowpass', 300, 0.7, 0.01);
+      for (var i = 0; i < 10; i++) samEmitSmoke(position, _wlV.set((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 8).clone(), 1.2, 1.5, 0.7, 0.85);
+      if (WL.smear) { WL.smear.style.opacity = '0.85'; WL.smearT = 9; }
+      if (typeof kjWear === 'function') kjWear(big ? 0.05 : 0.02, 'bird');
+    }
+    (function wlUi() {
+      var s = document.createElement('div');
+      s.style.cssText = 'position:fixed;inset:0;z-index:6;pointer-events:none;opacity:0;transition:opacity .2s;' +
+        'background:radial-gradient(ellipse 9% 7% at 47% 41%,rgba(120,40,30,.55),rgba(150,120,90,.35) 55%,transparent 75%),' +
+        'radial-gradient(ellipse 18% 4% at 52% 44%,rgba(170,150,120,.28),transparent 70%),radial-gradient(ellipse 3% 9% at 46% 50%,rgba(150,130,100,.3),transparent 70%)';
+      document.body.appendChild(s); WL.smear = s;
+    })();
+    function wlHideAll() { for (var k in WL.sp) { WL.sp[k].mesh.count = 0; } }
+    function wlUpdate(dt) {
+      WL.t += dt; WL_U.uWlT.value = WL.t;
+      if (WL.strikeT > 0) WL.strikeT -= dt;
+      if (WL.smearT > 0) { WL.smearT -= dt; if (WL.smearT <= 0 || currentRainIntensity > 0.3) { WL.smear.style.opacity = '0'; WL.smearT = 0; } }
+      if (!started || (typeof HY !== 'undefined' && HY.on)) { wlHideAll(); WL.herds.length = WL.pods.length = WL.whales.length = WL.vees.length = WL.thermals.length = 0; WL.lift = 0; return; }
+      var px = position.x, pz = position.z, agl = typeof kjAgl === 'function' ? kjAgl() : 100, airborne = !wasGrounded && !crashing;
+      // keep the world populated around you, and let things you've left far behind go
+      WL.herds = WL.herds.filter(function(H) { return Math.hypot(H.x - px, H.z - pz) < 3800; });
+      WL.pods = WL.pods.filter(function(P) { return Math.hypot(P.x - px, P.z - pz) < 3800; });
+      WL.whales = WL.whales.filter(function(W) { return Math.hypot(W.x - px, W.z - pz) < 5000; });
+      WL.vees = WL.vees.filter(function(V) { return Math.hypot(V.x - px, V.z - pz) < 4500; });
+      WL.thermals = WL.thermals.filter(function(T) { return T.age < T.life && Math.hypot(T.x - px, T.z - pz) < 4000; });
+      if ((WL.spawnT -= dt) <= 0) {
+        WL.spawnT = 1.2;
+        var count = function(k) { return WL.herds.filter(function(H) { return H.kind === k; }).length; };
+        if (count('deer') < 3) wlSpawnHerd('deer');
+        if (count('camel') < 2) wlSpawnHerd('camel');
+        if (count('bear') < 2) wlSpawnHerd('bear');
+        if (count('seal') < 2) wlSpawnHerd('seal');
+        if (WL.whales.length < 3) wlSpawnWhale();
+        if (WL.pods.length < 2) wlSpawnPod();
+        if (WL.vees.length < 1 && Math.random() < 0.25) wlSpawnVee();
+        if (WL.thermals.length < 3) wlSpawnThermal();
+      }
+      for (var k in WL.sp) WL.sp[k].n = 0;
+      // ---- herds on land ----
+      WL.herds.forEach(function(H) {
+        H.t += dt;
+        var dp = Math.hypot(H.x - px, H.z - pz);
+        var scary = airborne && dp < (isHelicopterMode ? 420 : 360) && agl < 220 && speed > 8;
+        if (scary && H.flee <= 0 && H.kind !== 'bear') {
+          H.flee = H.kind === 'deer' ? 9 : 5; H.dir = Math.atan2(H.x - px, H.z - pz) + (Math.random() - 0.5) * 0.6;
+        }
+        if (H.flee > 0) H.flee -= dt;
+        var fleeing = H.flee > 0, mv = 0;
+        if (H.kind === 'deer') mv = fleeing ? 12 : 0;
+        else if (H.kind === 'camel') { mv = fleeing ? 3.6 : 1.4; H.dir += Math.sin(H.t * 0.05) * 0.002; }
+        else if (H.kind === 'bear') { mv = 1.1; H.dir += Math.sin(H.t * 0.13) * 0.004; }
+        if (mv > 0) {
+          var nx = H.x + Math.sin(H.dir) * mv * dt, nz = H.z + Math.cos(H.dir) * mv * dt;
+          // turn back from water, cliffs and the edge of their country
+          if (wlLandOk(nx, nz, H.kind) === null) { H.dir += 1.2 + Math.random(); } else { H.x = nx; H.z = nz; }
+        }
+        var cu = Math.cos(H.dir), su = Math.sin(H.dir);
+        H.a.forEach(function(a, i) {
+          var tx = H.x + a.ou * cu + a.ov * su, tz = H.z - a.ou * su + a.ov * cu;
+          if (H.kind === 'deer' && !fleeing) {
+            // grazing: heads down for a while, up to look around, a few steps now and then
+            if ((a.kT -= dt) <= 0) { a.kT = 2 + Math.random() * 6; a.graze = Math.random() < 0.7 ? 1 : 0; a.walk = Math.random() < 0.35 ? 2 + Math.random() * 3 : 0; if (a.walk) a.wdir = Math.random() * 6.28; }
+            if (a.walk > 0) { a.walk -= dt; a.ou += Math.sin(a.wdir) * 0.9 * dt; a.ov += Math.cos(a.wdir) * 0.9 * dt; a.yaw = H.dir + a.wdir; }
+            a.k += ((a.graze || 0) - a.k) * Math.min(1, dt * 1.5);
+          } else if (H.kind === 'seal') {
+            if ((a.kT -= dt) <= 0) { a.kT = 3 + Math.random() * 7; a.graze = Math.random() < 0.5 ? -0.5 : 0.25; }
+            a.k += ((fleeing ? -0.6 : a.graze || 0) - a.k) * Math.min(1, dt * 2);
+          } else { a.k += (0 - a.k) * Math.min(1, dt * 2); }
+          var ax = a.x, az = a.z;
+          a.x += (tx - a.x) * Math.min(1, dt * (fleeing ? 3 : 1.2)); a.z += (tz - a.z) * Math.min(1, dt * (fleeing ? 3 : 1.2));
+          var vx = (a.x - ax) / Math.max(dt, 1e-4), vz = (a.z - az) / Math.max(dt, 1e-4), v = Math.hypot(vx, vz);
+          if (v > 0.25) { var wy = Math.atan2(vx, vz), dy = Math.atan2(Math.sin(wy - a.yaw), Math.cos(wy - a.yaw)); a.yaw += dy * Math.min(1, dt * 4); }
+          a.y = getTerrainHeight(a.x, a.z);
+          var gait = H.kind === 'deer' ? (v > 5 ? 13 : 6.5) : H.kind === 'camel' ? 3.6 + v * 0.9 : H.kind === 'bear' ? 3.4 : 5;
+          var amp = H.kind === 'seal' ? (fleeing ? 1 : 0.1) : THREE.MathUtils.clamp(v / (H.kind === 'deer' ? 1.6 : 1.2), 0, 1);
+          // a gallop is a bound: the body rises and pitches with each stride
+          var bound = H.kind === 'deer' && v > 5 ? Math.abs(Math.sin(WL.t * gait * 0.5 + a.ph)) * 0.35 : 0;
+          var pd = { x: a.x, y: a.y + bound, z: a.z, yaw: a.yaw, pitch: H.kind === 'deer' && v > 5 ? Math.sin(WL.t * gait + a.ph) * 0.08 : 0, scale: a.scale, ph: a.ph, freq: gait, amp: amp, k: H.kind === 'seal' ? a.k : Math.max(0, a.k) * (fleeing ? 0 : 1) };
+          if (H.kind === 'seal') { pd.freq = 7; pd.k = 0; pd.pitch = a.k * 0.3; }
+          wlPut(H.kind, pd);
+          if (i === 0) wlSpot(H.kind, a.x, a.y + 1, a.z, H.kind === 'bear' ? 650 : 520);
+        });
+        if (fleeing && H.kind === 'deer' && Math.random() < dt * 6) samEmitSmoke(_wlV.set(H.x, getTerrainHeight(H.x, H.z) + 0.5, H.z), new THREE.Vector3(0, 1.2, 0), 5, 2.2, 0.25, 0.75);
+      });
+      // ---- humpbacks ----
+      WL.whales.forEach(function(W) {
+        W.t += dt;
+        var sea = WATER_LEVEL, fwd = W.spd;
+        if (W.state === 'rise') { W.y += (sea - 0.9 - W.y) * Math.min(1, dt * 0.5); W.pitch = -0.08; if (W.y > sea - 1.4) { W.state = 'surface'; W.t = 0; W.dur = 18 + Math.random() * 20; } }
+        else if (W.state === 'surface') {
+          // rolling along the top: back and blowhole break the surface, a lazy undulation
+          W.y = sea - 0.75 + Math.sin(W.t * 0.6 + W.ph) * 0.25; W.pitch = Math.sin(W.t * 0.6 + W.ph) * 0.05;
+          if ((W.blowT -= dt) <= 0) {
+            W.blowT = 6 + Math.random() * 5;
+            var hx = W.x + Math.sin(W.yaw) * 4.5 * W.scale, hz = W.z + Math.cos(W.yaw) * 4.5 * W.scale;
+            for (var b = 0; b < 7; b++) samEmitSmoke(_wlV.set(hx, sea + 1, hz), new THREE.Vector3((Math.random() - 0.5) * 1.5, 9 + Math.random() * 5, (Math.random() - 0.5) * 1.5), 4 + Math.random() * 3, 2.6, 0.55, 0.97);
+            if (Math.hypot(hx - px, hz - pz) < 400 && typeof wNoise === 'function') wNoise(0.9, 0.06 * (1 - Math.hypot(hx - px, hz - pz) / 400), 'bandpass', 700, 0.5, 0.05);
+          }
+          if (W.t > W.dur) { W.state = Math.random() < 0.28 ? 'breach' : 'dive'; W.t = 0; if (W.state === 'breach') { W.y = sea - 14; W.vy = 0; W.pitch = -0.5; W.state = 'charge'; } }
+        } else if (W.state === 'dive') {
+          // the arch: the head goes down, the back rolls over and the flukes come up and slide under
+          W.pitch = Math.min(0.75, W.t * 0.22); W.y -= Math.max(0, W.t - 2) * 0.9 * dt;
+          W.fluke = W.t > 2 && W.t < 6;
+          if (W.t > 9) { W.state = 'deep'; W.t = 0; W.dur = 25 + Math.random() * 35; }
+        } else if (W.state === 'deep') {
+          W.y = sea - 40; fwd = 4;
+          if (W.t > W.dur) { W.state = 'rise'; W.y = sea - 18; W.blowT = 1; }
+        } else if (W.state === 'charge') {
+          // breach: up from the deep fast and steep, most of the body clears the water, a twist, a huge splash
+          W.pitch = -1.15; W.vy = (W.vy || 0) + 6 * dt; W.y += Math.min(W.vy, 11) * dt;
+          if (W.y > sea - 6) { W.state = 'air'; W.vy = 10.5; W.t = 0; }
+        } else if (W.state === 'air') {
+          W.vy -= 9.8 * dt; W.y += W.vy * dt; W.pitch = -1.15 + W.t * 0.75; W.roll = W.t * 1.4;
+          if (W.y < sea - 4 && W.vy < 0) {
+            for (var s = 0; s < 26; s++) samEmitSmoke(_wlV.set(W.x + (Math.random() - 0.5) * 14, sea + 1, W.z + (Math.random() - 0.5) * 14), new THREE.Vector3((Math.random() - 0.5) * 10, 6 + Math.random() * 14, (Math.random() - 0.5) * 10), 8 + Math.random() * 8, 3.2, 0.7, 0.97);
+            var dd = Math.hypot(W.x - px, W.z - pz);
+            if (dd < 1500) { if (typeof wNoise === 'function') wNoise(1.6, 0.22 * (1 - dd / 1500), 'lowpass', 500, 0.7, 0.02); if (dd < 900) samToast('A WHALE BREACHES!', '#8fd6ff', 2); }
+            W.state = 'deep'; W.t = 0; W.dur = 15 + Math.random() * 20; W.roll = 0; W.pitch = 0.3;
+          }
+        }
+        if (W.state !== 'air') W.roll *= 1 - Math.min(1, dt);
+        W.x += Math.sin(W.yaw) * fwd * dt; W.z += Math.cos(W.yaw) * fwd * dt;
+        W.yaw += Math.sin(WL.t * 0.03 + W.ph) * 0.004;
+        if (!wlSea(W.x + Math.sin(W.yaw) * 200, W.z + Math.cos(W.yaw) * 200, 25)) W.yaw += 0.6 * dt;
+        var swim = W.state === 'deep' || W.state === 'charge' ? 1 : W.state === 'surface' ? 0.45 : 0.8;
+        if (W.y > sea - 45) wlPut('whale', { x: W.x, y: W.y, z: W.z, yaw: W.yaw, pitch: W.pitch, roll: W.roll || 0, scale: W.scale * 1.05, ph: W.ph, freq: 1.4, amp: swim, k: W.fluke ? 0.35 : 0 });
+        if (W.y > sea - 3) wlSpot('whale', W.x, W.y, W.z, 900);
+      });
+      // ---- dolphins porpoising ----
+      WL.pods.forEach(function(P) {
+        P.x += Math.sin(P.dir) * 8 * dt; P.z += Math.cos(P.dir) * 8 * dt;
+        P.dir += Math.sin(WL.t * 0.11 + P.x * 0.001) * 0.01;
+        if (!wlSea(P.x + Math.sin(P.dir) * 120, P.z + Math.cos(P.dir) * 120, 5)) P.dir += 0.9 * dt;
+        var cu = Math.cos(P.dir), su = Math.sin(P.dir);
+        P.a.forEach(function(a, i) {
+          var s = (WL.t * a.rate + a.off) % 1, air = s < 0.3, u = s / 0.3;
+          var x = P.x + a.ou * cu + (a.ov + s * 6) * su, z = P.z - a.ou * su + (a.ov + s * 6) * cu;
+          var y = air ? WATER_LEVEL - 0.3 + Math.sin(u * Math.PI) * 2.2 : WATER_LEVEL - 1.6;
+          var pitch = air ? -Math.cos(u * Math.PI) * 0.75 : 0;
+          if (air && !a.splashed && u > 0.9) { a.splashed = true; samEmitSmoke(_wlV.set(x, WATER_LEVEL + 0.3, z), new THREE.Vector3(0, 3, 0), 2.2, 1.2, 0.6, 0.97); }
+          if (!air) a.splashed = false;
+          if (air || s < 0.42) wlPut('dolphin', { x: x, y: y, z: z, yaw: P.dir, pitch: pitch, scale: 1, ph: a.off * 6, freq: 9, amp: 1, k: 0 });
+          if (i === 0 && air) wlSpot('dolphin', x, y, z, 520);
+        });
+      });
+      // ---- geese in V ----
+      WL.vees.forEach(function(V) {
+        V.x += Math.sin(V.dir) * V.spd * dt; V.z += Math.cos(V.dir) * V.spd * dt;
+        var cu = Math.cos(V.dir), su = Math.sin(V.dir), dv = Math.hypot(V.x - px, V.y - position.y, V.z - pz);
+        V.a.forEach(function(a, i) {
+          var x = V.x + a.ou * cu + a.ov * su, z = V.z - a.ou * su + a.ov * cu, y = V.y + a.oy + Math.sin(WL.t * 0.7 + a.ph) * 0.4;
+          if (!a.hit && dv < 80 && Math.hypot(x - px, y - position.y, z - pz) < 3.8) { a.hit = true; wlBirdStrike(false); }
+          if (!a.hit) wlPut('goose', { x: x, y: y, z: z, yaw: V.dir, pitch: 0, roll: Math.sin(WL.t * 0.5 + a.ph) * 0.05, scale: 1.25, ph: a.ph, freq: 15.5, amp: 1, k: (Math.sin(WL.t * 0.4 + i) > 0.85 ? 0.8 : 0) });
+        });
+        if (dv < 700 && (V.honkT -= dt) <= 0) {
+          V.honkT = 0.5 + Math.random() * 1.6;
+          var vol = 0.05 * (1 - dv / 700);
+          if (typeof wTone === 'function') { var f = 360 + Math.random() * 60; wTone('sawtooth', f, f * 0.86, 0.16, vol, 0, 1300); wTone('sawtooth', f * 1.5, f * 1.3, 0.12, vol * 0.5, 0.02, 1500); }
+        }
+        wlSpot('goose', V.x, V.y, V.z, 600);
+      });
+      // ---- eagles in thermals, and the lift for you ----
+      var lift = 0;
+      WL.thermals.forEach(function(T) {
+        T.age += dt;
+        T.x += windPush.x * dt * 0.6; T.z += windPush.z * dt * 0.6;
+        var fade = Math.min(1, T.age / 20) * Math.min(1, (T.life - T.age) / 20);
+        T.eagles.forEach(function(E) {
+          E.a += dt * (E.w + 0.02 * Math.sin(WL.t * 0.3 + E.ph));
+          E.y += 0.7 * dt; if (E.y > T.top - 80) E.y = T.base + 160;      // ride it up, peel off, come back to the bottom
+          var x = T.x + Math.sin(E.a) * E.r, z = T.z + Math.cos(E.a) * E.r;
+          if ((E.flapT -= dt) <= 0) E.flapT = Math.random() < 0.15 ? -2.2 : 2 + Math.random() * 6;
+          var flapping = E.flapT < 0 ? 1 : 0; if (E.flapT < 0) E.flapT += dt * 2;
+          if (Math.hypot(x - px, E.y - position.y, z - pz) < 4.2) { E.y = T.base + 160; wlBirdStrike(true); }
+          wlPut('eagle', { x: x, y: E.y, z: z, yaw: E.a + Math.PI / 2, pitch: -0.04, roll: -0.38, scale: 1.45, ph: E.ph, freq: 11, amp: 0.9, k: 1 - flapping });
+          wlSpot('eagle', x, E.y, z, 450);
+        });
+        var d = Math.hypot(position.x - T.x, position.z - T.z);
+        if (d < T.r && position.y < T.top && position.y > T.base + 20) lift = Math.max(lift, T.str * fade * (1 - (d / T.r) * (d / T.r)));
+      });
+      WL.lift += (lift - WL.lift) * Math.min(1, dt * 1.5);
+      if (airborne && !isCarMode && WL.lift > 0.05) {
+        position.y += WL.lift * dt;
+        // a glider pilot's variometer: rising chirps in lift
+        if ((WL.varioT -= dt) <= 0) { WL.varioT = 0.55 - Math.min(0.35, WL.lift * 0.08); samBeep(700 + WL.lift * 140, 0.05, 0.035); }
+        if (!WL.liftSaid && WL.lift > 1) { WL.liftSaid = true; samToast('THERMAL — RISING AIR · +' + WL.lift.toFixed(1) + ' m/s', '#ffd27a', 2.4); }
+      } else if (WL.lift < 0.05) WL.liftSaid = false;
+      // ---- flocks of gulls (the old decorative birds, now with real wings) ----
+      if (typeof birdFlocks !== 'undefined' && birdFlocks.length) {
+        var bf = birdFlocks[0].birds[0].mesh.position;
+        wlSpot('gull', bf.x, bf.y, bf.z, 260);
+        birdFlocks.forEach(function(F) {
+          F.birds.forEach(function(B) {
+            if (Math.hypot(B.mesh.position.x - px, B.mesh.position.y - position.y, B.mesh.position.z - pz) < 3) wlBirdStrike(false);
+          });
+        });
+      }
+      for (var key in WL.sp) { var S = WL.sp[key]; S.mesh.count = S.n; S.mesh.instanceMatrix.needsUpdate = true; S.anim.needsUpdate = true; }
     }
 
     /* ============================================================
