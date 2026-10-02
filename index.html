@@ -16022,6 +16022,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           var apCmd = qolApControl(dt, manualPitchInput || (!droneCamActive && (keys.left || keys.right || QC.manR || (touchActive && !dpadActive && Math.abs(touchDX) > 6))));
           if (apCmd) { pitchInput = apCmd.p; rollInput = apCmd.r; }
         }
+        hyStickCancel(manualPitchInput || (!droneCamActive && (keys.left || keys.right || QC.manR || (touchActive && !dpadActive && Math.abs(touchDX) > 6))));
 
         // sustained high-G strain (from last frame's loading) dulls control authority before
         // full blackout — a pilot fighting to stay conscious can't fly with normal precision;
@@ -16287,6 +16288,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (nhOwn) { velocityVec.y = verticalVel; if (nh.wow) { velocityVec.x = horizForward.x * speed; velocityVec.z = horizForward.z * speed; } }
 
         position.addScaledVector(velocityVec, dt);
+        if (HY.on) hyStep(dt);
         if (currentWind > 0.01) position.addScaledVector(windPush, dt);
         // storm up/downdrafts — faded out near the ground so they can't slam you into it on final
         if (windGustY !== 0 && !wasGrounded) position.y += windGustY * dt * THREE.MathUtils.clamp((kjAgl() - 15) / 60, 0, 1);
@@ -16568,7 +16570,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         updateAirport(dt);
         updateHighwayTraffic(dt);
 
-        maybeUpdateChunks((CMDX.focus || position).x, (CMDX.focus || position).z);
+        if (!HY.on) maybeUpdateChunks((CMDX.focus || position).x, (CMDX.focus || position).z);
         updateForestLod(dt, camera.position);
         forestCollide(dt);
         recycleClouds(position.x, position.z, dt);
@@ -16613,6 +16615,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       aarUpdate(dt);
       qolUpdate(dt);
       eiUpdate(dt);
+      hyUpdate(dt);
       qolbUpdate(dt);
       qolcUpdate(dt);
       updateStrike(dt);
@@ -24996,6 +24999,119 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (EI_STATE.built && !WAR.on) pointers.push({ x: EI.x, z: EI.z, color: '#ff5a48', text: 'ENEMY ISLAND' });
     }
     eiBuild();
+
+    /* ============================================================
+       HYPER CRUISE — the Rocket's long-range mode (HYPER button or 9)
+       · Airborne in the Rocket, it spools up to ~20 km/s at 1,500 m and runs flat out to your NAV
+         waypoint (or, with none set, the ENEMY ISLAND — or HOME when you're already out there).
+       · It brakes on its own and drops you back to normal flight 25 km short, pointed at the target:
+         2,000 km in a little under two minutes.
+       · Any stick input, the button or 9 again cancels it. Terrain streaming pauses at these speeds
+         (it's open ocean down there anyway) and picks back up when you drop out.
+       ============================================================ */
+    var HY = { on: false, v: 0, tgt: null, alt: 1500, fuel: 0, btn: null, hud: null, hudT: 0, startT: 0, dist0: 0 };
+    var HY_VMAX = 20000, HY_ACC = 2600, HY_DROP = 25000;
+    (function hyBuild() {
+      var st = document.createElement('style');
+      st.textContent = [
+        '#hyBtn{position:fixed;z-index:12;left:calc(20px + env(safe-area-inset-left));top:calc(392px + env(safe-area-inset-top));font:900 11px ui-monospace,Menlo,monospace;letter-spacing:.14em;color:#d9f2ff;background:rgba(20,40,70,.72);border:2px solid #7cc8ff;border-radius:12px;padding:10px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}',
+        '#hyBtn.on{background:#7cc8ff;color:#06121e;box-shadow:0 0 18px rgba(124,200,255,.8)}',
+        '#hyBtn.hidden{display:none}',
+        '#hyHud{position:fixed;z-index:13;left:50%;top:calc(150px + env(safe-area-inset-top));transform:translateX(-50%);display:none;text-align:center;pointer-events:none;font:800 12px/1.4 ui-monospace,Menlo,monospace;letter-spacing:.12em;color:#d9f2ff;background:rgba(6,16,30,.72);border:1px solid rgba(124,200,255,.6);border-radius:10px;padding:8px 16px;text-shadow:0 0 8px rgba(80,170,255,.7)}',
+        '#hyHud big{display:block;font-size:20px;letter-spacing:.06em;color:#fff}',
+        '#hyHud .bar{height:4px;margin-top:6px;border-radius:2px;background:rgba(255,255,255,.15);overflow:hidden}#hyHud .bar i{display:block;height:100%;background:#7cc8ff}',
+        '#hyFx{position:fixed;inset:0;z-index:7;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,transparent 38%,rgba(120,190,255,.10) 62%,rgba(170,215,255,.38) 100%),repeating-conic-gradient(from 0deg at 50% 50%,rgba(255,255,255,.07) 0deg 1.2deg,transparent 1.2deg 7deg);-webkit-mask:radial-gradient(circle at center,transparent 22%,#000 70%);mask:radial-gradient(circle at center,transparent 22%,#000 70%)}'
+      ].join('\n');
+      document.head.appendChild(st);
+      HY.btn = document.createElement('div'); HY.btn.id = 'hyBtn'; HY.btn.className = 'hidden'; HY.btn.textContent = 'HYPER';
+      HY.btn.addEventListener('click', function(e) { e.preventDefault(); hyToggle(); });
+      document.body.appendChild(HY.btn);
+      HY.hud = document.createElement('div'); HY.hud.id = 'hyHud'; document.body.appendChild(HY.hud);
+      HY.fx = document.createElement('div'); HY.fx.id = 'hyFx'; document.body.appendChild(HY.fx);
+      window.addEventListener('keydown', function(e) {
+        if (e.code !== 'Digit9' || e.repeat || !started || gpPaused) return;
+        var t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+        hyToggle(); e.preventDefault();
+      });
+    })();
+    function hyAvail() { return started && selectedPlaneType === 'rocket' && !crashing && !ejecting && !wasGrounded && !kj.paused; }
+    function hyPickTarget() {
+      if (QOL.nav) return { x: QOL.nav.x, z: QOL.nav.z, name: QOL.nav.name };
+      if (Math.hypot(EI.x - position.x, EI.z - position.z) > 60000) return { x: EI.x, z: EI.z, name: 'ENEMY ISLAND' };
+      return { x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z, name: 'HOME BASE' };
+    }
+    function hyToggle() {
+      if (HY.on) { hyOff('HYPER CRUISE OFF'); return; }
+      if (!hyAvail()) { if (started && selectedPlaneType === 'rocket') samToast('HYPER — GET AIRBORNE FIRST', '#7cc8ff', 1.6); return; }
+      var t = hyPickTarget(), d = Math.hypot(t.x - position.x, t.z - position.z);
+      if (d < HY_DROP * 1.6) { samToast('HYPER — ' + t.name + ' IS TOO CLOSE', '#7cc8ff', 1.8); return; }
+      HY.on = true; HY.tgt = t; HY.v = Math.max(speed, 0); HY.fuel = fuel; HY.startT = elapsedSeconds; HY.dist0 = d;
+      HY.alt = Math.max(1500, position.y);
+      cruiseActive = false; if (QOL.ap) qolApOff('');
+      HY.btn.classList.add('on');
+      samToast('HYPER CRUISE → ' + t.name + ' · ' + mapFmtDist(d), '#7cc8ff', 2.4);
+      if (typeof qolSay === 'function') qolSay('hyper cruise', 520);
+    }
+    function hyOff(msg) {
+      if (!HY.on) return;
+      HY.on = false; HY.btn.classList.remove('on'); HY.hud.style.display = 'none'; HY.fx.style.opacity = 0;
+      // back to the airframe's own top speed, flying straight at the target
+      speed = Math.min(speed, MAX_SPEED); throttle = MAX_SPEED;
+      var ts = document.getElementById('throttleSlider'); if (ts) ts.value = Math.round(MAX_SPEED * 3.6);
+      velocityVec.set(-Math.sin(heading) * speed, 0, -Math.cos(heading) * speed);
+      verticalVel = 0; rollAngle = 0; pitchAngle = 0;
+      lastCCX = lastCCZ = null;                         // re-stream the terrain wherever we are now
+      if (msg) samToast(msg, '#7cc8ff', 2);
+    }
+    // runs right after the flight model has moved the aircraft
+    function hyStep(dt) {
+      if (!HY.on) return;
+      if (!hyAvail()) { hyOff(''); return; }
+      var t = HY.tgt, dx = t.x - position.x, dz = t.z - position.z, d = Math.hypot(dx, dz);
+      if (d <= HY_DROP) { hyOff('HYPER CRUISE COMPLETE · ' + t.name + ' ' + mapFmtDist(d)); return; }
+      // spool up, then brake so we arrive at the drop-out point at ordinary speed
+      var vBrake = Math.sqrt(MAX_SPEED * MAX_SPEED + 2 * HY_ACC * Math.max(0, d - HY_DROP));
+      var want = Math.min(HY_VMAX, vBrake);
+      HY.v = HY.v < want ? Math.min(want, HY.v + HY_ACC * 0.55 * dt) : want;
+      // turn onto the target (a gentle bank while the nose comes round), hold the cruise height
+      var want_h = Math.atan2(-dx, -dz), dh = Math.atan2(Math.sin(want_h - heading), Math.cos(want_h - heading));
+      var turn = THREE.MathUtils.clamp(dh, -0.9 * dt, 0.9 * dt);
+      heading += turn;
+      rollAngle += (0 - rollAngle) * Math.min(1, 3 * dt); rollRate = 0;
+      pitchAngle += (0 - pitchAngle) * Math.min(1, 3 * dt);
+      var ext = Math.max(0, HY.v - speed);
+      var fx = -Math.sin(heading), fz = -Math.cos(heading);
+      position.x += fx * ext * dt; position.z += fz * ext * dt;
+      var floor = Math.max(getEffectiveGroundHeight(position.x, position.z), WATER_LEVEL) + 400;
+      HY.alt = Math.max(1500, floor);
+      position.y += (HY.alt - position.y) * Math.min(1, 1.2 * dt);
+      verticalVel = 0; pitchRate = 0;
+      speed = MAX_SPEED; throttle = MAX_SPEED;
+      velocityVec.set(fx * speed, 0, fz * speed);
+      plane.position.copy(position);
+      distanceMeters += ext * dt;
+      fuel = HY.fuel;                                   // the hyper motor runs on its own propellant
+      // feel: the edges of the screen streak and glow, the camera hums
+      var k = THREE.MathUtils.clamp((HY.v - MAX_SPEED) / (HY_VMAX - MAX_SPEED), 0, 1);
+      HY.fx.style.opacity = (0.25 + 0.75 * k).toFixed(2);
+      if (typeof fxShake !== 'undefined') fxShake = Math.max(fxShake, 0.12 * k);
+      HY.hudT -= dt;
+      if (HY.hudT <= 0) {
+        HY.hudT = 0.15;
+        var eta = Math.max(0, Math.round((d - HY_DROP) / Math.max(HY.v, 1)));
+        HY.hud.style.display = 'block';
+        HY.hud.innerHTML = 'HYPER CRUISE → ' + t.name + '<big>' + (HY.v / 1000).toFixed(1) + ' km/s · MACH ' + Math.round(HY.v / 340) + '</big>' +
+          mapFmtDist(d) + ' TO GO · ETA ' + Math.floor(eta / 60) + ':' + String(eta % 60).padStart(2, '0') +
+          '<div class="bar"><i style="width:' + Math.round(100 * THREE.MathUtils.clamp(1 - (d - HY_DROP) / Math.max(1, HY.dist0 - HY_DROP), 0, 1)) + '%"></i></div>';
+      }
+    }
+    function hyUpdate(dt) {
+      var show = started && selectedPlaneType === 'rocket' && !crashing && !ejecting && !wasGrounded;
+      HY.btn.classList.toggle('hidden', !show);
+      if (HY.on && !hyAvail()) hyOff('');
+    }
+    // any real stick input takes the aircraft back
+    function hyStickCancel(manual) { if (HY.on && manual) hyOff('HYPER CRUISE OFF — STICK'); }
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
