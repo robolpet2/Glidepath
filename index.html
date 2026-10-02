@@ -8893,7 +8893,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var CV_WIRE_HALF = 17;
     var CV_RUNOUT = 88;                       // metres of cable payout to a stop
     var CV_CATS = [ { v: 9, u0: 55, u1: 150 }, { v: -8, u0: 55, u1: 150 } ];
-    var CV_GLIDE_DEG = 3.5, CV_GLIDE_AIM_S = 66;
+    var CV_GLIDE_DEG = 3.5, CV_GLIDE_AIM_S = 80;   // on the ball, the wheels touch at ~72 m and the hook takes the 3-wire
 
     var carrierGroup = new THREE.Group();
     carrierGroup.position.set(CARRIER.x, 0, CARRIER.z);
@@ -9384,7 +9384,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       cvHook.visible = cvHookEligible() && cvHookAngle > 0.03;
 
       // --- trap: the hook sweeps across a cable while rolling out on the angled deck ---
-      if (!cvState.arrest && !cvState.cat && hookWant && overDeck && aboveDeck < 2.5 && Math.abs(land.lat) < CV_WIRE_HALF &&
+      if (!cvState.arrest && !cvState.cat && hookWant && overDeck && aboveDeck < 0.45 && Math.abs(land.lat) < CV_WIRE_HALF &&
           speed > 12 && aligned > 0.85 && cvState.prevHookS !== null && !cvState.skip) {
         for (var wi = 0; wi < CV_WIRES.length; wi++) {
           if (cvState.prevHookS < CV_WIRES[wi] && hookS >= CV_WIRES[wi]) {
