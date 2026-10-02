@@ -1408,6 +1408,7 @@
             <div><b>M / X</b>Fire</div>
             <div><b>T</b>Next target</div>
             <div><b>[ / ]</b>Target type</div>
+            <div><b>6</b>AWACS camera</div>
             <div><b>J / K</b>Gun · AIM-9</div>
             <div><b>`</b>Night vision</div>
             <div><b>G</b>Flares (hold)</div>
@@ -10251,8 +10252,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         m.life += dt;
         var tgt = m.decoy ? m.decoy : (m.tObj ? (m.tObj.alive === false && m.hostile ? null : (m.tObj.pos || m.tObj)) : m.tPos);
         if (!tgt) { m.active = false; m.group.visible = false; return; }
-        var spd = Math.min(m.hostile ? 300 : 240, m.vel.length() + 160 * dt);
+        // against aircraft our missiles fly faster and lead the target instead of chasing its tail
+        var air = !m.hostile && !m.decoy && m.tObj && m.tObj.vel && (m.tObj.isBandit || m.tObj.isIntruder);
+        var spd = Math.min(m.hostile ? 300 : air ? 430 : 240, m.vel.length() + (air ? 260 : 160) * dt);
         _awV.copy(tgt).sub(m.pos); var d = _awV.length();
+        if (air) { _awV.addScaledVector(m.tObj.vel, Math.min(3, d / Math.max(spd, 1))); }
         _awV.normalize();
         m.vel.lerp(_awV.multiplyScalar(spd), Math.min(1, dt * (m.life < 0.6 ? 1.5 : 4)));
         m.pos.addScaledVector(m.vel, dt);
@@ -10264,7 +10268,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           m.active = false; m.group.visible = false;
           triggerMissileBlast(m.pos.clone());
           if (m.pos.distanceTo(position) < 1500 && typeof playMissileImpactSound === 'function') playMissileImpactSound();
-          if (!m.hostile) { if (m.tObj && m.tObj.isBandit) raHit(m.tObj, 220, 'aw', m.owner); else samOnGroundBlast(m.pos.clone(), 14); }
+          if (!m.hostile) { if (m.tObj && m.tObj.isBandit) raHit(m.tObj, 220, 'aw', m.owner); else if (m.tObj && m.tObj.isIntruder) cmdIntruderHit(m.tObj, 220); else samOnGroundBlast(m.pos.clone(), 14); }
           else if (!m.decoy && m.tObj && m.tObj.alive && m.life <= 18) awShotDown(m.tObj);
         }
       });
@@ -10749,6 +10753,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var ws = warSectorAt(CMD.marker.x, CMD.marker.z, 700);
         if (ws && ws.owner === 'red') { var sp = warSectorPoints(ws, from); if (sp.length) return sp; }
       }
+      if (task === 'track') {
+        var to = c && c.trackObj;
+        if (to && cmdObjAlive(to) && !to.isBandit && !to.isIntruder) pts.push(cmdObjPos(to).clone());
+        return pts;
+      }
       if (task === 'sam') {
         if (samRadar && samRadar.alive) pts.push(samRadar.pos.clone());
         samLaunchers.forEach(function(L) { if (L.alive) pts.push(L.pos.clone()); });
@@ -10779,7 +10788,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var pkg = CMD.pkg, base = CMD.base, task = CMD.task;
       if (base === 'strip' && !OLD_STRIP) base = 'field';
       if (task === 'marker' && !CMD.marker) { samToast('NO MARKER — OPEN THE MAP AND MARK A TARGET', '#ffcc33', 2); return; }
-      if (!cmdAimPoints(task, position).length) { samToast(CMD_TASKS[task] + ' — NO TARGETS LEFT', '#ffcc33', 1.8); return; }
+      var rdy = cmdOrdersReady(task, pkg);
+      if (rdy === false) return;
+      if (rdy === null && !cmdAimPoints(task, position).length) { samToast(CMD_TASKS[task] + ' — NO TARGETS LEFT', '#ffcc33', 1.8); return; }
       var calls = CMD_CALL[pkg], call = calls[CMD.seq % calls.length] + (pkg === 'fighters' ? ' ' + (CMD.seq % 9 + 1) : '');
       CMD.seq++;
       var kind = pkg === 'fighters' ? 'fighter' : pkg === 'drones' ? 'drone' : 'bomber';
@@ -10787,6 +10798,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       for (var i = 0; i < n; i++) {
         var a = awNew(kind, n > 1 ? call + '-' + (i + 1) : call, 'cmd');
         a.cmd = { task: task, base: base, orbit: Math.random() * 6.28, fireT: 2 + i * 2 };
+        cmdOrdersFor(a.cmd);
+        if (kind === 'fighter') a.aam = 2;
         if (task === 'marker' && WAR.on) { var cs = warSectorAt(CMD.marker.x, CMD.marker.z, 900); if (cs && cs.owner === 'blue' && kind === 'fighter') a.cmd.cap = true; }
         a.ammo = kind === 'fighter' ? 4 : kind === 'drone' ? 4 : 0;
         a.bombs = kind === 'bomber' ? 6 : 0;
@@ -10800,7 +10813,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         members.push(a);
       }
       var where = base === 'carrier' ? 'the carrier' : base === 'strip' ? 'the old field' : 'the airfield';
-      awRadio('Sentinel: ' + call + ', launch from ' + where + ', target ' + CMD_TASKS[task].toLowerCase(), '#9fe8ff');
+      awRadio('Sentinel: ' + call + ', launch from ' + where + ', target ' + (task === 'track' && CMDX.track ? CMDX.track.label.toLowerCase() : CMD_TASKS[task].toLowerCase()) + (CMDX.route.length ? ', via ' + CMDX.route.length + ' waypoints' : ''), '#9fe8ff');
+      CMDX.route = []; CMDX.routeMode = false; CMDX.sel = members[0];
       samBeep(880, 0.06, 0.05);
       cmdRefresh();
     }
@@ -10849,6 +10863,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (awSteer(a, h.x, h.y + 300, h.z, dt, a.cruise) < 650) { awRadio(a.name + ': overhead, landing', '#9fd0ff'); awRemove(a); }
         return;
       }
+      if (cmdFlyExtra(a, dt)) return;
       // mission: transit to the target area, then attack
       var pts = cmdAimPoints(c.task, a.pos, c);
       if (!pts.length) { awRadio(a.name + ': target area clean, RTB', '#9fd0ff'); cmdGoHome(a, true); return; }
@@ -11106,10 +11121,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var X = window.__mapX; if (!X || !X.exp) return false;
       var r = miniMapWrapEl.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top;
       if (Math.abs(sx - X.cx) > X.R || Math.abs(sy - X.cy) > X.R) return false;
+      if (cmdMapTap(X.px + (sx - X.cx) / X.scale, X.pz + (sy - X.cy) / X.scale, X.scale)) return true;
       cmdSetMarker(X.px + (sx - X.cx) / X.scale, X.pz + (sy - X.cy) / X.scale);
       return true;
     }
     function cmdMinimap(ctx, toS, exp) {
+      cmdRadarMap(ctx, toS, exp);
       var t = performance.now() / 1000;
       if (CMD.marker) {
         var q = toS(CMD.marker.x, CMD.marker.z);
@@ -11127,6 +11144,447 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var mq = toS(m.pos.x, m.pos.z);
         ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(mq.x, mq.y, 2.6, 0, Math.PI * 2); ctx.fill();
       });
+    }
+
+
+    /* ============================================================
+       SENTINEL — COMMAND LAYER
+       · RADAR PICTURE: on the chart, the Sentinel's radar coverage with a sweeping beam; every
+         contact inside it is painted as the beam passes — hostile air (red chevrons), hostile
+         ground and sea (red squares/diamonds), our flights (blue, named), traffic (green).
+       · CONTACTS: the nearest hostiles are listed in the panel; tap one (or tap it on the chart)
+         to make it the target. TARGET › CONTACT sends a package at it: fighters run a lead-pursuit
+         intercept on aircraft and fire on ground/sea contacts from standoff.
+       · PATROL: fighters orbit the map marker and jump any hostile aircraft that comes near.
+       · FLIGHTS: every package you launched is listed; select one to RE-TASK it with the current
+         target/route, send it home (RTB), or ride along with it (CAM).
+       · ROUTE: DRAW ROUTE, then tap the chart to lay up to six waypoints; the next package (or a
+         re-tasked one) flies the route before it goes for the target.
+       · COMMAND CAMERA (CAM or 6): follow one of your flights, or a missile in the silo salvo,
+         then step on to the next; the Sentinel holds wings level on autopilot meanwhile.
+       · TANKER: send the refuelling tanker to you, or to the selected flight — when it reaches a
+         flight it tops it up (time on station, missiles) and the flight goes back to work.
+       · In free flight the radar now and then picks up a pair of unidentified fighters heading
+         for the island — fair game for an intercept.
+       ============================================================ */
+    CMD_TASKS.track = 'CONTACT'; CMD_TASKS.patrol = 'PATROL';
+    var CMDX = { cidSeq: 0, contacts: [], contactsT: 0, track: null, route: [], routeMode: false, sel: null,
+                 cam: null, camPos: new THREE.Vector3(), camLook: new THREE.Vector3(), camHold: 0, focus: null,
+                 tanker: null, intruders: [], intrT: 40, panelSig: '', range: 12000 };
+    var _cxV = new THREE.Vector3(), _cxV2 = new THREE.Vector3();
+    function cmdCid(o) { if (!o.__cid) o.__cid = ++CMDX.cidSeq; return o.__cid; }
+    function cmdObjPos(o) { return o ? (o.pos || o.center || null) : null; }
+    function cmdObjAlive(o) { return !!o && o.alive !== false && !o.gone && o.state !== 'down'; }
+    function cmdRadarRange() { return 9000 + THREE.MathUtils.clamp(position.y - WATER_LEVEL, 0, 1500) * 4; }
+
+    /* ---------- the radar picture ---------- */
+    function cmdBuildContacts() {
+      var L = [], R = CMDX.range = cmdRadarRange(), px = position.x, pz = position.z;
+      function add(o, iff, cls, label) {
+        var p = cmdObjPos(o); if (!p || !cmdObjAlive(o)) return;
+        var d = Math.hypot(p.x - px, p.z - pz); if (d > R) return;
+        L.push({ id: cmdCid(o), obj: o, iff: iff, cls: cls, label: label, d: d });
+      }
+      raEnemies().forEach(function(b) { add(b, 'hostile', 'air', RA_KIND[b.kind] ? RA_KIND[b.kind].label : 'BANDIT'); });
+      CMDX.intruders.forEach(function(b) { add(b, 'hostile', 'air', 'FIGHTER'); });
+      if (samRadar && !(WAR.on && WAR.iron && WAR.iron.owner === 'blue')) add(samRadar, 'hostile', 'ground', 'SAM RADAR');
+      samLaunchers.forEach(function(Lc) { if (!Lc.war || (Lc.war.known && Lc.war.owner === 'red')) add(Lc, 'hostile', 'ground', 'SAM LAUNCHER'); });
+      AA.forEach(function(g) { if (!g.surrendered && (!g.war || (g.war.known && g.war.owner !== 'blue'))) add(g, 'hostile', 'ground', 'FLAK'); });
+      strikeTargets.forEach(function(t) { if (t.war && (!t.war.known || t.surrendered)) return; add(t, 'hostile', t.navy || t.kind === 'ship' ? 'sea' : 'ground', t.label || 'TARGET'); });
+      AW.list.forEach(function(a) { if (a.cmd && a.alive && a.state !== 'down' && a.state !== 'cmdhold') add(a, 'friendly', 'air', a.name); });
+      npcPlanes.forEach(function(n) { var m = n.mesh; if (m && m.visible) { var o = n.__radar || (n.__radar = { pos: m.position, alive: true }); add(o, 'neutral', 'air', 'TRAFFIC'); } });
+      if (AAR.pos) { var tk = CMDX.tankerObj || (CMDX.tankerObj = { pos: AAR.pos, alive: true }); add(tk, 'friendly', 'air', 'TEXACO'); }
+      L.sort(function(a, b) { return a.d - b.d; });
+      CMDX.contacts = L;
+      if (CMDX.track && !cmdObjAlive(CMDX.track.obj)) CMDX.track = null;
+    }
+    function cmdSelectContact(c) {
+      CMDX.track = { id: c.id, obj: c.obj, label: c.label, cls: c.cls };
+      CMD.task = 'track';
+      samBeep(1350, 0.05, 0.06);
+      samToast('TARGET · ' + c.label + ' · ' + mapFmtDist(c.d), '#ffd25a', 1.6);
+      cmdRefresh();
+    }
+    // the chart, in the Sentinel: coverage ring, sweep, painted contacts, routes, the tanker's leg
+    function cmdRadarMap(ctx, toS, exp) {
+      if (!isAwacsMode || !started) return;
+      var me = toS(position.x, position.z), edge = toS(position.x + CMDX.range, position.z), Rpx = Math.hypot(edge.x - me.x, edge.y - me.y);
+      var t = performance.now() / 1000, sw = (t * 1.3) % (Math.PI * 2);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(127,216,255,0.45)'; ctx.lineWidth = 1; ctx.setLineDash([6, 5]);
+      ctx.beginPath(); ctx.arc(me.x, me.y, Rpx, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      var g = ctx.createRadialGradient(me.x, me.y, 0, me.x, me.y, Rpx);
+      g.addColorStop(0, 'rgba(127,216,255,0.16)'); g.addColorStop(1, 'rgba(127,216,255,0.02)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(me.x, me.y); ctx.arc(me.x, me.y, Rpx, sw - 0.55, sw); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(127,216,255,0.55)'; ctx.beginPath(); ctx.moveTo(me.x, me.y); ctx.lineTo(me.x + Math.cos(sw) * Rpx, me.y + Math.sin(sw) * Rpx); ctx.stroke();
+      // planned route
+      if (CMDX.route.length) {
+        ctx.strokeStyle = 'rgba(255,210,90,0.8)'; ctx.lineWidth = 1.4; ctx.setLineDash([5, 4]); ctx.beginPath();
+        CMDX.route.forEach(function(w, i) { var q = toS(w.x, w.z); if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); }); ctx.stroke(); ctx.setLineDash([]);
+        CMDX.route.forEach(function(w, i) { var q = toS(w.x, w.z); ctx.fillStyle = '#ffd25a'; ctx.beginPath(); ctx.arc(q.x, q.y, 3.4, 0, 6.29); ctx.fill(); if (exp) { ctx.font = '800 9px ui-monospace,monospace'; ctx.textAlign = 'center'; ctx.fillText(String(i + 1), q.x, q.y - 7); } });
+      }
+      // routes still being flown
+      AW.list.forEach(function(a) {
+        if (!a.alive || !a.cmd || a.leader || !a.cmd.route || !a.cmd.route.length) return;
+        var p = toS(a.pos.x, a.pos.z);
+        ctx.strokeStyle = 'rgba(90,168,255,0.7)'; ctx.lineWidth = 1.2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(p.x, p.y);
+        a.cmd.route.forEach(function(w) { var q = toS(w.x, w.z); ctx.lineTo(q.x, q.y); }); ctx.stroke(); ctx.setLineDash([]);
+      });
+      // tanker rendezvous
+      if (CMDX.tanker) {
+        var gq = toS(CMDX.tanker.x, CMDX.tanker.z), tq = toS(AAR.pos.x, AAR.pos.z);
+        ctx.strokeStyle = 'rgba(159,224,255,0.7)'; ctx.setLineDash([2, 4]); ctx.beginPath(); ctx.moveTo(tq.x, tq.y); ctx.lineTo(gq.x, gq.y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.strokeStyle = '#9fe0ff'; ctx.strokeRect(gq.x - 4, gq.y - 4, 8, 8);
+      }
+      // contacts, brightest just after the beam passes
+      CMDX.contacts.forEach(function(c) {
+        var p = cmdObjPos(c.obj), q = toS(p.x, p.z);
+        var ang = Math.atan2(q.y - me.y, q.x - me.x), since = ((sw - ang) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+        var a = c.iff === 'friendly' ? 1 : 1 - 0.7 * since / (Math.PI * 2);
+        var col = c.iff === 'hostile' ? '255,74,58' : c.iff === 'friendly' ? '90,168,255' : '125,220,140';
+        ctx.fillStyle = 'rgba(' + col + ',' + a.toFixed(2) + ')'; ctx.strokeStyle = 'rgba(0,0,0,' + (0.6 * a).toFixed(2) + ')'; ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (c.cls === 'air' && c.iff === 'hostile') { ctx.moveTo(q.x, q.y - 5); ctx.lineTo(q.x + 4.5, q.y + 3.5); ctx.lineTo(q.x, q.y + 1.5); ctx.lineTo(q.x - 4.5, q.y + 3.5); }
+        else if (c.cls === 'sea') { ctx.moveTo(q.x, q.y - 4.5); ctx.lineTo(q.x + 4.5, q.y); ctx.lineTo(q.x, q.y + 4.5); ctx.lineTo(q.x - 4.5, q.y); }
+        else if (c.cls === 'air') ctx.arc(q.x, q.y, c.iff === 'friendly' ? 3.2 : 2.4, 0, 6.29);
+        else ctx.rect(q.x - 2.6, q.y - 2.6, 5.2, 5.2);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        if (exp && (c.cls === 'air' && c.iff !== 'neutral')) {
+          ctx.font = '700 8.5px ui-monospace,monospace'; ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(' + col + ',' + Math.max(0.6, a).toFixed(2) + ')';
+          ctx.fillText(c.label + (c.iff === 'hostile' ? ' ' + Math.round(cmdObjPos(c.obj).y - WATER_LEVEL) + 'm' : ''), q.x + 6, q.y - 4);
+        }
+        if (CMDX.track && CMDX.track.id === c.id) {
+          ctx.strokeStyle = '#ffd25a'; ctx.lineWidth = 1.5; var s = 7 + Math.sin(t * 6);
+          ctx.strokeRect(q.x - s, q.y - s, s * 2, s * 2);
+        }
+        if (CMDX.sel && c.obj === CMDX.sel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(q.x, q.y, 7, 0, 6.29); ctx.stroke(); }
+      });
+      ctx.restore();
+    }
+    // a tap on the open chart: lay a route point, pick a contact, or (as before) set the strike marker
+    function cmdMapTap(wx, wz, scale) {
+      if (CMDX.routeMode) {
+        if (CMDX.route.length >= 6) { samToast('ROUTE FULL — 6 POINTS', '#ffd25a', 1.2); return true; }
+        CMDX.route.push({ x: wx, z: wz }); samBeep(1100, 0.04, 0.05); cmdRefresh(); return true;
+      }
+      var best = null, bd = 14;
+      CMDX.contacts.forEach(function(c) {
+        if (c.iff !== 'hostile') return;
+        var p = cmdObjPos(c.obj), d = Math.hypot(p.x - wx, p.z - wz) * scale;
+        if (d < bd) { bd = d; best = c; }
+      });
+      if (best) { cmdSelectContact(best); return true; }
+      return false;
+    }
+
+    /* ---------- flights ---------- */
+    function cmdFlights() {
+      return AW.list.filter(function(a) { return a.alive && a.cmd && !a.leader && a.state !== 'down'; });
+    }
+    function cmdFlightMembers(lead) { return AW.list.filter(function(a) { return a.alive && a.cmd && (a === lead || a.leader === lead) && a.state !== 'down'; }); }
+    function cmdOrdersFor(c) {
+      c.task = CMD.task; c.onStation = false; c.time = 0; c.doneT = undefined; c.engage = null; c.called = false;
+      c.trackObj = CMD.task === 'track' && CMDX.track ? CMDX.track.obj : null;
+      c.patrolPt = CMD.marker ? CMD.marker.clone() : null;
+      c.route = CMDX.route.map(function(w) { return { x: w.x, z: w.z }; });
+    }
+    function cmdOrdersReady(task, kind) {
+      if (task === 'track') {
+        if (!CMDX.track) { samToast('NO CONTACT — PICK ONE IN THE LIST OR ON THE CHART', '#ffcc33', 2); return false; }
+        if (CMDX.track.cls === 'air' && kind && kind !== 'fighters') { samToast('ONLY FIGHTERS CAN INTERCEPT AIRCRAFT', '#ffcc33', 1.8); return false; }
+        return true;
+      }
+      if (task === 'patrol') {
+        if (!CMD.marker) { samToast('NO MARKER — OPEN THE MAP AND MARK THE PATROL POINT', '#ffcc33', 2); return false; }
+        if (kind && kind !== 'fighters') { samToast('ONLY FIGHTERS FLY PATROLS', '#ffcc33', 1.6); return false; }
+        return true;
+      }
+      return null;   // the original tasks validate themselves
+    }
+    function cmdRetask() {
+      var lead = CMDX.sel;
+      if (!lead || !lead.alive) { samToast('SELECT A FLIGHT FIRST', '#ffcc33', 1.4); return; }
+      var kind = lead.kind === 'fighter' ? 'fighters' : lead.kind === 'drone' ? 'drones' : 'bomber';
+      if (cmdOrdersReady(CMD.task, kind) === false) return;
+      if (CMD.task === 'marker' && !CMD.marker) { samToast('NO MARKER — OPEN THE MAP AND MARK A TARGET', '#ffcc33', 2); return; }
+      cmdFlightMembers(lead).forEach(function(a) {
+        cmdOrdersFor(a.cmd);
+        if (a.state === 'cmdhome') a.state = 'mission';
+      });
+      var what = CMD.task === 'track' ? CMDX.track.label.toLowerCase() : CMD_TASKS[CMD.task].toLowerCase();
+      awRadio('Sentinel: ' + lead.name + ', new tasking — ' + what + (lead.cmd.route.length ? ', via ' + lead.cmd.route.length + ' waypoints' : ''), '#9fe8ff');
+      setTimeout(function() { if (lead.alive) awRadio(lead.name + ': copy, ' + what, '#9fd0ff'); }, 1200);
+      cmdRefresh();
+    }
+    function cmdRtbSel() {
+      var lead = CMDX.sel;
+      if (!lead || !lead.alive) { samToast('SELECT A FLIGHT FIRST', '#ffcc33', 1.4); return; }
+      cmdFlightMembers(lead).forEach(function(a) { cmdGoHome(a, true); });
+      awRadio('Sentinel: ' + lead.name + ', RTB', '#9fe8ff');
+    }
+
+    /* ---------- flying: routes, intercepts, patrols ---------- */
+    // returns true when it has flown the aircraft this frame
+    function cmdFlyExtra(a, dt) {
+      var c = a.cmd;
+      // the leader flies the route; wingmen hold formation on it
+      if (a.leader && a.leader.alive && a.leader.cmd && a.leader.cmd.route && a.leader.cmd.route.length) { awFormation(a, dt); return true; }
+      if (c.route && c.route.length) {
+        var w = c.route[0], alt = Math.max(getTerrainHeight(w.x, w.z), WATER_LEVEL) + 650;
+        if (awSteer(a, w.x, alt, w.z, dt, a.cruise) < 550) {
+          c.route.shift();
+          if (!a.leader) awRadio(a.name + (c.route.length ? ': waypoint, ' + c.route.length + ' to go' : ': last waypoint, pressing on'), '#9fd0ff');
+        }
+        return true;
+      }
+      if (c.engage && cmdObjAlive(c.engage)) { cmdIntercept(a, dt, c.engage); return true; }
+      c.engage = null;
+      if (c.task === 'track' && c.trackObj && (c.trackObj.isBandit || c.trackObj.isIntruder)) {
+        if (!cmdObjAlive(c.trackObj)) {
+          // splash: switch to the nearest other hostile aircraft if there are missiles left
+          var nb = null, nd = 6000;
+          if (a.aam === undefined || a.aam > 0) raEnemies().concat(CMDX.intruders).forEach(function(o) { if (!cmdObjAlive(o)) return; var d = o.pos.distanceTo(a.pos); if (d < nd) { nd = d; nb = o; } });
+          if (nb) { c.trackObj = nb; c.called = false; if (!a.leader) awRadio(a.name + ': splash one — switching to the next bandit', '#ffd36a'); }
+          else { if (!a.leader) awRadio(a.name + ': target destroyed, RTB', '#9fd0ff'); cmdGoHome(a, true); return true; }
+        }
+        cmdIntercept(a, dt, c.trackObj); return true;
+      }
+      if (c.task === 'patrol') { cmdPatrol(a, dt); return true; }
+      return false;
+    }
+    function cmdIntercept(a, dt, o) {
+      var c = a.cmd, tp = cmdObjPos(o), d = a.pos.distanceTo(tp);
+      if (a.aam === undefined) a.aam = 2;
+      // lead pursuit: aim where it will be
+      _cxV.copy(tp); if (o.vel) _cxV.addScaledVector(o.vel, Math.min(5, d / 320));
+      var floor = Math.max(getTerrainHeight(tp.x, tp.z), WATER_LEVEL) + 120;
+      awSteer(a, _cxV.x, Math.max(_cxV.y, floor), _cxV.z, dt, a.cruise * 1.3);
+      if (!c.called && !a.leader) { c.called = true; awRadio(a.name + ': tally ' + (o.isIntruder ? 'two fast movers' : 'bandit') + ', ' + mapFmtDist(d) + ', committing', '#ffd36a'); }
+      c.fireT = (c.fireT || 0) - dt;
+      if (a.aam > 0 && d < 3000 && c.fireT <= 0) {
+        a.aam--; c.fireT = 5 + Math.random() * 2;
+        awFire(a.pos.clone(), o, null, false, a);
+        if (o.isBandit) o.threat = { pos: a.pos, active: true, target: o, reacted: true };
+        awRadio(a.name + ': Fox two!', '#ffd36a');
+      }
+      if (a.aam <= 0) { c.dryT = (c.dryT || 0) + dt; if (c.dryT > 9) { awRadio(a.name + ': winchester, RTB', '#9fd0ff'); cmdGoHome(a, true); } }
+    }
+    function cmdPatrol(a, dt) {
+      var c = a.cmd, P = c.patrolPt || CMD.marker || a.pos;
+      c.time = (c.time || 0) + dt;
+      if (c.time > 360) { if (!a.leader) awRadio(a.name + ': patrol complete, RTB', '#9fd0ff'); cmdGoHome(a, true); return; }
+      // anything hostile in the air nearby gets jumped
+      if (a.aam === 0 && !c.engage) { if (!a.leader) awRadio(a.name + ': winchester, RTB', '#9fd0ff'); cmdGoHome(a, true); return; }
+      if ((c.scanT = (c.scanT || 0) - dt) <= 0) {
+        c.scanT = 1;
+        var best = null, bd = 7000;
+        raEnemies().concat(CMDX.intruders).forEach(function(b) { if (!cmdObjAlive(b)) return; var d = b.pos.distanceTo(a.pos); if (d < bd) { bd = d; best = b; } });
+        if (best && (a.aam === undefined || a.aam > 0)) { c.engage = best; c.called = false; return; }
+      }
+      if (!c.onStation) { if (awSteer(a, P.x, P.y + 900, P.z, dt, a.cruise) < 2700) { c.onStation = true; c.orbit = Math.atan2(a.pos.z - P.z, a.pos.x - P.x); if (!a.leader) awRadio(a.name + ': on patrol station', '#9fd0ff'); } return; }
+      c.orbit += dt * (a.speed / 2500) * 0.9;
+      awSteer(a, P.x + Math.cos(c.orbit) * 2500, Math.max(P.y, WATER_LEVEL) + 900, P.z + Math.sin(c.orbit) * 2500, dt, a.cruise * 0.85);
+    }
+
+    /* ---------- free-flight intruders ---------- */
+    function cmdIntrudersUpdate(dt) {
+      var I = CMDX.intruders;
+      if (isAwacsMode && started && !WAR.on && !crashing && !I.some(function(b) { return b.alive; })) {
+        if ((CMDX.intrT -= dt) <= 0) {
+          CMDX.intrT = 150 + Math.random() * 90;
+          var hub = window.__citySpot || { x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z };
+          var ang = Math.random() * Math.PI * 2, r = 13000;
+          for (var k = 0; k < 2; k++) {
+            var b = { kind: 'fighter', isIntruder: true, mesh: raBuildMesh('fighter'), pos: new THREE.Vector3(hub.x + Math.cos(ang) * r + k * 160, 820 + k * 40, hub.z + Math.sin(ang) * r + k * 120),
+                      vel: new THREE.Vector3(), heading: 0, pitch: 0, roll: 0, speed: 135, cruise: 135 + k * 4, turnRate: 0.45, maxBank: 1.1, hp: 180, alive: true,
+                      state: 'in', t: 0, hub: hub, exit: { x: hub.x - Math.cos(ang) * r, z: hub.z - Math.sin(ang) * r }, slot: k, fallV: 0, smokeT: 0, name: 'BANDIT' };
+            b.heading = Math.atan2(-(hub.x - b.pos.x), -(hub.z - b.pos.z));
+            scene.add(b.mesh); I.push(b);
+          }
+          var brg = Math.round(((Math.atan2(I[I.length - 1].pos.x - position.x, -(I[I.length - 1].pos.z - position.z)) * 180 / Math.PI) + 360) % 360);
+          awRadio('Sentinel: new contact — two unknown fast movers, bearing ' + String(brg).padStart(3, '0') + ', ' + mapFmtDist(I[I.length - 1].pos.distanceTo(position)) + ', inbound', '#ff9a7a');
+          samBeep(900, 0.08, 0.07); setTimeout(function() { samBeep(900, 0.08, 0.07); }, 160);
+        }
+      }
+      for (var i = I.length - 1; i >= 0; i--) {
+        var b = I[i];
+        b.t += dt;
+        if (b.state === 'down') {
+          b.fallV += 9.8 * dt;
+          var fd = awFwd(b, _cxV); fd.y = 0;
+          b.pos.addScaledVector(fd, b.speed * 0.7 * dt); b.pos.y -= b.fallV * dt;
+          b.roll += dt * 2.4; b.pitch = Math.max(-1.2, b.pitch - dt * 0.5);
+          if ((b.smokeT -= dt) <= 0) { b.smokeT = 0.05; samEmitSmoke(b.pos, _cxV2.set(0, 1, 0), 7, 3.5, 0.7, 0.12); }
+          var gh = Math.max(getTerrainHeight(b.pos.x, b.pos.z), WATER_LEVEL);
+          if (b.pos.y <= gh + 1) {
+            b.pos.y = gh + 1; triggerMissileBlast(b.pos.clone(), 1.6);
+            if (b.pos.distanceTo(position) < 2500) playMissileImpactSound();
+            stIgniteFire(b.pos.clone(), 7, 45);
+            scene.remove(b.mesh); I.splice(i, 1); continue;
+          }
+          awPose(b); continue;
+        }
+        var off = b.slot ? 220 : 0;
+        if (b.state === 'in') {
+          if (awSteer(b, b.hub.x + off, 820, b.hub.z + off, dt, b.cruise) < 2200) { b.state = 'orbit'; b.t = 0; b.orb = Math.atan2(b.pos.z - b.hub.z, b.pos.x - b.hub.x); if (!b.slot) awRadio('Sentinel: bandits over the city!', '#ff6a5a'); }
+        } else if (b.state === 'orbit') {
+          b.orb += dt * 0.07;
+          awSteer(b, b.hub.x + Math.cos(b.orb + b.slot * 0.4) * 1800, 760, b.hub.z + Math.sin(b.orb + b.slot * 0.4) * 1800, dt, b.cruise * 0.9);
+          if (b.t > 75) b.state = 'out';
+        } else if (b.state === 'out') {
+          awSteer(b, b.exit.x, 900, b.exit.z, dt, b.cruise);
+          if (Math.hypot(b.pos.x - b.hub.x, b.pos.z - b.hub.z) > 15000) { scene.remove(b.mesh); b.alive = false; I.splice(i, 1); if (!b.slot) awRadio('Sentinel: the bandits have left the area', '#9fe8ff'); continue; }
+        }
+        b.vel.copy(awFwd(b, _cxV)).multiplyScalar(b.speed);
+        awPose(b);
+      }
+    }
+    function cmdIntruderHit(b, dmg) {
+      if (!b.alive || b.state === 'down') return;
+      b.hp -= dmg;
+      if (b.hp <= 0) {
+        b.state = 'down'; b.alive = false;
+        awRadio('Sentinel: splash one bandit!', '#7dff9a');
+        triggerMissileBlast(b.pos.clone(), 1.2);
+      }
+    }
+
+    /* ---------- command camera ---------- */
+    function cmdCamTargets() {
+      var T = [];
+      AW.list.forEach(function(a) { if (a.alive && a.cmd && a.state !== 'cmdhold' && a.state !== 'down') T.push({ type: 'flight', obj: a, label: a.name }); });
+      CMD.missiles.forEach(function(m, i) { T.push({ type: 'missile', obj: m, label: 'SILO MISSILE ' + (i + 1) }); });
+      CMDX.intruders.forEach(function(b) { if (b.alive) T.push({ type: 'flight', obj: b, label: 'BANDIT' }); });
+      return T;
+    }
+    function cmdCamCycle(target) {
+      var T = cmdCamTargets();
+      if (target) { CMDX.cam = T.filter(function(x) { return x.obj === target; })[0] || null; }
+      else {
+        var i = CMDX.cam ? T.map(function(x) { return x.obj; }).indexOf(CMDX.cam.obj) : -1;
+        CMDX.cam = i + 1 < T.length ? T[i + 1] : null;
+      }
+      if (CMDX.cam) {
+        CMDX.camSnap = true; CMDX.camHold = 0;
+        if (!QOL.ap && !wasGrounded) qolApOn('level');
+        samToast('CAMERA · ' + CMDX.cam.label, '#9fe0ff', 1.2);
+      } else { CMDX.focus = null; samToast(T.length ? 'CAMERA · SENTINEL' : 'NOTHING TO FOLLOW — LAUNCH A FLIGHT OR A STRIKE', '#9fe0ff', 1.4); }
+      cmdCamLabel();
+    }
+    function cmdCamLabel() {
+      if (!CMDX.camEl) {
+        CMDX.camEl = document.createElement('div');
+        CMDX.camEl.style.cssText = 'position:fixed;left:50%;top:calc(46px + env(safe-area-inset-top));transform:translateX(-50%);z-index:13;pointer-events:none;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:#9fe0ff;background:rgba(6,14,22,.72);border:1px solid rgba(127,216,255,.5);border-radius:3px;padding:4px 10px;display:none;white-space:nowrap';
+        document.body.appendChild(CMDX.camEl);
+      }
+      var c = CMDX.cam;
+      if (!c) { CMDX.camEl.style.display = 'none'; return; }
+      var p = c.type === 'missile' ? c.obj.pos : c.obj.pos;
+      CMDX.camEl.style.display = 'block';
+      CMDX.camEl.textContent = '◉ CAM · ' + c.label + ' · ' + mapFmtDist(p.distanceTo(position)) + ' FROM YOU · [6] NEXT';
+    }
+    // after the game has placed its own camera: ride along with the followed object instead
+    function cmdCamApply(dt) {
+      var c = CMDX.cam;
+      if (!c || !isAwacsMode || crashing) { if (c) { CMDX.cam = null; cmdCamLabel(); } CMDX.focus = null; return; }
+      var o = c.obj, gone = c.type === 'missile' ? CMD.missiles.indexOf(o) < 0 : !(o.alive || o.state === 'down') || o.gone;
+      if (gone) {
+        // hold on the impact a moment, then move on
+        CMDX.camHold += dt;
+        if (CMDX.camHold > (c.type === 'missile' ? 3.5 : 1)) { cmdCamCycle(); if (!CMDX.cam) return; }
+      }
+      var p = o.pos, dir = _cxV2;
+      if (c.type === 'missile') { dir.copy(o.pos).sub(o.prev); if (dir.lengthSq() < 1e-6) dir.set(0, 1, 0); dir.normalize(); }
+      else awFwd(o, dir);
+      var back = c.type === 'missile' ? 85 : 48, up = c.type === 'missile' ? 18 : 11;
+      _cxV.copy(p).addScaledVector(dir, gone ? -back * 2.5 : -back); _cxV.y += gone ? up * 4 : up;
+      var gy = Math.max(getEffectiveGroundHeight(_cxV.x, _cxV.z), WATER_LEVEL) + 4;
+      if (_cxV.y < gy) _cxV.y = gy;
+      if (CMDX.camSnap) { CMDX.camPos.copy(_cxV); CMDX.camLook.copy(p); CMDX.camSnap = false; }
+      CMDX.camPos.lerp(_cxV, Math.min(1, dt * 3.5));
+      CMDX.camLook.lerp(p, Math.min(1, dt * 6));
+      camera.position.copy(CMDX.camPos);
+      camera.up.set(0, 1, 0);
+      camera.lookAt(CMDX.camLook.x + dir.x * 25, CMDX.camLook.y + dir.y * 25, CMDX.camLook.z + dir.z * 25);
+      CMDX.focus = CMDX.camPos;
+      if ((CMDX.camLblT = (CMDX.camLblT || 0) - dt) <= 0) { CMDX.camLblT = 0.25; cmdCamLabel(); }
+    }
+
+    /* ---------- tanker ---------- */
+    function cmdTankerTo(who) {
+      if (who === 'me') {
+        CMDX.tanker = { x: position.x, z: position.z, flight: null };
+        awRadio('Sentinel: Texaco, rendezvous with Sentinel, ' + mapFmtDist(Math.hypot(position.x - AAR.pos.x, position.z - AAR.pos.z)), '#9fe8ff');
+      } else {
+        var lead = CMDX.sel;
+        if (!lead || !lead.alive) { samToast('SELECT A FLIGHT FIRST', '#ffcc33', 1.4); return; }
+        CMDX.tanker = { x: lead.pos.x, z: lead.pos.z, flight: lead };
+        awRadio('Sentinel: Texaco, rendezvous with ' + lead.name, '#9fe8ff');
+      }
+      setTimeout(function() { awRadio('Texaco: copy, on my way', '#9fe0ff'); }, 1100);
+      cmdRefresh();
+    }
+    // the racetrack itself slides toward the rendezvous, so the tanker flies its pattern there
+    function cmdTankerUpdate(dt) {
+      var G = CMDX.tanker; if (!G) return;
+      if (G.flight) {
+        if (!G.flight.alive) { CMDX.tanker = null; return; }
+        G.x = G.flight.pos.x; G.z = G.flight.pos.z;
+        if (Math.hypot(G.flight.pos.x - AAR.pos.x, G.flight.pos.z - AAR.pos.z) < 2600) {
+          cmdFlightMembers(G.flight).forEach(function(a) { if (a.cmd) a.cmd.time = 0; a.aam = 2; if (a.kind === 'fighter') a.ammo = Math.max(a.ammo, 4); else if (a.kind === 'drone') a.ammo = Math.max(a.ammo, 4); a.cmd.doneT = undefined; a.cmd.dryT = 0; });
+          awRadio(G.flight.name + ': plugged in… topped off, thanks Texaco. Back to work', '#9fd0ff');
+          CMDX.tanker = null;
+          return;
+        }
+      }
+      var dx = G.x - AAR_TRACK.x, dz = G.z - AAR_TRACK.z, d = Math.hypot(dx, dz);
+      var step = Math.min(d, 125 * dt);
+      if (d > 1) { AAR_TRACK.x += dx / d * step; AAR_TRACK.z += dz / d * step; }
+      var floor = Math.max(getTerrainHeight(AAR_TRACK.x, AAR_TRACK.z), WATER_LEVEL) + 700;
+      AAR_TRACK.y += (Math.max(floor, G.flight ? G.flight.pos.y + 150 : position.y + 80) - AAR_TRACK.y) * Math.min(1, dt * 0.2);
+      if (!G.flight && d < 400) { awRadio('Texaco: on station, basket out, cleared to join', '#9fe0ff'); CMDX.tanker = null; }
+    }
+
+    /* ---------- panel ---------- */
+    function cmdPanelExtra() {
+      var el = document.getElementById('cmdX'); if (!el) return;
+      var fl = cmdFlights();
+      if (CMDX.sel && (!CMDX.sel.alive || fl.indexOf(CMDX.sel) < 0)) CMDX.sel = null;
+      var hostiles = CMDX.contacts.filter(function(c) { return c.iff === 'hostile'; }).slice(0, 5);
+      var sig = fl.map(function(a) { return a.name + a.state + (a === CMDX.sel); }).join() + '|' + hostiles.map(function(c) { return c.id + ':' + Math.round(c.d / 100); }).join() + '|' +
+                (CMDX.track ? CMDX.track.id : '') + '|' + CMDX.route.length + CMDX.routeMode + '|' + (CMDX.tanker ? 1 : 0);
+      if (sig === CMDX.panelSig) return;
+      CMDX.panelSig = sig;
+      var st = function(a) { return a.state === 'mission' ? (a.cmd.route && a.cmd.route.length ? 'ROUTE' : a.cmd.engage ? 'ENGAGED' : a.cmd.onStation ? 'ON STN' : 'TRANSIT') : a.state === 'cmdhome' || a.state === 'rtb' ? 'RTB' : a.state === 'cmdclimb' || a.state === 'climbout' ? 'CLIMB' : 'LAUNCH'; };
+      el.innerHTML =
+        '<span class="cl">ROUTE</span><div class="acts"><button class="act' + (CMDX.routeMode ? ' go' : '') + '" data-a="route">' + (CMDX.routeMode ? 'DRAWING ✓' : 'DRAW ROUTE') + '</button><button class="act" data-a="rclear">CLEAR</button><span class="st">' + (CMDX.route.length ? CMDX.route.length + ' pts' : 'direct') + '</span></div>' +
+        '<span class="cl">FLIGHTS</span><div class="acts"><span class="chips">' + (fl.length ? fl.map(function(a, i) { return '<button data-fl="' + i + '" class="' + (a === CMDX.sel ? 'on' : '') + '">' + a.name + ' · ' + st(a) + '</button>'; }).join('') : '<span class="st" style="color:#7f9bab">none up</span>') + '</span></div>' +
+        '<span class="cl"></span><div class="acts"><button class="act go" data-a="retask">RE-TASK</button><button class="act" data-a="rtb1">RTB</button><button class="act" data-a="cam">CAM ◉</button></div>' +
+        '<span class="cl">CONTACTS</span><div class="acts"><span class="chips">' + (hostiles.length ? hostiles.map(function(c) { return '<button data-ct="' + c.id + '" class="' + (CMDX.track && CMDX.track.id === c.id ? 'on' : '') + '">' + (c.cls === 'air' ? '▲ ' : c.cls === 'sea' ? '◆ ' : '■ ') + c.label + ' ' + mapFmtDist(c.d) + '</button>'; }).join('') : '<span class="st" style="color:#7f9bab">radar clear</span>') + '</span></div>' +
+        '<span class="cl">TANKER</span><div class="acts"><button class="act" data-a="tkme">TO ME</button><button class="act" data-a="tkfl">TO FLIGHT</button><span class="st">' + (CMDX.tanker ? 'en route' : '') + '</span></div>';
+      el._fl = fl; el._ct = hostiles;
+    }
+    function cmdPanelClick(b) {
+      var el = document.getElementById('cmdX');
+      if (b.dataset.fl !== undefined) { var a = el._fl[+b.dataset.fl]; CMDX.sel = CMDX.sel === a ? null : a; CMDX.panelSig = ''; cmdPanelExtra(); return true; }
+      if (b.dataset.ct !== undefined) { var c = el._ct.filter(function(x) { return String(x.id) === b.dataset.ct; })[0]; if (c) cmdSelectContact(c); CMDX.panelSig = ''; cmdPanelExtra(); return true; }
+      var act = b.getAttribute('data-a');
+      if (act === 'route') { CMDX.routeMode = !CMDX.routeMode; if (CMDX.routeMode) { setMiniMapExpanded(true); samToast('TAP THE MAP TO LAY WAYPOINTS', '#ffd25a', 2); } }
+      else if (act === 'rclear') { CMDX.route = []; CMDX.routeMode = false; }
+      else if (act === 'retask') cmdRetask();
+      else if (act === 'rtb1') cmdRtbSel();
+      else if (act === 'cam') cmdCamCycle(CMDX.sel && !CMDX.cam ? CMDX.sel : undefined);
+      else if (act === 'tkme') cmdTankerTo('me');
+      else if (act === 'tkfl') cmdTankerTo('flight');
+      else return false;
+      CMDX.panelSig = ''; cmdPanelExtra();
+      return true;
+    }
+    function cmdxUpdate(dt) {
+      cmdIntrudersUpdate(dt);
+      cmdTankerUpdate(dt);
+      if ((CMDX.contactsT -= dt) <= 0) { CMDX.contactsT = 0.5; if (isAwacsMode && started) { cmdBuildContacts(); cmdPanelExtra(); } }
+      if (!isAwacsMode && CMDX.cam) { CMDX.cam = null; CMDX.focus = null; cmdCamLabel(); }
     }
 
     /* ---------- the command panel ---------- */
@@ -11152,6 +11610,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         '#cmdPanel .red{background:rgba(255,70,50,.32);border-color:#ff6a4a}',
         '#cmdPanel .acts{display:flex;gap:5px;flex-wrap:wrap;align-items:center}',
         '#cmdPanel .st{color:#ffcf8a;font-size:10.5px;margin-left:4px}',
+        '#cmdPanel .chips{display:flex;gap:4px;flex-wrap:wrap}#cmdPanel .chips button{appearance:none;cursor:pointer;font:700 10px ui-monospace,Menlo,monospace;letter-spacing:.04em;padding:4px 7px;border-radius:2px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#dbeefa}#cmdPanel .chips button.on{border-color:#ffd25a;background:rgba(255,210,90,.2);color:#fff}',
+        '#cmdPanel{max-height:calc(100vh - 70px);overflow-y:auto}#cmdPanel #cmdX{padding-top:0}',
         'body.gp-nohud #cmdPanel{visibility:hidden !important}',
         '@media (max-height:520px),(max-width:700px){#cmdPanel{bottom:auto;top:calc(8px + env(safe-area-inset-top));width:min(470px,calc(100vw - 250px));font-size:10px}#cmdPanel .cb{grid-template-columns:50px 1fr;gap:3px 6px}#cmdPanel .seg button,#cmdPanel .act{padding:4px 6px;font-size:9.5px}}',
         '@media (orientation:portrait) and (max-width:700px){#cmdPanel{top:auto;bottom:calc(150px + env(safe-area-inset-bottom));width:calc(100vw - 20px)}}'
@@ -11165,15 +11625,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         '<div class="cb">' +
         '<span class="cl">PACKAGE</span><div class="seg" data-k="pkg"><button data-v="fighters">FIGHTERS</button><button data-v="drones">DRONES</button><button data-v="bomber">BOMBER</button></div>' +
         '<span class="cl">FROM</span><div class="seg" data-k="base"><button data-v="field">AIRFIELD</button><button data-v="strip">OLD FIELD</button><button data-v="carrier">CARRIER</button></div>' +
-        '<span class="cl">TARGET</span><div class="seg" data-k="task"><button data-v="sam">SAM SITE</button><button data-v="convoy">CONVOY</button><button data-v="aa">AA GUNS</button><button data-v="marker">MARKER</button></div>' +
+        '<span class="cl">TARGET</span><div class="seg" data-k="task"><button data-v="sam">SAM SITE</button><button data-v="convoy">CONVOY</button><button data-v="aa">AA GUNS</button><button data-v="marker">MARKER</button><button data-v="track">CONTACT</button><button data-v="patrol">PATROL</button></div>' +
         '<span class="cl">ORDERS</span><div class="acts"><button class="act go" data-a="launch">LAUNCH ▸</button><button class="act" data-a="recall">RECALL ALL</button></div>' +
         '<span class="cl">SILOS</span><div class="acts"><button class="act" data-a="map">MAP · MARK</button><button class="act red" data-a="strike">MISSILE STRIKE ▸</button><span class="st" id="cmdSilo"></span></div>' +
-        '</div>';
+        '</div><div class="cb" id="cmdX"></div>';
       document.body.appendChild(p);
       p.querySelector('.ch').addEventListener('click', function() { p.classList.toggle('min'); });
       p.addEventListener('click', function(e) {
         e.stopPropagation();
         var b = e.target.closest('button'); if (!b) return;
+        if (cmdPanelClick(b)) return;
         var seg = b.parentNode.getAttribute('data-k');
         if (seg) { CMD[seg] = b.getAttribute('data-v'); cmdRefresh(); return; }
         var a = b.getAttribute('data-a');
@@ -11928,6 +12389,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         case 'KeyM': case 'KeyX': if (val) fireMissile(); return true;
         case 'KeyB': if (val) arsFire(); return true;
         case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5': if (val) arsSelect(+code.charAt(5) - 1); return true;
+        case 'Digit6': if (val && isAwacsMode) cmdCamCycle(); return true;
         case 'KeyG': flarePress(val); return true;
         case 'KeyH': if (val) flareToggleAuto(); return true;
         case 'KeyT': if (val) { if (droneCamActive) toggleStrikeTrack(); else arsCycleLock(); } return true;
@@ -16018,13 +16480,15 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           camera.lookAt(lookTarget);
         }
 
-        sky.position.set(position.x, 0, position.z);
-        water.position.x = position.x; water.position.z = position.z;
+        cmdCamApply(dt);
+        var cxFocus = CMDX.focus || position;
+        sky.position.set(cxFocus.x, 0, cxFocus.z);
+        water.position.x = cxFocus.x; water.position.z = cxFocus.z;
         waterMaterial.uniforms.time.value = elapsedSeconds;
         seaUpdateWaves(dt, elapsedSeconds, currentWind, currentRainIntensity);
         waterMaterial.uniforms.uAmpSum.value = seaAmpSum;
         waterMaterial.uniforms.uFoamAmt.value = THREE.MathUtils.clamp((seaState - 0.45) / 0.9, 0, 1);
-        starField.position.set(position.x, 0, position.z);
+        starField.position.set(cxFocus.x, 0, cxFocus.z);
         starField.material.uniforms.uTime.value = elapsedSeconds;
         starField.material.uniforms.uPR.value = renderer.getPixelRatio();
         updateMeteors(dt, camera);
@@ -16094,7 +16558,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         updateAirport(dt);
         updateHighwayTraffic(dt);
 
-        maybeUpdateChunks(position.x, position.z);
+        maybeUpdateChunks((CMDX.focus || position).x, (CMDX.focus || position).z);
         updateForestLod(dt, camera.position);
         forestCollide(dt);
         recycleClouds(position.x, position.z, dt);
@@ -16132,6 +16596,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       updateSAM(dt);
       airWingUpdate(dt);
       cmdUpdate(dt);
+      cmdxUpdate(dt);
       warUpdate(dt);
       regUpdate(dt);
       navyUpdate(dt);
