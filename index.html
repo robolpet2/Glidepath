@@ -2640,7 +2640,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var canvasEl = document.getElementById('canvas');
     // antialiasing comes from the multisampled scene target in the post chain, so the canvas itself
     // doesn't need its own MSAA buffer
-    var renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: false, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
+    var renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: false, powerPreference: 'high-performance', logarithmicDepthBuffer: false });
     // checking every shader for errors forces a synchronous compile + link (a visible hitch each time
     // a new material shows up); let the driver compile in the background instead
     renderer.debug.checkShaderErrors = false;
@@ -3289,10 +3289,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     // water plane — animated waves + sun sparkle, fixed level, follows player's XZ only
     var waterMaterial = new THREE.ShaderMaterial({
-      defines: {
-        USE_LOGDEPTHBUF: '',
-        USE_LOGDEPTHBUF_EXT: ''
-      },
       uniforms: THREE.UniformsUtils.merge([
         THREE.UniformsLib.fog,
         {
@@ -7163,64 +7159,86 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var chunks = new Map();
     var tmpColor = new THREE.Color();
 
-    function buildChunk(cx, cz) {
-      var worldOffsetX = cx * CHUNK_SIZE;
-      var worldOffsetZ = cz * CHUNK_SIZE;
-
-      var geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, CHUNK_SEGMENTS, CHUNK_SEGMENTS);
-      geometry.rotateX(-Math.PI / 2);
-      var posAttr = geometry.attributes.position;
-      var colorArray = new Float32Array(posAttr.count * 3);
+    // A chunk is built as a small job in three stages — the height grid, the per-vertex colour /
+    // biome pass, then the mesh and its forest — so streaming terrain in can be spread over
+    // several frames instead of landing as one 6 ms lump (two of them a frame used to stutter).
+    function chunkJob(cx, cz) {
+      var gSeg = CHUNK_SEGMENTS, gW = gSeg + 3;
+      return { cx: cx, cz: cz, ox: cx * CHUNK_SIZE, oz: cz * CHUNK_SIZE, stage: 0, row: 0, i: 0, done: false, entry: null,
+               hGrid: new Float32Array(gW * gW), gW: gW, geometry: null };
+    }
+    function chunkJobStep(j, budgetMs) {
+      var t0 = performance.now();
+      var worldOffsetX = j.ox, worldOffsetZ = j.oz;
+      var gSeg = CHUNK_SEGMENTS, gStep = CHUNK_SIZE / gSeg, gHalf = CHUNK_SIZE / 2, gW = j.gW, hGrid = j.hGrid;
       // height grid with a one-vertex apron around the chunk, so every vertex (including the
       // chunk's own border) gets a true central-difference normal from its real neighbours —
       // computeVertexNormals() only sees this chunk, which leaves visible lighting seams along
       // chunk edges once the terrain is smooth-shaded
-      var gSeg = CHUNK_SEGMENTS, gStep = CHUNK_SIZE / gSeg, gHalf = CHUNK_SIZE / 2, gW = gSeg + 3;
-      var hGrid = new Float32Array(gW * gW);
-      for (var gz = -1; gz <= gSeg + 1; gz++) {
+      while (j.stage === 0) {
+        var gz = j.row - 1;
         for (var gx = -1; gx <= gSeg + 1; gx++) {
           hGrid[(gz + 1) * gW + (gx + 1)] = getTerrainHeight(worldOffsetX - gHalf + gx * gStep, worldOffsetZ - gHalf + gz * gStep);
         }
+        if (++j.row > gSeg + 2) {
+          j.stage = 1;
+          j.geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, CHUNK_SEGMENTS, CHUNK_SEGMENTS);
+          j.geometry.rotateX(-Math.PI / 2);
+          var cnt = j.geometry.attributes.position.count;
+          j.colorArray = new Float32Array(cnt * 3); j.normalArray = new Float32Array(cnt * 3); j.bioArray = new Float32Array(cnt * 3);
+        }
+        if (performance.now() - t0 > budgetMs) return false;
       }
-      var normalArray = new Float32Array(posAttr.count * 3);
-      var bioArray = new Float32Array(posAttr.count * 3), bio = [0, 0, 0];
-      for (var i = 0; i < posAttr.count; i++) {
-        var lx = posAttr.getX(i);
-        var lz = posAttr.getZ(i);
-        var wx = lx + worldOffsetX, wz = lz + worldOffsetZ;
-        var gix = Math.round((lx + gHalf) / gStep) + 1, giz = Math.round((lz + gHalf) / gStep) + 1;
-        var h = hGrid[giz * gW + gix];
-        var nxv = hGrid[giz * gW + gix - 1] - hGrid[giz * gW + gix + 1];
-        var nzv = hGrid[(giz - 1) * gW + gix] - hGrid[(giz + 1) * gW + gix];
-        var nyv = 2 * gStep;
-        var nLen = Math.sqrt(nxv * nxv + nyv * nyv + nzv * nzv);
-        normalArray[i * 3] = nxv / nLen; normalArray[i * 3 + 1] = nyv / nLen; normalArray[i * 3 + 2] = nzv / nLen;
-        posAttr.setY(i, h);
-        colorForHeight(h, tmpColor);
-        // forest floor: needles, leaf litter and canopy shade darken the ground under the stands,
-        // which also keeps distant forests reading as solid masses when their trees thin out
-        var fd = forestDensityAt(wx, wz, h);
-        if (fd > 0.01 && !treeBlockedAt(wx, wz)) { tmpColor.r *= 1 - fd * 0.5; tmpColor.g *= 1 - fd * 0.36; tmpColor.b *= 1 - fd * 0.52; }
-        regColor(wx, wz, h, tmpColor, bio);
-        bioArray[i * 3] = bio[0]; bioArray[i * 3 + 1] = bio[1]; bioArray[i * 3 + 2] = bio[2];
-        var jitter = 1 + (smoothNoise(wx * 0.11, wz * 0.11) - 0.5) * 0.22
-                      + (smoothNoise(wx * 0.31, wz * 0.29) - 0.5) * 0.09;
-        colorArray[i * 3] = Math.min(1, Math.max(0, tmpColor.r * jitter));
-        colorArray[i * 3 + 1] = Math.min(1, Math.max(0, tmpColor.g * jitter));
-        colorArray[i * 3 + 2] = Math.min(1, Math.max(0, tmpColor.b * jitter));
+      if (j.stage === 1) {
+        var posAttr = j.geometry.attributes.position, colorArray = j.colorArray, normalArray = j.normalArray, bioArray = j.bioArray, bio = [0, 0, 0];
+        for (var i = j.i; i < posAttr.count; i++) {
+          var lx = posAttr.getX(i);
+          var lz = posAttr.getZ(i);
+          var wx = lx + worldOffsetX, wz = lz + worldOffsetZ;
+          var gix = Math.round((lx + gHalf) / gStep) + 1, giz = Math.round((lz + gHalf) / gStep) + 1;
+          var h = hGrid[giz * gW + gix];
+          var nxv = hGrid[giz * gW + gix - 1] - hGrid[giz * gW + gix + 1];
+          var nzv = hGrid[(giz - 1) * gW + gix] - hGrid[(giz + 1) * gW + gix];
+          var nyv = 2 * gStep;
+          var nLen = Math.sqrt(nxv * nxv + nyv * nyv + nzv * nzv);
+          normalArray[i * 3] = nxv / nLen; normalArray[i * 3 + 1] = nyv / nLen; normalArray[i * 3 + 2] = nzv / nLen;
+          posAttr.setY(i, h);
+          colorForHeight(h, tmpColor);
+          // forest floor: needles, leaf litter and canopy shade darken the ground under the stands,
+          // which also keeps distant forests reading as solid masses when their trees thin out
+          var fd = forestDensityAt(wx, wz, h);
+          if (fd > 0.01 && !treeBlockedAt(wx, wz)) { tmpColor.r *= 1 - fd * 0.5; tmpColor.g *= 1 - fd * 0.36; tmpColor.b *= 1 - fd * 0.52; }
+          regColor(wx, wz, h, tmpColor, bio);
+          bioArray[i * 3] = bio[0]; bioArray[i * 3 + 1] = bio[1]; bioArray[i * 3 + 2] = bio[2];
+          var jitter = 1 + (smoothNoise(wx * 0.11, wz * 0.11) - 0.5) * 0.22
+                        + (smoothNoise(wx * 0.31, wz * 0.29) - 0.5) * 0.09;
+          colorArray[i * 3] = Math.min(1, Math.max(0, tmpColor.r * jitter));
+          colorArray[i * 3 + 1] = Math.min(1, Math.max(0, tmpColor.g * jitter));
+          colorArray[i * 3 + 2] = Math.min(1, Math.max(0, tmpColor.b * jitter));
+          if ((i & 63) === 63 && performance.now() - t0 > budgetMs) { j.i = i + 1; return false; }
+        }
+        j.stage = 2;
+        if (performance.now() - t0 > budgetMs) return false;
       }
-      geometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
-      geometry.setAttribute('normal', new THREE.BufferAttribute(normalArray, 3));
-      geometry.setAttribute('aBio', new THREE.BufferAttribute(bioArray, 3));
+      var geometry = j.geometry;
+      geometry.setAttribute('color', new THREE.BufferAttribute(j.colorArray, 3));
+      geometry.setAttribute('normal', new THREE.BufferAttribute(j.normalArray, 3));
+      geometry.setAttribute('aBio', new THREE.BufferAttribute(j.bioArray, 3));
 
       var mesh = new THREE.Mesh(geometry, terrainMaterial);
       mesh.position.set(worldOffsetX, 0, worldOffsetZ);
       mesh.receiveShadow = true;
       scene.add(mesh);
 
-      var forest = forestPlant(cx, cz, worldOffsetX, worldOffsetZ, hGrid, gW, scene);
-
-      return { mesh: mesh, trees: null, trees2: null, trunks: null, forest: forest };
+      var forest = forestPlant(j.cx, j.cz, worldOffsetX, worldOffsetZ, hGrid, gW, scene);
+      j.entry = { mesh: mesh, trees: null, trees2: null, trunks: null, forest: forest };
+      j.done = true;
+      return true;
+    }
+    function buildChunk(cx, cz) {
+      var j = chunkJob(cx, cz);
+      chunkJobStep(j, Infinity);
+      return j.entry;
     }
 
     function disposeChunk(entry) {
@@ -7271,16 +7289,25 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         lastCCX = ccx; lastCCZ = ccz;
         updateChunks(px, pz);
       }
-      // build up to 2 queued chunks per frame (immediate neighbours get built in 1 frame, outer ring streams in)
-      var built = 0;
-      while (chunkBuildQueue.length > 0 && built < 2) {
-        var item = chunkBuildQueue.shift();
-        if (chunkNeeded[item.key] && !chunks.has(item.key)) {
-          chunks.set(item.key, buildChunk(item.cx, item.cz));
-          built++;
+      // the chunk you're in and its neighbours are built straight away (you could be about to touch
+      // them); the outer rings stream in as a background job capped at ~2.5 ms a frame
+      while (chunkBuildQueue.length > 0 && chunkBuildQueue[0].distSq <= 2) {
+        var near = chunkBuildQueue.shift();
+        if (chunkNeeded[near.key] && !chunks.has(near.key)) chunks.set(near.key, buildChunk(near.cx, near.cz));
+      }
+      var budget = 2.5, t0 = performance.now();
+      while (performance.now() - t0 < budget) {
+        if (chunkJobCur && (!chunkNeeded[chunkJobCur.key] || chunks.has(chunkJobCur.key))) chunkJobCur = null;
+        if (!chunkJobCur) {
+          var item = chunkBuildQueue.shift();
+          if (!item) break;
+          if (!chunkNeeded[item.key] || chunks.has(item.key)) continue;
+          chunkJobCur = chunkJob(item.cx, item.cz); chunkJobCur.key = item.key;
         }
+        if (chunkJobStep(chunkJobCur, budget - (performance.now() - t0))) { chunks.set(chunkJobCur.key, chunkJobCur.entry); chunkJobCur = null; }
       }
     }
+    var chunkJobCur = null;
 
     /* ============================================================
        CLOUDS — fields of cumulus that look like the real thing
@@ -14991,11 +15018,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         for (var x = 0; x < n; x++) j.H[ry * n + x] = getTerrainHeight(x0 + x * step, z);
       }
       if (j.row < j.res + 1) return;
-      // colour + hillshade (light from the north-west) in one pass
-      var cv = mapTerrain.canvas; cv.width = cv.height = j.res;
-      var c = cv.getContext('2d'), img = c.createImageData(j.res, j.res), col = [0, 0, 0];
+      // colour + hillshade (light from the north-west), a slice of rows per frame so the chart never
+      // costs a long frame; the finished image replaces the old one in one go
+      var cv = mapTerrain.canvas;
+      if (!j.img) { j.img = cv.getContext('2d').createImageData(j.res, j.res); j.crow = 0; }
+      var img = j.img, col = [0, 0, 0], tStart = performance.now();
       var k2 = 1.8 / step;
-      for (var y = 0; y < j.res; y++) {
+      for (var y = j.crow; y < j.res; y++) {
+        if (y > j.crow && performance.now() - tStart > 1.5) { j.crow = y; return; }
         for (var xx = 0; xx < j.res; xx++) {
           var i = (y + 1) * n + (xx + 1);
           var h = j.H[i];
@@ -15014,7 +15044,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           img.data[o + 3] = 255;
         }
       }
-      c.putImageData(img, 0, 0);
+      cv.width = cv.height = j.res;
+      cv.getContext('2d').putImageData(img, 0, 0);
       mapTerrain.cx = j.cx; mapTerrain.cz = j.cz; mapTerrain.span = j.span; mapTerrain.ready = true;
       mapTerrain.job = null;
     }
@@ -17135,13 +17166,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         m.geometry = FOREST_SP[s].g[lod];
         m.count = lod === 2 ? Math.max(1, Math.ceil(F.full[s] * FOREST_QL[FOREST_Q][4])) : F.full[s];
         m.castShadow = cast;
-        m.layers.mask = lod === 2 ? 4 : 1;          // far stands stay out of the water's mirror pass
+        m.layers.mask = lod === 0 ? 1 : 4;          // only the nearest stands are drawn into the water's mirror pass
       }
     }
     // forest quality: 0 full, 1 lighter, 2 lightest — the adaptive-quality loop steps it down on slow
     // devices (touch devices start one step down)
     var FOREST_Q = typeof GFX_IS_TOUCH !== 'undefined' && GFX_IS_TOUCH ? 1 : 0;
-    var FOREST_QL = [[110, 140, 520, 580, 0.6], [60, 85, 340, 390, 0.45], [1, 1, 200, 240, 0.35]];
+    var FOREST_QL = [[95, 120, 420, 470, 0.55], [60, 80, 300, 340, 0.42], [1, 1, 190, 230, 0.32]];
     function forestSetQuality(q) {
       FOREST_Q = Math.max(0, Math.min(2, q));
       chunks.forEach(function(entry) { if (entry.forest) { entry.forest.lod = -1; forestSetLod(entry.forest, forestPickLod(entry.forest, camera.position)); } });
@@ -17149,7 +17180,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     // by distance to the nearest point of the chunk, with a little hysteresis
     function forestPickLod(F, cam) {
       var ax = Math.max(0, Math.abs(F.cx - cam.x) - CHUNK_SIZE / 2), az = Math.max(0, Math.abs(F.cz - cam.z) - CHUNK_SIZE / 2);
-      var d = Math.sqrt(ax * ax + az * az), Q = FOREST_QL[FOREST_Q];
+      // height counts too: flying high over a forest, the trees right under you are small on screen
+      if (F.hy === undefined) { var hs = 0; for (var hi = 0; hi < F.n; hi++) hs += F.y[hi]; F.hy = hs / Math.max(1, F.n); }
+      var ay = Math.max(0, Math.abs(cam.y - F.hy) - 15);
+      var d = Math.sqrt(ax * ax + az * az + ay * ay), Q = FOREST_QL[FOREST_Q];
       F.dNear = d;
       if (d < (F.lod === 0 ? Q[1] : Q[0])) return 0;
       if (d < (F.lod === 2 ? Q[2] : Q[3])) return 1;
@@ -23762,7 +23796,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (!show) return;
       var txt = 'TGT ▸ ' + QB_FILTERS[QB.filt][1];
       if (txt !== QB.filtTxt) { QB.filtTxt = txt; QB.filtEl.textContent = txt; QB.filtEl.classList.toggle('on', QB.filt > 0); }
-      // ride just above the weapons panel, wherever the layout put it
+      // ride just above the weapons panel, wherever the layout put it (measured twice a second — a
+      // layout read every frame forces the browser to recompute styles mid-frame)
+      if ((QB.filtMeasT = (QB.filtMeasT || 0) - 1) > 0 && QB.filtPos) return;
+      QB.filtMeasT = 30;
       var r = arsPanel.getBoundingClientRect();
       var k = Math.round(r.left) + ',' + Math.round(r.top);
       if (k !== QB.filtPos) { QB.filtPos = k; QB.filtEl.style.left = Math.round(r.right - 2) + 'px'; QB.filtEl.style.top = Math.round(r.top - 24) + 'px'; QB.filtEl.style.transform = 'translateX(-100%)'; }
