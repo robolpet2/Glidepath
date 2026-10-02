@@ -2394,7 +2394,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     //   · THE CALDERA, an island volcano ~600 km south-west: a sheer rim around a flat floor and a pad
     var DT_SITES = {
       arctic: { x: 0, z: -600000, y: 20 },
-      canyon: { x: 600000, z: -30000, floor: 25, top: 240, half: 5200 },
+      canyon: { x: 600000, z: -6000, floor: 25, top: 240, half: 5200 },
       crater: { x: -420000, z: 420000, floor: 320, rim: 900, inner: 1700, wall: 2200, R: 7000 }
     };
     function dtCanyonZ(x) { var u = x - DT_SITES.canyon.x; return DT_SITES.canyon.z + 520 * Math.sin(u * 0.0011) + 200 * Math.sin(u * 0.0029 + 1.0); }
@@ -25258,7 +25258,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // --- UI: the TRIPS button, the panel, the gate HUD and the stamp ---
       var css = document.createElement('style');
       css.textContent = [
-        '#dtBtn{position:fixed;z-index:12;left:calc(98px + env(safe-area-inset-left));bottom:calc(296px + env(safe-area-inset-bottom));width:64px;height:34px;box-sizing:border-box;border-radius:12px;display:flex;align-items:center;justify-content:center;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#ffe2c4;background:rgba(60,30,10,.6);border:2px solid #ffb36a;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}',
+        '#dtBtn{position:fixed;z-index:12;left:calc(170px + env(safe-area-inset-left));bottom:calc(250px + env(safe-area-inset-bottom));width:64px;height:40px;box-sizing:border-box;border-radius:12px;display:flex;align-items:center;justify-content:center;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#ffe2c4;background:rgba(60,30,10,.6);border:2px solid #ffb36a;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}',
         '@media (orientation: landscape) and (max-height: 500px){#dtBtn{left:calc(254px + env(safe-area-inset-left));bottom:auto;top:calc(80px + env(safe-area-inset-top));width:58px;height:30px;border-radius:9px;font-size:9.5px}}',
         '#dtBtn.hidden{display:none}',
         '#dtPanel{position:fixed;z-index:30;left:50%;top:50%;transform:translate(-50%,-50%);width:min(360px,calc(100vw - 32px));box-sizing:border-box;display:none;font:600 12px/1.4 ui-monospace,Menlo,monospace;color:#f4e8dc;background:rgba(18,12,8,.92);border:1px solid #ffb36a;border-radius:14px;padding:14px}',
