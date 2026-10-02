@@ -10603,7 +10603,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
        Mark the target by opening the map (MAP in the panel) and tapping/clicking it.
        ============================================================ */
     var isAwacsMode = false;
-    var CMD = { marker: null, task: 'sam', pkg: 'fighters', base: 'field', silo: null, siloRevealed: false, missile: null,
+    var CMD = { marker: null, task: 'sam', pkg: 'fighters', base: 'field', silo: null, siloRevealed: false, missile: null, missiles: [],
                 reload: 0, countdown: 0, flights: 0, open: true, seq: 1, beam: null };
 
     /* ---------- the airframe ---------- */
@@ -10703,27 +10703,35 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
       }
       if (!best) best = { x: RUNWAY_CENTER_X - 3600, z: RUNWAY_CENTER_Z - 2600 };
-      var y = getTerrainHeight(best.x, best.z);
-      var g = new THREE.Group(); g.position.set(best.x, y, best.z); scene.add(g);
+      // a field of four silos in a loose diamond, ~45 m apart, each with its own doors and missile
       var camo = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x4f5a3a).convertSRGBToLinear(), roughness: 0.95 });
       var conc = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x77756d).convertSRGBToLinear(), roughness: 0.95 });
-      var pad = new THREE.Mesh(new THREE.CylinderGeometry(9, 10, 1.2, 24), conc); pad.position.y = -0.3; pad.receiveShadow = true; g.add(pad);
-      var shaft = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 30, 20, 1, true), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, side: THREE.BackSide })); shaft.position.y = -14.8; g.add(shaft);
-      var doors = [-1, 1].map(function(sd) {
-        var d = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.5, 6.4), camo); d.position.set(sd * 1.5, 0.35, 0); d.castShadow = true; g.add(d); return d;
+      var shaftM = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, side: THREE.BackSide });
+      var bodyM = new THREE.MeshStandardMaterial({ color: new THREE.Color(0xe6e6e0).convertSRGBToLinear(), roughness: 0.5, metalness: 0.2 });
+      var noseM = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x2b2e31).convertSRGBToLinear(), roughness: 0.4 });
+      var bandMat = new THREE.MeshStandardMaterial({ color: 0x8e2a22 });
+      var pads = [[0, 0], [46, 18], [-20, 44], [26, 62]].map(function(o) {
+        var px = best.x + o[0], pz = best.z + o[1], py = getTerrainHeight(px, pz);
+        var g = new THREE.Group(); g.position.set(px, py, pz); scene.add(g);
+        var pad = new THREE.Mesh(new THREE.CylinderGeometry(9, 10, 1.2, 24), conc); pad.position.y = -0.3; pad.receiveShadow = true; g.add(pad);
+        var shaft = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 30, 20, 1, true), shaftM); shaft.position.y = -14.8; g.add(shaft);
+        var doors = [-1, 1].map(function(sd) {
+          var d = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.5, 6.4), camo); d.position.set(sd * 1.5, 0.35, 0); d.castShadow = true; g.add(d); return d;
+        });
+        [[6, 4], [-6.5, -3], [5, -6]].forEach(function(v) { var vent = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.8, 8), conc); vent.position.set(v[0], 0.3, v[1]); g.add(vent); });
+        // the missile, waiting in its tube
+        var ms = new THREE.Group();
+        var body = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, 13, 18), bodyM); body.position.y = 6.5; ms.add(body);
+        var nose = new THREE.Mesh(new THREE.ConeGeometry(1.05, 3.2, 18), noseM); nose.position.y = 14.6; ms.add(nose);
+        var bandM = new THREE.Mesh(new THREE.CylinderGeometry(1.07, 1.07, 0.6, 18), bandMat); bandM.position.y = 10; ms.add(bandM);
+        var flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0, fog: false }));
+        flame.position.y = -2.5; flame.scale.set(6, 10, 1); ms.add(flame);
+        ms.position.set(px, py - 15, pz); ms.visible = false; scene.add(ms);
+        return { x: px, z: pz, y: py, group: g, doors: doors, missile: ms, flame: flame };
       });
-      [[6, 4], [-6.5, -3], [5, -6]].forEach(function(v) { var vent = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.8, 8), conc); vent.position.set(v[0], 0.3, v[1]); g.add(vent); });
-      // the missile, waiting in the tube
-      var ms = new THREE.Group();
-      var body = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, 13, 18), new THREE.MeshStandardMaterial({ color: new THREE.Color(0xe6e6e0).convertSRGBToLinear(), roughness: 0.5, metalness: 0.2 }));
-      body.position.y = 6.5; ms.add(body);
-      var nose = new THREE.Mesh(new THREE.ConeGeometry(1.05, 3.2, 18), new THREE.MeshStandardMaterial({ color: new THREE.Color(0x2b2e31).convertSRGBToLinear(), roughness: 0.4 }));
-      nose.position.y = 14.6; ms.add(nose);
-      var bandM = new THREE.Mesh(new THREE.CylinderGeometry(1.07, 1.07, 0.6, 18), new THREE.MeshStandardMaterial({ color: 0x8e2a22 })); bandM.position.y = 10; ms.add(bandM);
-      var flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0, fog: false }));
-      flame.position.y = -2.5; flame.scale.set(6, 10, 1); ms.add(flame);
-      ms.position.set(best.x, y - 15, best.z); ms.visible = false; scene.add(ms);
-      CMD.silo = { x: best.x, z: best.z, y: y, group: g, doors: doors, missile: ms, flame: flame, doorT: 0 };
+      var y = pads[0].y;
+      // the first pad stands in for the whole field (map marker, cameras)
+      CMD.silo = { x: best.x, z: best.z, y: y, pads: pads, group: pads[0].group, doors: pads[0].doors, missile: pads[0].missile, flame: pads[0].flame, doorT: 0 };
       return CMD.silo;
     }
 
@@ -10892,26 +10900,33 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     /* ---------- the missile strike ---------- */
     function cmdStrike() {
       if (!CMD.marker) { samToast('MARK A TARGET ON THE MAP FIRST', '#ffcc33', 1.8); return; }
-      if (CMD.missile || CMD.countdown > 0) { samToast('STRIKE ALREADY IN PROGRESS', '#ffcc33', 1.4); return; }
-      if (CMD.reload > 0) { samToast('SILO RELOADING — ' + Math.ceil(CMD.reload) + 's', '#ffcc33', 1.4); return; }
+      if (CMD.missiles.length || CMD.countdown > 0) { samToast('STRIKE ALREADY IN PROGRESS', '#ffcc33', 1.4); return; }
+      if (CMD.reload > 0) { samToast('SILOS RELOADING — ' + Math.ceil(CMD.reload) + 's', '#ffcc33', 1.4); return; }
       var S = cmdSiteSilo();
       CMD.siloRevealed = true;
       CMD.countdown = 5; CMD.target = CMD.marker.clone();
       S.doorT = 0.0001;
       var km = (Math.hypot(S.x - CMD.target.x, S.z - CMD.target.z) / 1000).toFixed(1);
-      awRadio('Sentinel: Silo Kilo, fire mission, grid marked, ' + km + ' km — authenticate', '#ff9a7a');
-      setTimeout(function() { awRadio('Silo Kilo: authenticated. Doors opening. Launch in five', '#ff9a7a'); }, 900);
+      awRadio('Sentinel: Silo Kilo, fire mission, full salvo, grid marked, ' + km + ' km — authenticate', '#ff9a7a');
+      setTimeout(function() { awRadio('Silo Kilo: authenticated. All ' + S.pads.length + ' doors opening. Salvo in five', '#ff9a7a'); }, 900);
       samBeep(520, 0.12, 0.06);
       cmdRefresh();
     }
+    // every silo fires at once; the warheads land in a spread around the mark so the salvo covers the target area
     function cmdLaunchMissile() {
-      var S = CMD.silo, t = CMD.target;
-      var p0 = new THREE.Vector3(S.x, S.y + 2, S.z), d = Math.hypot(t.x - S.x, t.z - S.z);
-      var apex = Math.max(1800, d * 0.42);
-      var p1 = new THREE.Vector3((S.x + t.x) / 2, Math.max(S.y, t.y) + apex, (S.z + t.z) / 2);
-      CMD.missile = { s: 0, T: THREE.MathUtils.clamp(d / 210, 16, 38), p0: p0, p1: p1, p2: t.clone(), pop: 0, smokeT: 0, pos: p0.clone(), prev: p0.clone() };
-      S.missile.visible = true; S.missile.position.set(S.x, S.y - 15, S.z); S.missile.rotation.set(0, 0, 0);
-      awRadio('Silo Kilo: missile away. Time of flight ' + Math.round(CMD.missile.T + 2) + ' seconds', '#ff9a7a');
+      var S = CMD.silo, t = CMD.target, n = S.pads.length;
+      CMD.missiles = S.pads.map(function(pd, i) {
+        var a = i / n * Math.PI * 2 + 0.5, r = i === 0 ? 0 : 38 + (i % 2) * 14;
+        var tx = t.x + Math.cos(a) * r, tz = t.z + Math.sin(a) * r;
+        var p2 = new THREE.Vector3(tx, Math.max(getEffectiveGroundHeight(tx, tz), WATER_LEVEL), tz);
+        var p0 = new THREE.Vector3(pd.x, pd.y + 2, pd.z), d = Math.hypot(p2.x - pd.x, p2.z - pd.z);
+        var apex = Math.max(1800, d * 0.42) + i * 60;
+        var p1 = new THREE.Vector3((pd.x + p2.x) / 2, Math.max(pd.y, p2.y) + apex, (pd.z + p2.z) / 2);
+        pd.missile.visible = true; pd.missile.position.set(pd.x, pd.y - 15, pd.z); pd.missile.rotation.set(0, 0, 0);
+        return { pad: pd, s: 0, T: THREE.MathUtils.clamp(d / 210, 16, 38) + i * 0.35, p0: p0, p1: p1, p2: p2, pop: -i * 0.12, smokeT: 0, pos: p0.clone(), prev: p0.clone() };
+      });
+      CMD.missile = CMD.missiles[0];
+      awRadio('Silo Kilo: salvo away, ' + n + ' missiles. Time of flight ' + Math.round(CMD.missile.T + 2) + ' seconds', '#ff9a7a');
       if (S.missile.position.distanceTo(position) < 3000) playMissileLaunchSound();
     }
     var _cmdQ = new THREE.Vector3(), _cmdUp = new THREE.Vector3(0, 1, 0);
@@ -10925,54 +10940,61 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // the doors slide apart and steam vents before the launch
       if (S.doorT > 0) {
         S.doorT = Math.min(1, S.doorT + dt / 3);
-        S.doors.forEach(function(dd, i) { dd.position.x = (i ? 1 : -1) * (1.5 + S.doorT * 3.4); });
-        if (Math.random() < dt * 8) samEmitSmoke(new THREE.Vector3(S.x + (Math.random() - 0.5) * 4, S.y + 1, S.z + (Math.random() - 0.5) * 4), new THREE.Vector3(0, 4, 0), 7, 4, 0.5, 0.85);
+        S.pads.forEach(function(pd) {
+          pd.doors.forEach(function(dd, i) { dd.position.x = (i ? 1 : -1) * (1.5 + S.doorT * 3.4); });
+          if (Math.random() < dt * 5) samEmitSmoke(new THREE.Vector3(pd.x + (Math.random() - 0.5) * 4, pd.y + 1, pd.z + (Math.random() - 0.5) * 4), new THREE.Vector3(0, 4, 0), 7, 4, 0.5, 0.85);
+        });
       }
       if (CMD.countdown > 0) {
         CMD.countdown -= dt;
         if (CMD.countdown <= 0) cmdLaunchMissile();
         return;
       }
-      var m = CMD.missile;
-      if (!m) {
-        if (S.doorT >= 1 && CMD.reload < 50) { S.doorT = 0; S.doors.forEach(function(dd, i) { dd.position.x = (i ? 1 : -1) * 1.5; }); }
+      if (!CMD.missiles.length) {
+        if (S.doorT >= 1 && CMD.reload < 50) { S.doorT = 0; S.pads.forEach(function(pd) { pd.doors.forEach(function(dd, i) { dd.position.x = (i ? 1 : -1) * 1.5; }); }); }
         return;
       }
-      var ms = S.missile;
-      if (m.pop < 1.6) {
-        // cold launch: the missile is blown out of the tube, then the motor lights
-        m.pop += dt;
-        ms.position.y = S.y - 15 + Math.min(1, m.pop / 1.2) * 32;
-        S.flame.material.opacity = m.pop > 1.2 ? 1 : 0;
-        if (Math.random() < dt * 20) samEmitSmoke(new THREE.Vector3(S.x, S.y + 2, S.z), new THREE.Vector3((Math.random() - 0.5) * 10, 6, (Math.random() - 0.5) * 10), 12, 5, 0.75, 0.85);
-        m.p0.set(ms.position.x, ms.position.y, ms.position.z);
-        return;
+      for (var k = CMD.missiles.length - 1; k >= 0; k--) {
+        var m = CMD.missiles[k], pd = m.pad, ms = pd.missile;
+        if (m.pop < 1.6) {
+          // cold launch: the missile is blown out of the tube, then the motor lights
+          m.pop += dt;
+          var pp = Math.max(0, m.pop);
+          ms.position.y = pd.y - 15 + Math.min(1, pp / 1.2) * 32;
+          pd.flame.material.opacity = pp > 1.2 ? 1 : 0;
+          if (pp > 0 && Math.random() < dt * 14) samEmitSmoke(new THREE.Vector3(pd.x, pd.y + 2, pd.z), new THREE.Vector3((Math.random() - 0.5) * 10, 6, (Math.random() - 0.5) * 10), 12, 5, 0.75, 0.85);
+          m.p0.set(ms.position.x, ms.position.y, ms.position.z); m.pos.copy(m.p0); m.prev.copy(m.p0);
+          continue;
+        }
+        m.s += dt / m.T;
+        var sN = Math.min(1, m.s), e = sN < 0.25 ? sN * sN * 2 / 0.5 * 0.5 + sN * 0.5 : sN;
+        m.prev.copy(m.pos); cmdBez(m, Math.min(1, e), m.pos);
+        ms.position.copy(m.pos).addScaledVector(_cmdQ.copy(m.pos).sub(m.prev).normalize(), -7);
+        if (m.pos.distanceToSquared(m.prev) > 1e-4) ms.quaternion.setFromUnitVectors(_cmdUp, _cmdQ.copy(m.pos).sub(m.prev).normalize());
+        pd.flame.material.opacity = sN < 0.62 ? 0.9 + Math.random() * 0.1 : Math.max(0, pd.flame.material.opacity - dt);
+        if ((m.smokeT -= dt) <= 0 && sN < 0.62) { m.smokeT = 0.06; samEmitSmoke(m.pos, new THREE.Vector3(0, 1, 0), 9 + sN * 10, 7, 0.65, 0.9); }
+        if (sN >= 1) { cmdImpact(m); CMD.missiles.splice(k, 1); }
       }
-      m.s += dt / m.T;
-      var s = Math.min(1, m.s), e = s < 0.25 ? s * s * 2 / 0.5 * 0.5 + s * 0.5 : s;
-      m.prev.copy(m.pos); cmdBez(m, Math.min(1, e), m.pos);
-      ms.position.copy(m.pos).addScaledVector(_cmdQ.copy(m.pos).sub(m.prev).normalize(), -7);
-      if (m.pos.distanceToSquared(m.prev) > 1e-4) ms.quaternion.setFromUnitVectors(_cmdUp, _cmdQ.copy(m.pos).sub(m.prev).normalize());
-      S.flame.material.opacity = s < 0.62 ? 0.9 + Math.random() * 0.1 : Math.max(0, S.flame.material.opacity - dt);
-      if ((m.smokeT -= dt) <= 0 && s < 0.62) { m.smokeT = 0.05; samEmitSmoke(m.pos, new THREE.Vector3(0, 1, 0), 9 + s * 10, 7, 0.65, 0.9); }
-      if (s >= 1) cmdImpact(m.p2);
+      // the lead (soonest to land) drives the panel read-out, the chart and cameras
+      CMD.missile = null;
+      CMD.missiles.forEach(function(m) { if (!CMD.missile || (1 - m.s) * m.T < (1 - CMD.missile.s) * CMD.missile.T) CMD.missile = m; });
+      if (!CMD.missiles.length) { CMD.reload = 75; awRadio('Silo Kilo: salvo complete. All tubes reloading', '#ff9a7a'); cmdRefresh(); }
     }
-    function cmdImpact(p) {
-      var S = CMD.silo;
-      S.missile.visible = false; S.flame.material.opacity = 0;
-      CMD.missile = null; CMD.reload = 60;
+    function cmdImpact(m) {
+      var p = m.p2;
+      m.pad.missile.visible = false; m.pad.flame.material.opacity = 0;
       var gy = Math.max(getEffectiveGroundHeight(p.x, p.z), WATER_LEVEL);
       var at = new THREE.Vector3(p.x, gy + 1, p.z);
-      for (var k = 0; k < 6; k++) triggerMissileBlast(at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 30, Math.random() * 12, (Math.random() - 0.5) * 30)));
-      for (var s = 0; s < 14; s++) samEmitSmoke(at, new THREE.Vector3((Math.random() - 0.5) * 30, 10 + Math.random() * 18, (Math.random() - 0.5) * 30), 24, 9, 0.8, 0.3);
-      if (typeof stIgniteFire === 'function') stIgniteFire(at.clone(), 14, 60);
+      for (var k = 0; k < 4; k++) triggerMissileBlast(at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 26, Math.random() * 10, (Math.random() - 0.5) * 26)));
+      for (var s = 0; s < 10; s++) samEmitSmoke(at, new THREE.Vector3((Math.random() - 0.5) * 30, 10 + Math.random() * 18, (Math.random() - 0.5) * 30), 24, 9, 0.8, 0.3);
+      if (typeof stIgniteFire === 'function') stIgniteFire(at.clone(), 12, 60);
       if (typeof gfxShockwave === 'function') gfxShockwave(at, 2.4);
       var dist = at.distanceTo(position);
       if (dist < 1500) fxShake = Math.max(fxShake, 1.4 * (1 - dist / 1500));
       if (dist < 4000) playMissileImpactSound();
       netEmit('boom', { p: [Math.round(at.x), Math.round(at.y), Math.round(at.z)] });
       arsDamage(at, 75, 700, false, true);
-      awRadio('Silo Kilo: impact. Splash one. Silo reloading', '#ff9a7a');
+      if (CMD.missiles.length === CMD.silo.pads.length) awRadio('Silo Kilo: first impact. Splash one', '#ff9a7a');
       cmdRefresh();
     }
 
@@ -11008,10 +11030,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         ctx.fillStyle = '#ffcf4a'; ctx.beginPath(); ctx.moveTo(sq.x, sq.y - 5); ctx.lineTo(sq.x + 4.5, sq.y + 3.5); ctx.lineTo(sq.x - 4.5, sq.y + 3.5); ctx.closePath(); ctx.fill();
         if (exp) { ctx.font = '800 9px ui-monospace, monospace'; ctx.fillStyle = '#ffcf4a'; ctx.textAlign = 'center'; ctx.fillText('SILO', sq.x, sq.y + 13); }
       }
-      if (CMD.missile) {
-        var mq = toS(CMD.missile.pos.x, CMD.missile.pos.z);
+      CMD.missiles.forEach(function(m) {
+        var mq = toS(m.pos.x, m.pos.z);
         ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(mq.x, mq.y, 2.6, 0, Math.PI * 2); ctx.fill();
-      }
+      });
     }
 
     /* ---------- the command panel ---------- */
@@ -11052,7 +11074,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         '<span class="cl">FROM</span><div class="seg" data-k="base"><button data-v="field">AIRFIELD</button><button data-v="strip">OLD FIELD</button><button data-v="carrier">CARRIER</button></div>' +
         '<span class="cl">TARGET</span><div class="seg" data-k="task"><button data-v="sam">SAM SITE</button><button data-v="convoy">CONVOY</button><button data-v="aa">AA GUNS</button><button data-v="marker">MARKER</button></div>' +
         '<span class="cl">ORDERS</span><div class="acts"><button class="act go" data-a="launch">LAUNCH ▸</button><button class="act" data-a="recall">RECALL ALL</button></div>' +
-        '<span class="cl">SILO</span><div class="acts"><button class="act" data-a="map">MAP · MARK</button><button class="act red" data-a="strike">MISSILE STRIKE ▸</button><span class="st" id="cmdSilo"></span></div>' +
+        '<span class="cl">SILOS</span><div class="acts"><button class="act" data-a="map">MAP · MARK</button><button class="act red" data-a="strike">MISSILE STRIKE ▸</button><span class="st" id="cmdSilo"></span></div>' +
         '</div>';
       document.body.appendChild(p);
       p.querySelector('.ch').addEventListener('click', function() { p.classList.toggle('min'); });
@@ -11079,7 +11101,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var live = AW.list.filter(function(a) { return a.alive && a.cmd && a.state !== 'down'; });
       document.getElementById('cmdSum').textContent = live.length ? live.length + ' flight' + (live.length > 1 ? 's' : '') + ' up' : 'no flights';
       var sEl = document.getElementById('cmdSilo');
-      sEl.textContent = CMD.countdown > 0 ? 'LAUNCH IN ' + Math.ceil(CMD.countdown) : CMD.missile ? 'IMPACT IN ' + Math.max(0, Math.ceil((1 - CMD.missile.s) * CMD.missile.T)) + 's'
+      sEl.textContent = CMD.countdown > 0 ? 'LAUNCH IN ' + Math.ceil(CMD.countdown) : CMD.missile ? CMD.missiles.length + '× · IMPACT IN ' + Math.max(0, Math.ceil((1 - CMD.missile.s) * CMD.missile.T)) + 's'
         : CMD.reload > 0 ? 'RELOADING ' + Math.ceil(CMD.reload) + 's' : CMD.marker ? 'MARKER ' + (Math.hypot(CMD.marker.x - position.x, CMD.marker.z - position.z) / 1000).toFixed(1) + ' km' : 'NO MARKER';
     }
 
