@@ -25624,33 +25624,26 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       // ---- the rainbow: a band at 42° round the antisolar point, red outside, violet in, and a faint
       //      reversed secondary at 51° — drawn as a ring facing you on the rain ----
-      var bowMat = new THREE.ShaderMaterial({
-        uniforms: { uA: { value: 0 }, uHorizon: { value: 0 } },
-        vertexShader: [
-          'varying vec2 vUv; varying float vY;',
-          '#include <common>', '#include <logdepthbuf_pars_vertex>',
-          'void main(){ vUv = uv; vec4 wp = modelMatrix * vec4(position,1.0); vY = wp.y;',
-          '  gl_Position = projectionMatrix * viewMatrix * wp;', '  #include <logdepthbuf_vertex>', '}'
-        ].join('\n'),
-        fragmentShader: [
-          'uniform float uA; uniform float uHorizon; varying vec2 vUv; varying float vY;',
-          '#include <common>', '#include <logdepthbuf_pars_fragment>',
-          'vec3 spec(float t){ return clamp(vec3(abs(t*6.0-3.0)-1.0, 2.0-abs(t*6.0-2.0), 2.0-abs(t*6.0-4.0)), 0.0, 1.0); }',
-          'void main(){', '  #include <logdepthbuf_fragment>',
-          '  float r = length(vUv - 0.5) * 2.0;',            // 0 centre .. 1 outer edge of the quad
-          '  float deg = degrees(atan(r * 1.4826));',
-          '  float p = clamp((deg - 40.4) / 2.2, 0.0, 1.0), s = clamp((53.6 - deg) / 3.4, 0.0, 1.0);',
-          '  float bp = smoothstep(40.2, 40.9, deg) * (1.0 - smoothstep(42.1, 42.8, deg));',
-          '  float bs = smoothstep(50.0, 50.8, deg) * (1.0 - smoothstep(53.2, 54.0, deg)) * 0.38;',
-          '  vec3 col = spec(0.8 - p * 0.8) * bp + spec(0.8 - s * 0.8) * bs;',
-          '  float inner = (1.0 - smoothstep(30.0, 40.5, deg)) * smoothstep(5.0, 30.0, deg) * 0.07;',   // the brighter sky inside the bow
-          '  float a = (max(bp, bs) * 0.55 + inner) * uA * smoothstep(uHorizon - 8.0, uHorizon + 25.0, vY);',
-          '  if (a < 0.002) discard;',
-          '  gl_FragColor = vec4(col + vec3(inner * 4.0), a);', '}'
-        ].join('\n'),
-        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
-      });
-      WX2.bow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), bowMat);
+      // the bow is painted once into a texture (primary at 42°, a faint reversed secondary at 51°,
+      // the brighter sky inside the bow) and drawn on a camera-facing quad with an ordinary
+      // additive material — cropped at the horizon by sizing the quad, not by a custom shader
+      var bc = document.createElement('canvas'); bc.width = bc.height = 512;
+      var bx = bc.getContext('2d'), img = bx.createImageData(512, 512), d = img.data;
+      function spec(t) { return [Math.min(1, Math.max(0, Math.abs(t * 6 - 3) - 1)), Math.min(1, Math.max(0, 2 - Math.abs(t * 6 - 2))), Math.min(1, Math.max(0, 2 - Math.abs(t * 6 - 4)))]; }
+      function ss(e0, e1, x) { var t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); }
+      for (var py = 0; py < 512; py++) for (var px = 0; px < 512; px++) {
+        var r = Math.hypot(px - 255.5, py - 255.5) / 256, deg = Math.atan(r * 1.4826) * 180 / Math.PI;
+        var pp = Math.min(1, Math.max(0, (deg - 40.4) / 2.2)), sp2 = Math.min(1, Math.max(0, (53.6 - deg) / 3.4));
+        var bp = ss(40.2, 40.9, deg) * (1 - ss(42.1, 42.8, deg)), bs = ss(50, 50.8, deg) * (1 - ss(53.2, 54, deg)) * 0.38;
+        var c1 = spec(0.8 - pp * 0.8), c2 = spec(0.8 - sp2 * 0.8), inner = (1 - ss(30, 40.5, deg)) * ss(5, 30, deg) * 0.07;
+        var k = (py * 512 + px) * 4, al = Math.max(bp, bs) * 0.55 + inner;
+        // additive: bake the alpha into the colour
+        d[k] = Math.min(255, (c1[0] * bp + c2[0] * bs + inner * 4) * al * 255 * 1.6); d[k + 1] = Math.min(255, (c1[1] * bp + c2[1] * bs + inner * 4) * al * 255 * 1.6);
+        d[k + 2] = Math.min(255, (c1[2] * bp + c2[2] * bs + inner * 4) * al * 255 * 1.6); d[k + 3] = 255;
+      }
+      bx.putImageData(img, 0, 0);
+      var btex = new THREE.CanvasTexture(bc);
+      WX2.bow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: btex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
       WX2.bow.frustumCulled = false; WX2.bow.visible = false; WX2.bow.renderOrder = 2;
       scene.add(WX2.bow);
       // ---- the dust storm: a wall of billowing brown cloud along its leading edge ----
@@ -25834,9 +25827,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       B.position.copy(_wx2A);
       B.lookAt(cam);
       var R = D * Math.tan(56 * Math.PI / 180);
-      B.scale.set(R * 2, R * 2, 1);
-      B.material.uniforms.uA.value = WX2.bowA * 0.9;
-      B.material.uniforms.uHorizon.value = cam.y - D * 0.01;
+      // only the part above the horizon: the antisolar point sits D·tan(sun elevation) below the eye line
+      var below = D * Math.tan(Math.asin(Math.min(0.95, Math.max(0, L.y)))), top = R, bot = Math.min(R * 0.98, below);
+      var hgt = top - bot;
+      B.scale.set(R * 2, hgt, 1);
+      B.translateY((top + bot) / 2 - 0);
+      B.material.map.repeat.set(1, hgt / (2 * R)); B.material.map.offset.set(0, (bot + R) / (2 * R));
+      B.material.opacity = WX2.bowA * 0.9;
     }
     // ---- sand streaming past the canopy ----
     function wx2Sand(dt) {
@@ -27718,8 +27715,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       ORB.armed = null; ORB.cds[d.id] = d.cd;
       var gy = Math.max(getTerrainHeight(pt.x, pt.z), WATER_LEVEL);
-      var beam = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 900, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xff3020, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
-      beam.position.set(pt.x, gy + 450, pt.z); scene.add(beam);
+      var beam = new THREE.Group(); beam.position.set(pt.x, gy, pt.z); scene.add(beam);
+      var core = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 1600, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xff4030, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+      core.position.y = 800; beam.add(core);
+      var glow = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 1600, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xff2010, transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+      glow.position.y = 800; beam.add(glow);
+      var gr = new THREE.Mesh(_orbRingGeo, new THREE.MeshBasicMaterial({ color: 0xff4030, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+      gr.rotation.x = -Math.PI / 2; gr.position.y = 1.5; beam.add(gr);
+      var strobe = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, color: 0xff3020, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+      strobe.position.y = 4; strobe.scale.set(30, 30, 1); beam.add(strobe);
+      beam.userData = { core: core, glow: glow, ring: gr, strobe: strobe };
       ORB.strikes.push({ d: d, x: pt.x, z: pt.z, gy: gy, t: 0, beam: beam, shells: [], fired: 0, laser: null });
       if (typeof cv2Say === 'function') cv2Say('DESTROYER IN ORBIT', '"' + d.name.toLowerCase().replace(/^\w/, function(c) { return c.toUpperCase(); }) + ' inbound. Impact in ' + d.delay + ' seconds."', '#ffd23a', 'orbital strike inbound');
       samToast('☄ ' + d.name + ' — IMPACT IN ' + d.delay + ' s', '#ffd23a', 2.4);
@@ -27741,10 +27746,38 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (typeof AA !== 'undefined') AA.forEach(function(g) { if (g.alive) list.push({ t: g, pos: g.pos, hp: g.maxHp || 120 }); });
       return list;
     }
+    // visual effects owned by the strikes: fireballs, ground shock rings, scorch marks, flashes
+    var ORB_FX = [], _orbRingGeo = new THREE.RingGeometry(0.82, 1, 64), _orbDisc = new THREE.CircleGeometry(1, 40);
+    var orbScorchTex = (function() {
+      var cv = document.createElement('canvas'); cv.width = cv.height = 128; var c = cv.getContext('2d');
+      var g = c.createRadialGradient(64, 64, 4, 64, 64, 64); g.addColorStop(0, 'rgba(10,8,6,0.95)'); g.addColorStop(0.55, 'rgba(25,18,12,0.75)'); g.addColorStop(1, 'rgba(30,22,14,0)');
+      c.fillStyle = g; c.fillRect(0, 0, 128, 128);
+      for (var i = 0; i < 40; i++) { c.strokeStyle = 'rgba(15,10,6,' + (0.2 + Math.random() * 0.3) + ')'; c.lineWidth = 1 + Math.random() * 2; var a = Math.random() * 6.28; c.beginPath(); c.moveTo(64, 64); c.lineTo(64 + Math.cos(a) * 64, 64 + Math.sin(a) * 64); c.stroke(); }
+      return new THREE.CanvasTexture(cv);
+    })();
+    function orbFxAdd(o) { ORB_FX.push(o); return o; }
+    function orbBlastFx(p, R, power) {
+      // the blinding core flash, a rolling fireball, the shock ring racing out along the ground,
+      // a dust skirt, a mushrooming smoke column and the scorch it leaves
+      var flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, color: 0xfff6dc, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+      flash.position.copy(p).add(_orbV.set(0, R * 0.3, 0)); scene.add(flash);
+      orbFxAdd({ o: flash, t: 0, life: 0.45, up: function(f, u) { var s = R * (1.2 + 1.6 * u); f.o.scale.set(s, s, 1); f.o.material.opacity = 0.85 * (1 - u) * (1 - u); } });
+      var ball = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, color: 0xff9a40, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+      ball.position.copy(p); scene.add(ball);
+      orbFxAdd({ o: ball, t: 0, life: 2.4, up: function(f, u) { var s = R * (0.5 + 1.1 * Math.sqrt(u)); f.o.scale.set(s, s * 0.9, 1); f.o.position.y = p.y + R * 0.25 + u * R * 0.6; f.o.material.opacity = (1 - u) * 0.8; f.o.material.color.setRGB(1, 0.55 - 0.3 * u, 0.2 - 0.15 * u); } });
+      var ring = new THREE.Mesh(_orbRingGeo, new THREE.MeshBasicMaterial({ color: 0xffe2b0, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2; ring.position.set(p.x, p.y + 1.5, p.z); scene.add(ring);
+      orbFxAdd({ o: ring, t: 0, life: 1.4, up: function(f, u) { var s = R * (0.3 + 3.5 * Math.pow(u, 0.6)); f.o.scale.set(s, s, 1); f.o.material.opacity = 0.7 * (1 - u); } });
+      // (no point lights: adding one makes three.js recompile every material — the flash sprite does the job)
+      // dust skirt and the smoke column (water: a towering white plume of spray instead)
+      var wet = p.y <= WATER_LEVEL + 0.5, grey = wet ? 0.95 : 0.32;
+      for (var i = 0; i < 12; i++) { var a = i / 12 * Math.PI * 2; samEmitSmoke(p, _orbV.set(Math.cos(a) * R * 0.7, 4 + Math.random() * 6, Math.sin(a) * R * 0.7).clone(), R * 0.45 + Math.random() * R * 0.25, 4, 0.45, wet ? 0.85 : 0.36); }
+      for (var j = 0; j < 14; j++) samEmitSmoke(p, _orbV.set((Math.random() - 0.5) * R * 0.3, R * (0.6 + Math.random() * 0.9), (Math.random() - 0.5) * R * 0.3).clone(), R * (0.7 + Math.random() * 0.6), 9 + Math.random() * 5, 0.8, grey);
+      triggerMissileBlast(p.clone(), 3 + 2 * power);
+    }
     function orbBlast(x, z, R, power) {
       var gy = Math.max(getTerrainHeight(x, z), WATER_LEVEL), p = new THREE.Vector3(x, gy + 2, z);
-      triggerMissileBlast(p.clone(), power);
-      for (var i = 0; i < 10 * power; i++) samEmitSmoke(p, _orbV.set((Math.random() - 0.5) * 30, 15 + Math.random() * 30, (Math.random() - 0.5) * 30).clone(), 30 + Math.random() * 30 * power, 7, 0.75, 0.3);
+      orbBlastFx(p, R, power);
       if (typeof gfxShockwave === 'function') gfxShockwave(p, 0.4 * power);
       var dp = p.distanceTo(position);
       if (dp < 6000) { playMissileImpactSound(); fxShake = Math.max(fxShake, 0.9 * power * (1 - dp / 6000)); }
@@ -27756,12 +27789,19 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // a streak dropping from orbit, then the impact
       var top = new THREE.Vector3(x + 300, S.gy + 3500, z - 200), bot = new THREE.Vector3(x, S.gy, z);
       var g = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, color: 0xfff0c0, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
-      g.scale.set(18 * power, 18 * power, 1); scene.add(g);
-      var line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([top, top.clone()]), new THREE.LineBasicMaterial({ color: 0xffe0a0, transparent: true, opacity: 0.9, fog: false }));
-      scene.add(line);
+      g.scale.set(40 * power, 40 * power, 1); scene.add(g);
+      // the trail: a glowing tapered rod from the sky down to the head (rebuilt along the path each frame)
+      var tg = new THREE.CylinderGeometry(1, 0.35, 1, 10, 1, true); tg.translate(0, -0.5, 0);
+      var line = new THREE.Mesh(tg, new THREE.MeshBasicMaterial({ color: 0xffd7a0, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+      line.frustumCulled = false; scene.add(line);
       S.shells.push({ g: g, line: line, top: top, bot: bot, t: 0, dur: 0.7, power: power, R: R });
     }
     function orbUpdate(dt) {
+      for (var fi = ORB_FX.length - 1; fi >= 0; fi--) {
+        var F = ORB_FX[fi]; F.t += dt;
+        var fu = Math.min(1, F.t / F.life); F.up(F, fu);
+        if (fu >= 1) { scene.remove(F.o); ORB_FX.splice(fi, 1); }
+      }
       for (var k in ORB.cds) if (ORB.cds[k] > 0) { ORB.cds[k] = Math.max(0, ORB.cds[k] - dt); }
       var show = orbAvail();
       ORB.btn.style.display = show ? 'flex' : 'none';
@@ -27770,7 +27810,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       for (var i = ORB.strikes.length - 1; i >= 0; i--) {
         var S = ORB.strikes[i], d = S.d;
         S.t += dt;
-        S.beam.material.opacity = 0.35 + 0.3 * Math.abs(Math.sin(S.t * 6));
+        var bu = S.beam.userData, pulse = Math.abs(Math.sin(S.t * 6));
+        bu.core.material.opacity = 0.55 + 0.4 * pulse; bu.glow.material.opacity = 0.15 + 0.2 * pulse;
+        var rs = 20 + ((S.t * 25) % 40); bu.ring.scale.set(rs, rs, 1); bu.ring.material.opacity = 0.9 * (1 - ((S.t * 25) % 40) / 40);
+        bu.strobe.material.opacity = (Math.floor(S.t * 4) % 2) ? 1 : 0.3;
         var t = S.t - d.delay;
         if (t >= 0) {
           if (d.id === 'prec' && S.fired === 0) { S.fired = 1; orbShell(S, S.x, S.z, 2, 60); }
@@ -27788,8 +27831,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           }
           if (d.id === 'laser') {
             if (!S.laser) {
-              S.laser = new THREE.Mesh(new THREE.CylinderGeometry(4, 6, 4000, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xff5a2a, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
-              scene.add(S.laser); S.lx = S.x; S.lz = S.z; S.burnT = 0;
+              S.laser = new THREE.Group(); scene.add(S.laser);
+              var lc = new THREE.Mesh(new THREE.CylinderGeometry(3, 4, 4000, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff0d8, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+              var ls = new THREE.Mesh(new THREE.CylinderGeometry(10, 14, 4000, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xff5a1a, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+              var lp = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireGlowTexture, color: 0xff8a30, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+              lp.scale.set(70, 45, 1); lp.position.y = -1990;
+              S.laser.add(lc); S.laser.add(ls); S.laser.add(lp); S.laser.userData = { core: lc, sheath: ls, pool: lp };
+              S.lx = S.x; S.lz = S.z; S.burnT = 0;
             }
             // hunt the nearest target within 300 m of the beacon, sweeping at 25 m/s
             var tg = null, td = 300; orbTargets().forEach(function(o) { var dd = Math.hypot(o.pos.x - S.x, o.pos.z - S.z); if (dd < td) { td = dd; tg = o; } });
@@ -27797,10 +27845,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             var dx = tx - S.lx, dz = tz - S.lz, dl = Math.hypot(dx, dz) || 1, mv = Math.min(dl, 25 * dt);
             S.lx += dx / dl * mv; S.lz += dz / dl * mv;
             var ly = Math.max(getTerrainHeight(S.lx, S.lz), WATER_LEVEL);
-            S.laser.position.set(S.lx, ly + 2000, S.lz); S.laser.material.opacity = 0.6 + 0.3 * Math.random();
+            S.laser.position.set(S.lx, ly + 2000, S.lz);
+            var lu = S.laser.userData, fl = Math.random();
+            lu.core.material.opacity = 0.8 + 0.2 * fl; lu.sheath.material.opacity = 0.35 + 0.25 * fl; lu.pool.scale.set(60 + fl * 25, 40 + fl * 15, 1);
             if ((S.burnT -= dt) <= 0) {
               S.burnT = 0.25;
-              samEmitSmoke(_orbV.set(S.lx, ly + 2, S.lz), new THREE.Vector3(0, 10, 0), 22, 3, 0.7, 0.25);
+              samEmitSmoke(_orbV.set(S.lx, ly + 2, S.lz), new THREE.Vector3((Math.random() - 0.5) * 6, 14, (Math.random() - 0.5) * 6), 30, 4, 0.75, 0.22);
+              if (Math.random() < 0.5) triggerMissileBlast(new THREE.Vector3(S.lx + (Math.random() - 0.5) * 10, ly + 2, S.lz + (Math.random() - 0.5) * 10), 1.5);
               orbTargets().forEach(function(o) { if (Math.hypot(o.pos.x - S.lx, o.pos.z - S.lz) < 18) arsHit(o.t, 60, false, true); });
               if (ly > WATER_LEVEL + 0.5 && Math.random() < 0.3) stIgniteFire(new THREE.Vector3(S.lx, ly, S.lz), 6, 30);
               var dp = Math.hypot(position.x - S.lx, position.z - S.lz);
@@ -27815,9 +27866,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           var sh = S.shells[j]; sh.t += dt;
           var u = Math.min(1, sh.t / sh.dur);
           _orbV.copy(sh.top).lerp(sh.bot, u); sh.g.position.copy(_orbV);
-          var pa = sh.line.geometry.attributes.position.array; pa[3] = _orbV.x; pa[4] = _orbV.y; pa[5] = _orbV.z; sh.line.geometry.attributes.position.needsUpdate = true;
-          if (u >= 1) { orbBlast(sh.bot.x, sh.bot.z, sh.R, sh.power); scene.remove(sh.g); sh.lineT = 0.6; }
-          if (sh.lineT !== undefined) { sh.lineT -= dt; sh.line.material.opacity = Math.max(0, sh.lineT); if (sh.lineT <= 0) { scene.remove(sh.line); S.shells.splice(j, 1); } }
+          // the trail stretches from where it came out of the sky to the head
+          var tail = sh.top.clone().lerp(sh.bot, Math.max(0, u - 0.45)), len = tail.distanceTo(_orbV);
+          sh.line.position.copy(tail); sh.line.scale.set(3.2 * sh.power, Math.max(1, len), 3.2 * sh.power);
+          sh.line.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), _orbV.clone().sub(tail).normalize());
+          if (u >= 1 && !sh.hit) { sh.hit = true; orbBlast(sh.bot.x, sh.bot.z, sh.R, sh.power); scene.remove(sh.g); sh.lineT = 0.6; }
+          if (sh.lineT !== undefined) { sh.lineT -= dt; sh.line.material.opacity = Math.max(0, sh.lineT) * 1.4; if (sh.lineT <= 0) { scene.remove(sh.line); S.shells.splice(j, 1); } }
         }
         var finished = (d.id === 'laser' ? S.done : (d.id === 'barrage' ? S.fired >= 14 : S.fired > 0)) && !S.shells.length;
         if (finished) { scene.remove(S.beam); ORB.strikes.splice(i, 1); }
