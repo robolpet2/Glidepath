@@ -2640,7 +2640,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var canvasEl = document.getElementById('canvas');
     // antialiasing comes from the multisampled scene target in the post chain, so the canvas itself
     // doesn't need its own MSAA buffer
-    var renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: false, powerPreference: 'high-performance', logarithmicDepthBuffer: false });
+    var renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: false, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
     // checking every shader for errors forces a synchronous compile + link (a visible hitch each time
     // a new material shows up); let the driver compile in the background instead
     renderer.debug.checkShaderErrors = false;
@@ -3289,6 +3289,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     // water plane — animated waves + sun sparkle, fixed level, follows player's XZ only
     var waterMaterial = new THREE.ShaderMaterial({
+      defines: {
+        USE_LOGDEPTHBUF: '',
+        USE_LOGDEPTHBUF_EXT: ''
+      },
       uniforms: THREE.UniformsUtils.merge([
         THREE.UniformsLib.fog,
         {
