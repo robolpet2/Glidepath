@@ -13873,15 +13873,43 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
          cloud  — a fireball that rises and cools into a rolling mushroom cap on a dust stem,
                   a condensation collar, a base surge rolling out over the ground, fires
                   burning across the blast zone, and a scorched scar left on the land.
-       Radii: fireball 170 m · lethal 650 m · heavy damage 1.4 km · felt 3.4 km.
+       YIELD (the ☢ YIELD button while flying the B-2, before release): 20 kt, 300 kt (default),
+       1.2 Mt or 5 Mt. Every radius scales with the cube root of the yield, and so does the cloud.
+       At 300 kt: fireball 380 m · lethal 1.8 km · heavy blast 3.8 km · thermal burns 5 km ·
+       felt 9 km · EMP 12 km.
+       What it does, in the order it reaches you:
+         · LIGHT: an instant flash and THERMAL PULSE — burns your airframe out to the thermal radius
+           and sets fires across the zone
+         · EMP: avionics glitch, radar locks drop and, close in, the engine flames out for a few seconds
+         · SHOCK: the front leaves at several km/s and slows to the speed of sound, flattening the
+           forest and destroying (or damaging) every ground target, AA gun, ship and enemy aircraft
+           it reaches — the bounties are yours
+         · FALLOUT: a low or ground burst lofts dirt into the cloud; a radioactive plume drifts
+           downwind for minutes. Fly through it and the Geiger counter starts clicking and the dose adds up.
        ============================================================ */
     var NUKE = {
-      R_FIREBALL: 170, R_LETHAL: 650, R_HEAVY: 1400, R_FELT: 3400,
-      SHOCK_SPEED: 430, ARM_TIME: 11, BURST_AGL: 260, FUSE_MAX: 32, REARM_TIME: 60,
+      R_FIREBALL: 380, R_LETHAL: 1800, R_HEAVY: 3800, R_FELT: 9000, R_THERMAL: 5000, R_EMP: 12000, VS: 2.2,
+      SHOCK_SPEED: 430, ARM_TIME: 14, BURST_AGL: 520, FUSE_MAX: 40, REARM_TIME: 60,
+      YIELDS: [{ name: '20 kt', kt: 20 }, { name: '300 kt', kt: 300 }, { name: '1.2 Mt', kt: 1200 }, { name: '5 Mt', kt: 5000 }], yi: 1,
+      fallout: [], dose: 0, doseRate: 0, geigerT: 0, empT: 0, sickSaid: 0,
       state: 'ready', t: 0, pos: new THREE.Vector3(), vel: new THREE.Vector3(), chute: 0, landed: false,
       blasts: [], history: [], beep: 0
     };
     var bombCooldownTimer = 0;   // rearm time left (the button greys out while it counts down)
+    // radii for the selected yield: cube-root scaling from the 300 kt reference
+    function nukeApplyYield() {
+      var N = NUKE, s = Math.cbrt(N.YIELDS[N.yi].kt / 300);
+      N.R_FIREBALL = 380 * s; N.R_LETHAL = 1800 * s; N.R_HEAVY = 3800 * s; N.R_FELT = 9000 * s; N.R_THERMAL = 5000 * s; N.R_EMP = 12000 * s;
+      N.VS = N.R_FIREBALL / 170;                 // how much bigger than the original cloud art
+      N.BURST_AGL = Math.max(220, 520 * s);       // optimum airburst height grows with the yield
+      N.ARM_TIME = 12 + 4 * s;                    // and so does the time you need to get clear
+      N.FUSE_MAX = N.ARM_TIME + 26;
+    }
+    nukeApplyYield();
+    function nukeFmtR(m) { return m >= 1000 ? (m / 1000).toFixed(m >= 10000 ? 0 : 1) + ' km' : Math.round(m) + ' m'; }
+    // the shock front: several km/s at the fireball, slowing toward the speed of sound
+    function nukeShockV(r) { return 340 + 2600 * Math.exp(-r / (NUKE.R_LETHAL * 0.45)); }
+    function nukeArrive(d) { var c = 340, a = 2600, L = NUKE.R_LETHAL * 0.45; return (d + L * Math.log((c + a * Math.exp(-d / L)) / (c + a))) / c; }
 
     // ---------- the weapon ----------
     var nukeBomb = (function() {
@@ -13931,6 +13959,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       'font:800 13px/1.35 "Courier New",monospace;letter-spacing:.08em;text-align:center;padding:7px 14px;border-radius:6px;' +
       'background:rgba(20,6,4,.72);border:1px solid rgba(255,90,60,.7);color:#ffd3c4;display:none;max-width:92vw;text-shadow:0 0 6px rgba(255,60,30,.6)';
     document.body.appendChild(nukeHudEl);
+    var nukeYieldEl = document.createElement('div');
+    nukeYieldEl.style.cssText = 'position:fixed;z-index:12;left:calc(170px + env(safe-area-inset-left));bottom:calc(296px + env(safe-area-inset-bottom));height:34px;padding:0 10px;box-sizing:border-box;border-radius:11px;' +
+      'display:none;align-items:center;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.06em;color:#ffd3c4;background:rgba(40,8,4,.66);border:2px solid #ff5a4a;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent';
+    nukeYieldEl.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (NUKE.state === 'falling') { samToast('☢ YIELD IS SET — WEAPON ALREADY AWAY', '#ff7a5a', 1.6); return; }
+      NUKE.yi = (NUKE.yi + 1) % NUKE.YIELDS.length; nukeApplyYield();
+      samToast('☢ YIELD ' + NUKE.YIELDS[NUKE.yi].name + ' · LETHAL ' + nukeFmtR(NUKE.R_LETHAL) + ' · BLAST ' + nukeFmtR(NUKE.R_HEAVY), '#ff7a5a', 2.6);
+    });
+    document.body.appendChild(nukeYieldEl);
     var nukeFlashEl = document.createElement('div');
     nukeFlashEl.style.cssText = 'position:fixed;inset:0;z-index:8;pointer-events:none;background:#fffaf0;opacity:0';
     document.body.appendChild(nukeFlashEl);
@@ -14174,7 +14212,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       nukeBomb.position.copy(NUKE.pos);
       nhBayOpen();
       playMissileLaunchSound();
-      samToast('☢ WEAPON AWAY — CHUTE DEPLOYING · GET OUT OF THERE', '#ff7a5a', 3);
+      samToast('☢ ' + NUKE.YIELDS[NUKE.yi].name + ' WEAPON AWAY — GET ' + nukeFmtR(NUKE.R_HEAVY) + ' CLEAR', '#ff7a5a', 3);
       if (typeof kjNukeReleased === 'function') kjNukeReleased();
     }
 
@@ -14231,12 +14269,19 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var fire = N.t >= N.ARM_TIME && (agl <= N.BURST_AGL || N.landed) || N.t >= N.FUSE_MAX;
       // HUD
       var d = N.pos.distanceTo(position);
-      var zone = d < N.R_LETHAL ? ['LETHAL ZONE', '#ff4b3a'] : d < N.R_HEAVY ? ['BLAST ZONE', '#ffb13a'] : ['CLEAR', '#7dff8a'];
+      var zone = d < N.R_LETHAL ? ['LETHAL ZONE', '#ff4b3a'] : d < N.R_HEAVY ? ['BLAST ZONE', '#ffb13a'] : d < N.R_THERMAL ? ['BURN ZONE', '#ffd06a'] : ['CLEAR', '#7dff8a'];
       var tt = N.t < N.ARM_TIME ? (N.ARM_TIME - N.t).toFixed(1) : (N.landed ? '0.0' : 'ARMED');
+      // will you make it? where you'll be when it goes, plus the time the shock takes to reach you
+      var tLeft = Math.max(0, N.ARM_TIME - N.t) + (N.landed ? 0 : Math.max(0, (agl - N.BURST_AGL) / 19));
+      var ax = position.x - N.pos.x, az = position.z - N.pos.z, al = Math.hypot(ax, az) || 1;
+      var radial = (velocityVec.x * ax + velocityVec.z * az) / al;
+      var dAt = Math.max(0, al + radial * tLeft), dShock = dAt + radial * nukeArrive(dAt);
+      var verdict = dShock > N.R_HEAVY ? ['ON COURSE TO CLEAR', '#7dff8a'] : dShock > N.R_LETHAL ? ['YOU WILL TAKE THE SHOCK', '#ffb13a'] : ['NOT GOING TO MAKE IT — TURN AWAY', '#ff4b3a'];
       nukeHudEl.style.display = 'block';
       nukeHudEl.style.borderColor = zone[1];
-      nukeHudEl.innerHTML = '☢ DETONATION T-' + tt + ' &nbsp;·&nbsp; ' + (d >= 1000 ? (d / 1000).toFixed(2) + ' km' : Math.round(d) + ' m') +
-        ' &nbsp;·&nbsp; <span style="color:' + zone[1] + '">' + zone[0] + '</span><br><span style="opacity:.7;font-size:11px">LETHAL &lt; 650 m · SHOCKWAVE &lt; 1.4 km · CLIMB AND RUN</span>';
+      nukeHudEl.innerHTML = '☢ ' + N.YIELDS[N.yi].name + ' · T-' + tt + ' &nbsp;·&nbsp; ' + nukeFmtR(d) +
+        ' &nbsp;·&nbsp; <span style="color:' + zone[1] + '">' + zone[0] + '</span><br><span style="color:' + verdict[1] + '">' + verdict[0] + '</span>' +
+        '<br><span style="opacity:.7;font-size:11px">LETHAL ' + nukeFmtR(N.R_LETHAL) + ' · BLAST ' + nukeFmtR(N.R_HEAVY) + ' · BURNS ' + nukeFmtR(N.R_THERMAL) + ' · EMP ' + nukeFmtR(N.R_EMP) + '</span>';
       if (fire) nukeDetonate(N.pos.clone(), gy);
     }
 
@@ -14255,7 +14300,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       B.active = true; B.t = 0; B.pos = pos.clone(); B.gy = gy; B.agl = pos.y - gy;
       B.overWater = getEffectiveGroundHeight(pos.x, pos.z) < WATER_LEVEL + 0.5;
-      B.shockR = 0; B.hitPlayer = false; B.samDone = false; B.aw = [];
+      B.shockR = 0; B.hitPlayer = false; B.samDone = false; B.aw = []; B.hitT = []; B.vs = N.VS; B.ts = Math.sqrt(N.VS / 2.2);
       B.drift = new THREE.Vector3();
       B.fx.all.forEach(function(m) { m.visible = true; m.material.uniforms.uAlpha.value = 0; });
       B.fx.flash.visible = true;
@@ -14267,10 +14312,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       B.fx.wilson.material.uniforms.uColor.value.setRGB(0.95, 0.96, 1.0);
       // ground fires across the blast zone (not on water)
       B.fx.fires.forEach(function(F) {
-        var a = Math.random() * Math.PI * 2, r = 120 + Math.sqrt(Math.random()) * (N.R_LETHAL * 1.15 - 120);
+        var a = Math.random() * Math.PI * 2, r = N.R_FIREBALL * 0.6 + Math.sqrt(Math.random()) * (N.R_THERMAL * 0.75 - N.R_FIREBALL * 0.6);
         var fx = pos.x + Math.cos(a) * r, fz = pos.z + Math.sin(a) * r, fh = getEffectiveGroundHeight(fx, fz);
         F.life = fh > WATER_LEVEL + 1 ? 60 + Math.random() * 50 : 0;
-        F.pos.set(fx, fh, fz); F.st = 2 + r / N.SHOCK_SPEED + Math.random() * 3; F.sz = 10 + Math.random() * 22; F.sp = Math.random() * 10;
+        F.pos.set(fx, fh, fz); F.st = 0.3 + Math.random() * 2 + (r < N.R_HEAVY ? nukeArrive(r) : 0); F.sz = (10 + Math.random() * 22) * Math.sqrt(N.VS / 2.2) * 1.6; F.sp = Math.random() * 10;
         F.f.visible = F.s.visible = false;
       });
       // the flash: light arrives instantly — blinding if you were looking at it
@@ -14287,6 +14332,90 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       N.history.push({ x: pos.x, y: pos.y, z: pos.z, gy: gy });
       if (N.history.length > 4) N.history.shift();
       if (typeof kjOnNuke === 'function') kjOnNuke(d);
+      nukeLightEffects(B, d);
+    }
+    // what arrives at the speed of light: the thermal pulse and the EMP
+    function nukeLightEffects(B, d) {
+      var N = NUKE;
+      if (started && !crashing && !ejecting && d < N.R_THERMAL && d > N.R_LETHAL * 0.9) {
+        // the burn falls off with the square of the distance; airframes facing it take more
+        var k = Math.pow(1 - (d - N.R_LETHAL) / (N.R_THERMAL - N.R_LETHAL), 2);
+        if (typeof kjWear === 'function') kjWear(0.04 + 0.22 * k, 'nuke-thermal');
+        if (k > 0.55 && Math.random() < k) wreckDamage('thermal');
+        samToast('☢ THERMAL PULSE — PAINT BLISTERING', '#ffd06a', 2.4);
+      }
+      if (started && d < N.R_EMP) {
+        var e = 1 - d / N.R_EMP;
+        if (typeof kj !== 'undefined') kj.glitchT = Math.max(kj.glitchT || 0, 4 + 8 * e);
+        N.empT = Math.max(N.empT, d < N.R_HEAVY * 1.6 && !isCarMode ? 2.5 + 4 * e : 0);
+        if (typeof WAR !== 'undefined') WAR.lock = 0;
+        if (typeof NAVY !== 'undefined') NAVY.lock = 0;
+        samToast(N.empT > 0 ? '☢ EMP — ENGINE FLAMEOUT · RELIGHTING' : '☢ EMP — AVIONICS UPSET', '#9fe0ff', 2.6);
+      }
+      // a low burst sucks dirt into the cloud: radioactive fallout downwind
+      var low = B.agl < N.R_FIREBALL * 1.6;
+      if (low && !B.overWater || B.agl < N.R_FIREBALL * 0.6) {
+        var wl = Math.hypot(windPush.x, windPush.z), dir = wl > 0.5 ? Math.atan2(windPush.x, windPush.z) : (typeof windDirAngle === 'number' ? windDirAngle : 0);
+        N.fallout.push({ x: B.pos.x, z: B.pos.z, dir: dir, t: 0, life: 420 * B.ts + 120, len: 0, maxLen: N.R_HEAVY * 4.5, w: N.R_LETHAL * 1.2, str: B.agl < N.R_FIREBALL * 0.6 ? 1 : 0.55 });
+        if (N.fallout.length > 3) N.fallout.shift();
+      }
+    }
+    // the shock reaching things on the ground and in the air: everything inside the blast radius
+    var _nkT = new THREE.Vector3();
+    function nukeShockTargets(B) {
+      var N = NUKE, p = B.pos;
+      function hit(t, pos) {
+        if (!t || !t.alive || B.hitT.indexOf(t) >= 0) return;
+        var d = p.distanceTo(pos);
+        if (B.shockR < d || d > N.R_HEAVY) return;
+        B.hitT.push(t);
+        if (d < N.R_LETHAL) arsHit(t, 1e6, false, true);
+        else { var sev = 1 - (d - N.R_LETHAL) / (N.R_HEAVY - N.R_LETHAL); arsHit(t, (t.maxHp || 100) * (0.25 + 0.85 * sev), false, true); }
+      }
+      if (typeof strikeTargets !== 'undefined') strikeTargets.forEach(function(t) { hit(t, t.center); });
+      if (typeof AA !== 'undefined') AA.forEach(function(g) { hit(g, g.pos); });
+      if (typeof RA !== 'undefined' && RA.list) RA.list.forEach(function(b) {
+        if (!b.alive || b.state === 'down' || B.hitT.indexOf(b) >= 0) return;
+        var d = p.distanceTo(b.pos); if (B.shockR < d || d > N.R_HEAVY) return;
+        B.hitT.push(b); raHit(b, d < N.R_LETHAL ? 1e6 : b.maxHp * (1 - (d - N.R_LETHAL) / (N.R_HEAVY - N.R_LETHAL)) * 1.2, 'nuke');
+      });
+      // the wildlife runs out of luck too
+      if (typeof WL !== 'undefined') {
+        WL.herds = WL.herds.filter(function(H) { return Math.hypot(H.x - p.x, H.z - p.z) > Math.min(B.shockR, N.R_HEAVY); });
+        WL.pods = WL.pods.filter(function(P) { return Math.hypot(P.x - p.x, P.z - p.z) > Math.min(B.shockR, N.R_LETHAL); });
+        WL.vees = WL.vees.filter(function(V) { return Math.hypot(V.x - p.x, V.z - p.z) > Math.min(B.shockR, N.R_HEAVY); });
+      }
+    }
+    // fallout: the plume grows downwind, the dose adds up while you're in it
+    function nukeFallout(dt) {
+      var N = NUKE, rate = 0;
+      N.fallout = N.fallout.filter(function(F) { return F.t < F.life; });
+      N.fallout.forEach(function(F) {
+        F.t += dt; F.len = Math.min(F.maxLen, F.len + (12 + Math.hypot(windPush.x, windPush.z) * 2) * dt);
+        var ux = Math.sin(F.dir), uz = Math.cos(F.dir), rx = position.x - F.x, rz = position.z - F.z;
+        var along = rx * ux + rz * uz, lat = Math.abs(rx * uz - rz * ux);
+        if (along < -F.w * 0.4 || along > F.len) return;
+        var width = F.w * (0.5 + 0.9 * Math.max(0, along) / F.maxLen);
+        if (lat > width) return;
+        // hottest near ground zero and along the centreline, decaying with time (and height: it settles)
+        var hot = F.str * (1 - Math.max(0, along) / (F.maxLen * 1.1)) * (1 - lat / width) * Math.pow(Math.max(0.05, 1 - F.t / F.life), 1.3);
+        var agl = typeof kjAgl === 'function' ? kjAgl() : 0, hk = 1 - gfxSmoothstepJS(1500, 6000, agl);
+        rate += 40 * hot * (0.3 + 0.7 * hk);
+      });
+      N.doseRate = rate;
+      if (started && !crashing) N.dose += rate * dt;
+      N.dose = Math.max(0, N.dose - dt * 0.4);              // the crew's dosimeters only care about the recent dose
+      if (rate > 0.3 && started) {
+        if ((N.geigerT -= dt) <= 0) { N.geigerT = Math.max(0.02, 0.6 / (1 + rate) * (0.4 + Math.random())); nukeBeep(2400 + Math.random() * 1600, 0.008, 0.05); }
+        nukeHudEl.style.display = 'block'; nukeHudEl.style.borderColor = '#c6ff4a';
+        nukeHudEl.innerHTML = '☢ FALLOUT · ' + rate.toFixed(1) + ' mSv/s · DOSE ' + Math.round(N.dose) + ' mSv<br><span style="opacity:.75;font-size:11px">CLIMB OR LEAVE THE PLUME — CROSSWIND IS FASTEST</span>';
+        N.radShown = true;
+      } else if (N.radShown && N.state !== 'falling') { N.radShown = false; nukeHudEl.style.display = 'none'; }
+      if (N.dose > 600 && (elapsedSeconds - N.sickSaid) > 20) {
+        N.sickSaid = elapsedSeconds; samToast('☢ RADIATION SICKNESS — CREW IMPAIRED', '#c6ff4a', 2.6);
+        if (typeof kjWear === 'function') kjWear(0.06, 'radiation');
+        if (typeof kj !== 'undefined') kj.glitchT = Math.max(kj.glitchT || 0, 3);
+      }
     }
 
     // ---------- forest: thermal pulse + blast wave ----------
@@ -14298,12 +14427,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (d < N.R_LETHAL) { o.tilt = 1.52 - Math.random() * 0.12; o.burn = 1; }
       else if (d < N.R_HEAVY * 0.78) { var f = (d - N.R_LETHAL) / (N.R_HEAVY * 0.78 - N.R_LETHAL); o.tilt = (1.4 - f * 1.2) * (0.75 + Math.random() * 0.25); o.burn = 1 - f * 0.55; }
       else if (d < N.R_HEAVY) { o.tilt = Math.random() * 0.12; o.burn = 0.35 * (1 - (d - N.R_HEAVY * 0.78) / (N.R_HEAVY * 0.22)); }
+      else if (d < N.R_THERMAL) { o.burn = 0.3 * (1 - (d - N.R_HEAVY) / (N.R_THERMAL - N.R_HEAVY)); }
       return o;
     }
     // chunks built after a blast come up already flattened
     function nukeApplyToForest(F) {
       NUKE.history.forEach(function(h) {
-        if (Math.hypot(F.cx - h.x, F.cz - h.z) > NUKE.R_HEAVY + CHUNK_SIZE) return;
+        if (Math.hypot(F.cx - h.x, F.cz - h.z) > Math.max(NUKE.R_HEAVY, NUKE.R_THERMAL) + CHUNK_SIZE) return;
         for (var k = 0; k < F.n; k++) {
           var o = nukeTreeTarget(h, F, k);
           if (o.gone) F.gone[k] = 1;
@@ -14318,12 +14448,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var h = { x: B.pos.x, y: B.pos.y, z: B.pos.z };
       chunks.forEach(function(entry) {
         var F = entry.forest; if (!F) return;
-        if (Math.hypot(F.cx - h.x, F.cz - h.z) > NUKE.R_HEAVY + CHUNK_SIZE) return;
+        if (Math.hypot(F.cx - h.x, F.cz - h.z) > Math.max(NUKE.R_HEAVY, NUKE.R_THERMAL) + CHUNK_SIZE) return;
         var anim = [], touched = false;
         for (var k = 0; k < F.n; k++) {
           var o = nukeTreeTarget(h, F, k);
           if (o.burn > F.burn[k]) { F.burn[k] = o.burn; forestTint(F, k); touched = true; }
-          if (o.gone || o.tilt > F.tilt[k] + 0.01) anim.push(k, o.d / NUKE.SHOCK_SPEED, o.gone ? -1 : o.tilt, o.az);
+          if (o.gone || o.tilt > F.tilt[k] + 0.01) anim.push(k, nukeArrive(o.d), o.gone ? -1 : o.tilt, o.az);
         }
         if (touched) F.meshes.forEach(function(m) { if (m && m.instanceColor) m.instanceColor.needsUpdate = true; });
         if (anim.length) B.trees.push({ F: F, a: anim, from: new Float32Array(anim.length / 4), done: false });
@@ -14395,6 +14525,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (bombCooldownTimer > 0) bombCooldownTimer = Math.max(0, bombCooldownTimer - dt);
         if (bombCooldownTimer <= 0) { N.state = 'ready'; if (isStealthMode) samToast('☢ WEAPON BAY ARMED', '#7dff8a', 1.8); }
       }
+      nukeYieldEl.style.display = isStealthMode && started && !crashing ? 'flex' : 'none';
+      nukeYieldEl.textContent = '☢ YIELD ' + N.YIELDS[N.yi].name;
+      nukeYieldEl.style.opacity = N.state === 'falling' ? 0.5 : 1;
+      if (N.empT > 0) { N.empT -= dt; throttle = Math.min(throttle, MIN_SPEED); keys.boost = false; if (N.empT <= 0) samToast('ENGINE RELIT', '#7dff8a', 1.4); }
+      nukeFallout(dt);
       nukeFlashOp = Math.max(0, nukeFlashOp - dt * 0.55);
       nukeFlashEl.style.opacity = nukeFlashOp > 0.002 ? nukeFlashOp.toFixed(3) : '0';
     }
@@ -14406,49 +14541,50 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var B = N.blasts[bi]; if (!B.active) continue;
         B.t += dt;
         var t = B.t, fx = B.fx, p = B.pos;
-        B.shockR = t * N.SHOCK_SPEED;
+        B.shockR += nukeShockV(B.shockR) * dt;
+        var VS = B.vs, TS = B.ts;
         // drift downwind as it ages
         if (t > 20) B.drift.addScaledVector(windPush, dt * 0.5);
-        var rise = 820 * (1 - Math.exp(-t / 15)) + t * 1.2;
+        var rise = 820 * Math.pow(VS, 0.85) * (1 - Math.exp(-t / (15 * TS))) + t * 1.2;
         var yc = p.y + rise;
-        var rf = N.R_FIREBALL * (1 - Math.exp(-t * 3.2)) * (1 + Math.min(t, 10) * 0.025);
-        var rc = N.R_FIREBALL * 1.05 + 280 * (1 - Math.exp(-t / 13));
+        var rf = 170 * VS * (1 - Math.exp(-t * 3.2 / TS)) * (1 + Math.min(t, 10) * 0.025);
+        var rc = 170 * VS * 1.05 + 280 * VS * (1 - Math.exp(-t / (13 * TS)));
         var cx = p.x + B.drift.x, cz = p.z + B.drift.z;
-        var fade = 1 - gfxSmoothstepJS(75, 125, t);
+        var fade = 1 - gfxSmoothstepJS(75 * TS, 125 * TS, t);
         fx.all.forEach(function(m) { m.material.uniforms.uTime.value = t; if (m.material.uniforms.uSun) { m.material.uniforms.uSun.value.copy(_nkSun); m.material.uniforms.uSunCol.value.copy(_nkSunCol); m.material.uniforms.uAmb.value.copy(_nkAmb); } });
         // fireball
         var U = fx.ball.material.uniforms;
         fx.ball.position.set(cx, yc, cz); fx.ball.scale.setScalar(Math.max(rf, 1));
-        U.uTemp.value = Math.exp(-t / 2.6);
-        U.uAlpha.value = 1 - gfxSmoothstepJS(5, 13, t);
+        U.uTemp.value = Math.exp(-t / (2.6 * TS));
+        U.uAlpha.value = 1 - gfxSmoothstepJS(5 * TS, 13 * TS, t);
         fx.ball.visible = U.uAlpha.value > 0.01;
         // cap
         U = fx.cap.material.uniforms;
         fx.cap.position.set(cx, yc + rc * 0.05, cz); fx.cap.scale.set(rc, rc * 0.62, rc);
         U.uHeat.value = THREE.MathUtils.clamp(1.3 * Math.exp(-(t - 1.5) / 7), 0, 1) * gfxSmoothstepJS(1.2, 3, t);
         U.uAlpha.value = gfxSmoothstepJS(1.5, 5, t) * 0.97 * fade;
-        U.uErode.value = -0.2 + gfxSmoothstepJS(55, 122, t) * 1.2;
+        U.uErode.value = -0.2 + gfxSmoothstepJS(55 * TS, 122 * TS, t) * 1.2;
         U.uFlow.value.set(0, -0.12, 0.05);
         // stem: dust and debris sucked up behind the fireball
         U = fx.stem.material.uniforms;
-        var top = Math.min(yc - rc * 0.22, B.gy + Math.max(0, t - 0.8) * 95);
-        var W = 48 + 50 * (1 - Math.exp(-t / 9));
+        var top = Math.min(yc - rc * 0.22, B.gy + Math.max(0, t - 0.8) * 95 * VS);
+        var W = (48 + 50 * (1 - Math.exp(-t / (9 * TS)))) * VS;
         fx.stem.position.set(p.x + B.drift.x * 0.6, B.gy - 4, p.z + B.drift.z * 0.6);
         fx.stem.scale.set(W, Math.max(1, top - B.gy + 4), W);
         U.uHeat.value = 0.25 * Math.exp(-t / 10);
-        U.uAlpha.value = gfxSmoothstepJS(1, 4.5, t) * 0.92 * fade * (B.agl < 700 ? 1 : 0);
-        U.uErode.value = -0.2 + gfxSmoothstepJS(45, 110, t) * 1.2;
+        U.uAlpha.value = gfxSmoothstepJS(1, 4.5, t) * 0.92 * fade * (B.agl < 700 * VS ? 1 : 0);
+        U.uErode.value = -0.2 + gfxSmoothstepJS(45 * TS, 110 * TS, t) * 1.2;
         // base surge rolling out along the ground
         U = fx.surge.material.uniforms;
-        var Rs = 1250 * (1 - Math.exp(-t / 8));
-        fx.surge.position.set(p.x, B.gy - 2, p.z); fx.surge.scale.set(Math.max(Rs, 1), 55 + 35 * (1 - Math.exp(-t / 8)), Math.max(Rs, 1));
-        U.uAlpha.value = 0.7 * gfxSmoothstepJS(0.6, 2.5, t) * (1 - gfxSmoothstepJS(14, 45, t)) * (B.agl < 700 ? 1 : 0);
+        var Rs = 1250 * VS * (1 - Math.exp(-t / (8 * TS)));
+        fx.surge.position.set(p.x, B.gy - 2, p.z); fx.surge.scale.set(Math.max(Rs, 1), (55 + 35 * (1 - Math.exp(-t / 8))) * Math.sqrt(VS), Math.max(Rs, 1));
+        U.uAlpha.value = 0.7 * gfxSmoothstepJS(0.6, 2.5, t) * (1 - gfxSmoothstepJS(14 * TS, 45 * TS, t)) * (B.agl < 700 * VS ? 1 : 0);
         U.uErode.value = 0.05 + gfxSmoothstepJS(14, 45, t) * 0.8;
         // dust kicked up right at the shock front
         U = fx.dust.material.uniforms;
-        fx.dust.position.set(p.x, B.gy - 1, p.z); fx.dust.scale.set(Math.max(B.shockR, 1), 38, Math.max(B.shockR, 1));
+        fx.dust.position.set(p.x, B.gy - 1, p.z); fx.dust.scale.set(Math.max(B.shockR, 1), 38 * Math.sqrt(VS), Math.max(B.shockR, 1));
         U.uAlpha.value = 0.55 * gfxSmoothstepJS(0.3, 1, t) * (1 - gfxSmoothstepJS(N.R_LETHAL, N.R_FELT, B.shockR));
-        fx.dust.visible = U.uAlpha.value > 0.01 && B.agl < 900;
+        fx.dust.visible = U.uAlpha.value > 0.01 && B.agl < 900 * VS;
         // condensation collar around the stem
         U = fx.collar.material.uniforms;
         var cy = B.gy + (yc - B.gy) * 0.48;
@@ -14460,7 +14596,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         fx.collar.visible = U.uAlpha.value > 0.01;
         // Wilson cloud: a fleeting white shell of condensation just behind the shock
         U = fx.wilson.material.uniforms;
-        fx.wilson.position.copy(p); fx.wilson.scale.setScalar(Math.max(1, Math.min(B.shockR * 0.94, 900)));
+        fx.wilson.position.copy(p); fx.wilson.scale.setScalar(Math.max(1, Math.min(B.shockR * 0.94, 900 * VS)));
         U.uAlpha.value = 0.4 * gfxSmoothstepJS(0.15, 0.5, t) * (1 - gfxSmoothstepJS(1.1, 2.6, t));
         fx.wilson.visible = U.uAlpha.value > 0.01;
         // the shock sphere itself
@@ -14470,7 +14606,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         fx.shock.visible = U.uAlpha.value > 0.01;
         // flash
         fx.flash.position.copy(p);
-        var fs = 700 + t * 900;
+        var fs = (700 + t * 900) * VS;
         fx.flash.scale.set(fs, fs, 1);
         fx.flash.material.opacity = Math.exp(-t * 2.6);
         fx.flash.visible = fx.flash.material.opacity > 0.01;
@@ -14500,10 +14636,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
         fx.all.forEach(function(m) { if (m.material.uniforms.uFogK) m.material.uniforms.uFogK.value = 1 / kk; });
         // light: the flash, then the long orange glow of the fireball
-        var I = 7e6 * Math.exp(-t * 2.4) + 9e5 * Math.exp(-t / 8);
+        var I = (7e6 * Math.exp(-t * 2.4) + 9e5 * Math.exp(-t / (8 * TS))) * VS * VS;
         if (I > lightI) { lightI = I; lightPos = fx.ball.position; }
         // scorched ground cools
-        if (B.scorch) B.scorch.w = Math.max(0, 1 - t / 90);
+        if (B.scorch) B.scorch.w = Math.max(0, 1 - t / (90 * TS));
+        nukeShockTargets(B);
         // shock arrivals: you, the air wing, the SAM site, the forest
         var dP = p.distanceTo(position);
         if (!B.hitPlayer && B.shockR >= dP) { B.hitPlayer = true; nukeHitPlayer(B, dP); }
@@ -14517,7 +14654,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (B.shockR >= ds) { B.samDone = true; if (ds < N.R_LETHAL + 250) samOnGroundBlast(new THREE.Vector3(p.x, B.gy, p.z), N.R_LETHAL); }
         }
         if (B.trees) nukeForestWave(B);
-        if (t > 128) {
+        if (t > 130 * TS) {
           B.active = false;
           fx.all.forEach(function(m) { m.visible = false; });
           fx.flash.visible = false;
@@ -14546,8 +14683,21 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var N = NUKE, gz = null;
       if (N.state === 'falling') gz = N.pos;
       N.blasts.forEach(function(B) { if (B.active && B.shockR < N.R_FELT) gz = B.pos; });
+      N.fallout.forEach(function(F) {
+        var o = toS(F.x, F.z), ux = Math.sin(F.dir), uz = Math.cos(F.dir), e = toS(F.x + ux * F.len, F.z + uz * F.len);
+        var a = 0.35 * Math.max(0.15, 1 - F.t / F.life), w = F.w * 1.4 * scale;
+        var g = ctx.createLinearGradient(o.x, o.y, e.x, e.y);
+        g.addColorStop(0, 'rgba(200,255,60,' + a + ')'); g.addColorStop(1, 'rgba(200,255,60,0)');
+        ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(Math.atan2(e.y - o.y, e.x - o.x));
+        var L = Math.hypot(e.x - o.x, e.y - o.y);
+        ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, -w * 0.35); ctx.lineTo(L, -w); ctx.lineTo(L, w); ctx.lineTo(0, w * 0.35); ctx.closePath(); ctx.fill(); ctx.restore();
+      });
       if (!gz) return;
       var q = toS(gz.x, gz.z), blink = Math.floor(performance.now() / 300) % 2;
+      ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(255,220,110,0.7)'; ctx.beginPath(); ctx.arc(q.x, q.y, N.R_THERMAL * scale, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(140,210,255,0.6)'; ctx.beginPath(); ctx.arc(q.x, q.y, N.R_EMP * scale, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = 'rgba(255,70,50,' + (blink ? 0.95 : 0.6) + ')'; ctx.fillStyle = 'rgba(255,40,20,0.12)';
       ctx.beginPath(); ctx.arc(q.x, q.y, N.R_LETHAL * scale, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
