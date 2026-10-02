@@ -645,6 +645,9 @@
   }
   #gpFps.hidden{ display:none; }
   /* HUD off / minimap off */
+  /* free flight: essentials only (speed, fuel, airframe, clearance, throttle; weapons and warnings stay) */
+  body.gpFree #gGauge, body.gpFree #kjPulse, body.gpFree #hud .stats, body.gpFree #hud .ringStats, body.gpFree #mpHudRow.offline,
+  body.gpFree #controlHint, body.gpFree #kjPops, body.gpFree #kjRing, body.gpFree #kjOrder, body.gpFree #kjBtns button.kjCodec{ display:none !important; }
   body.gp-nohud #hud, body.gp-nohud #miniMapWrap, body.gp-nohud #kjTop, body.gp-nohud #rwrPanel, body.gp-nohud #controlHint, body.gp-nohud #arsPanel,
   body.gp-nomap #miniMapWrap{ visibility:hidden !important; }
 
@@ -9429,7 +9432,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (cvState.cat) hud = '⚓ CATAPULT ' + (cvState.cat.i + 1) + (cvState.cat.phase === 'tension' ? ' — TENSION' : ' — SHOT');
         else if (cvState.arrest) hud = '⚓ ARRESTED — ' + (cvState.arrest.wire + 1) + '-WIRE  ' + Math.round(speed * 3.6) + ' km/h';
         else if (cvState.onDeck) hud = '⚓ ON DECK' + (Math.abs(speed) < 3 ? (isRefueling ? '  ·  REFUELLING' : '  ·  FUELLED & ARMED') + (cvCatEligible() ? '  ·  CAT / L TO LAUNCH' : '') : '');
-        else if (dist < 3500 && !crashing) hud = '⚓ CARRIER ' + (dist / 1000).toFixed(1) + ' km  ·  land along the angled deck';
+        else if (dist < 1500 && !crashing) hud = '⚓ CARRIER ' + (dist / 1000).toFixed(1) + ' km  ·  land along the angled deck';
       }
       if (hud !== cvLastHud) { cvLastHud = hud; cvHudEl.textContent = hud; cvHudEl.style.display = hud ? 'block' : 'none'; }
     }
@@ -10030,6 +10033,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     document.body.appendChild(awRadioEl);
     var awRadioLines = [];
     function awRadio(msg, col) {
+      if (typeof WAR !== 'undefined' && !WAR.on && !isAwacsMode) return;   // free flight: no radio chatter
       awRadioLines.push({ msg: msg, col: col || '#bfe3ff', t: 7 });
       if (awRadioLines.length > 3) awRadioLines.shift();
       awRadioRender();
@@ -24114,6 +24118,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (rel.along < -50 || rel.along > 12000) return;
         if (Math.abs(rel.lat) > rel.along * 0.45 + 120) return;
         if (Math.abs(qolWrap(heading - a.hdg)) > 0.8) return;
+        // only when you're plausibly on the approach: near the slope's height, not cruising overhead
+        if (Math.abs(position.y - (a.ay + Math.max(0, rel.along) * a.tan)) > Math.max(120, rel.along * 0.2)) return;
         if (!best || rel.along < best.rel.along) best = { a: a, rel: rel };
       });
       return best;
@@ -24808,6 +24814,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     function qolcUpdate(dt) {
+      var free = started && !WAR.on;
+      if (free !== QC.free0) { QC.free0 = free; document.body.classList.toggle('gpFree', free); if (free) { awRadioLines.length = 0; awRadioRender(); } }
       if (!QC.init) { QC.init = true; qcPerfFirstRun(); qcPhotoUi(); }
       qcPerfTick();
     }
@@ -26026,7 +26034,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var kjBtns = kjEl('div', { id: 'kjBtns', class: 'hidden' });
     var kjNvgBtn = kjEl('button', { id: 'nvgBtn', title: 'Night vision (`)', 'aria-label': 'Night vision' }, kjBtns, '<span style="font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.04em">NV</span>');
     kjNvgBtn.addEventListener('click', function(e) { e.stopPropagation(); nvgToggle(); });
-    var kjCodecBtn = kjEl('button', { title: 'Codec (I)', 'aria-label': 'Codec radio' }, kjBtns, '📻');
+    var kjCodecBtn = kjEl('button', { title: 'Codec (I)', 'aria-label': 'Codec radio', class: 'kjCodec' }, kjBtns, '📻');
     var kjPhotoBtn = kjEl('button', { title: 'Photo mode (O)', 'aria-label': 'Photo mode' }, kjBtns, '📷');
     var kjCtx = kjEl('div', { id: 'kjCtx' });
     var kjBoxBtn = kjEl('button', { class: 'hidden' }, kjCtx, '📦 BOX');
@@ -26487,7 +26495,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     // incoming calls ring (they don't force the codec open — flying comes first); unanswered ones are remembered
     function kjRing(who, id) {
-      if (!started || kj.codecOpen) return;
+      if (!started || kj.codecOpen || !WAR.on) return;   // free flight stays quiet: no incoming calls
       if (kjc.ring && kjc.ring.pri >= 50 && id !== 'h_alert') return;
       var e = kjPick(who, id);
       if (!e || (e.once && kj.stats.said[e.id])) return;
@@ -26838,12 +26846,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (f.life <= 0) { scene.remove(f.mesh); f.mesh.geometry.dispose(); kj.flyingBoxes.splice(i, 1); }
       }
       var canBox = started && !kj.boxed && !crashing && !ejecting && wasGrounded && Math.abs(speed) < 1.2;
-      kjBoxBtn.classList.toggle('hidden', !canBox || kj.photoOn);
+      kjBoxBtn.classList.toggle('hidden', !canBox || kj.photoOn || !WAR.on);
     }
     kjBoxBtn.addEventListener('click', function() { kjBoxDeploy(); });
 
     /* ---------- OPENING CREDITS (once per session, on your first takeoff) ---------- */
     function kjCredits() {
+      if (!WAR.on) { kj.creditsShown = true; return; }   // free flight: no cinematic overlay
       if (kj.creditsShown) return;
       kj.creditsShown = true;
       var cs = kjCallsign(), lines = [
@@ -27199,6 +27208,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     var _kjH = new THREE.Vector3(), _kjN = new THREE.Vector3();
     function kjDeliveryTick(dt) {
+      if (!WAR.on) {
+        // free flight: no pickup pad, crates or delivery orders
+        if (kjOrder) kjEndOrder(false);
+        if (kjPadObjs) { scene.remove(kjPadObjs.grp); kjPadObjs = null; kjPad = null; }
+        kjOrderEl.classList.add('hidden'); kjDropBtn.classList.add('hidden');
+        return;
+      }
       kjSetupPad();
       var o = kjOrder, kind = kjKind();
       if (kjPadObjs) kjPadObjs.beam.visible = !o;
