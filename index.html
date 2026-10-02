@@ -16070,6 +16070,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
       nukeMinimap(ctx, toS, scale);
       if (typeof baseMinimap === 'function') baseMinimap(ctx, toS, scale);
+      if (typeof csgMinimap === 'function') csgMinimap(ctx, toS, scale);
       cmdMinimap(ctx, toS, exp);
       navyMap(ctx, toS, exp, inView, label, rot);
       aarMap(ctx, toS, exp, inView, label, rot);
@@ -16907,6 +16908,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       wlUpdate(dt);
       cv2Frame(dt);
       baseUpdate(dt);
+      csgUpdate(dt);
       hyUpdate(dt);
       qolbUpdate(dt);
       qolcUpdate(dt);
@@ -26955,6 +26957,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (dd < 45 && started && !crashing) pvpDamage(50 * (1 - dd / 45), null);
       scene.remove(M.g);
       var i = strikeTargets.indexOf(M.t); if (i >= 0) strikeTargets.splice(i, 1);
+      if (hitBase && M.onHit) { M.onHit(M); return; }
       if (hitBase) {
         if (M.tgt && BASE.built[M.tgt.id] && !BASE.dmg[M.tgt.id]) {
           BASE.dmg[M.tgt.id] = true; baseShowDamage(M.tgt.id); baseSave();
@@ -27070,18 +27073,19 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       for (var i = BASE.missiles.length - 1; i >= 0; i--) {
         var M = BASE.missiles[i];
         if (!M.t.alive) { baseExplode(M, false); BASE.missiles.splice(i, 1); continue; }
+        if (M.follow) { M.tx = CARRIER.x; M.tz = CARRIER.z; }
         var dx = M.tx - M.pos.x, dz = M.tz - M.pos.z, d = Math.hypot(dx, dz);
         // sea-skimming, terrain-following, a pop-up at the end
         var gnd = Math.max(getTerrainHeight(M.pos.x + dx / d * 200, M.pos.z + dz / d * 200), getTerrainHeight(M.pos.x, M.pos.z), WATER_LEVEL);
         var wantY = gnd + (d < 1200 ? 20 + (d / 1200) * 180 : 45);
-        if (d < 400) wantY = getTerrainHeight(M.tx, M.tz) + 2;
+        if (d < 400) wantY = M.follow ? CARRIER.deckY + 4 : getTerrainHeight(M.tx, M.tz) + 2;
         M.pos.x += dx / d * M.v * dt; M.pos.z += dz / d * M.v * dt;
         M.pos.y += (wantY - M.pos.y) * Math.min(1, dt * 1.6);
         M.g.position.copy(M.pos); M.g.rotation.set(-(wantY - M.pos.y) * 0.01, Math.atan2(dx, dz), 0);
         M.t.center.copy(M.pos);
         if ((M.smokeT -= dt) <= 0) { M.smokeT = 0.06; samEmitSmoke(M.pos, _bV.set(0, 0.2, 0), 2.5, 1.6, 0.35, 0.9); }
         if (!BASE.radarSaid && d < 3500) { BASE.radarSaid = true; if (!baseAny('radar')) samToast('INCOMING! MISSILES ON THE BASE', '#ff4b3a', 2.4); }
-        if (d < 25) { baseExplode(M, true); BASE.missiles.splice(i, 1); }
+        if (d < (M.follow ? 70 : 25)) { baseExplode(M, true); BASE.missiles.splice(i, 1); }
       }
       baseDefend(dt);
       var T = BASE.tracers, arr = T.m.geometry.attributes.position.array, dirty = false;
@@ -27099,6 +27103,307 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (BASE.t - BASE.hangarSaid > 20) { BASE.hangarSaid = BASE.t; samToast('HANGAR CREW ON IT — RESTORING THE AIRFRAME', '#7dff9a', 2.2); }
           if (kj.stats.wear[key] >= 1) kjSave();
         }
+      }
+    }
+
+    /* ============================================================
+       CARRIER STRIKE GROUP 7 — the carrier never sails alone
+         CV-71           the supercarrier and her air wing
+         CG-62 CAPE HOLLIS   Ticonderoga-class guided-missile cruiser: twin Aegis deckhouses,
+                         fore and aft missile cells, two 5-inch guns — the group's air-defence commander
+         DESRON 21       three Arleigh Burke-class destroyers: DDG-118 MARROW, DDG-121 KESTREL,
+                         DDG-124 HALVARD — the outer screen
+         T-AOE 8 SUPPLY HALE fast combat support ship — fuel, ammunition and stores, UNREP rigs
+         SSN-796 TARPON  attack submarine scouting ahead; surfaces now and then
+       Each ship keeps a formation station on the carrier, steering and sailing like a ship (they
+       lag through the turns and catch up). The Aegis ships shoot down anything coming at the group:
+       Standard missiles out to 15 km, Phalanx inside 2. Every 8-11 minutes, while you're near the
+       group, the enemy throws a salvo of anti-ship missiles at the carrier; a hit sets the flight
+       deck on fire and closes it for a minute.
+       ============================================================ */
+    var CSG = { ships: [], raidT: 300, deckFireT: 0, fires: [], said: {}, t: 0 };
+    var CSG_M = {
+      haze: new THREE.MeshStandardMaterial({ color: 0x7c848d, roughness: 0.62, metalness: 0.25 }),
+      deck: new THREE.MeshStandardMaterial({ color: 0x484d53, roughness: 0.85, metalness: 0.1 }),
+      dark: new THREE.MeshStandardMaterial({ color: 0x2b2f34, roughness: 0.6, metalness: 0.35 }),
+      boot: new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.7 }),
+      spy: new THREE.MeshStandardMaterial({ color: 0x3d4248, roughness: 0.45, metalness: 0.5 }),
+      white: new THREE.MeshStandardMaterial({ color: 0xe8eaec, roughness: 0.5 }),
+      red: new THREE.MeshStandardMaterial({ color: 0x7a2a22, roughness: 0.7 })
+    };
+    // ---- building blocks (ship frame: x = starboard, y = up from the waterline, z = forward) ----
+    function csgBox(g, w, h, d, m, x, y, z, ry) { var b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); if (ry) b.rotation.y = ry; b.castShadow = true; b.receiveShadow = true; g.add(b); return b; }
+    function csgCyl(g, r0, r1, h, m, x, y, z, seg) { var c = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, h, seg || 12), m); c.position.set(x, y, z); c.castShadow = true; g.add(c); return c; }
+    // the hull: a plan-view outline with a fine bow and a transom stern, extruded up from the keel
+    function csgHull(g, len, beam, free, draft, bow) {
+      var h = len / 2, b = beam / 2, s = new THREE.Shape();
+      s.moveTo(-b * 0.86, -h); s.lineTo(b * 0.86, -h);
+      s.bezierCurveTo(b, -h * 0.6, b, h * 0.2, b * 0.96, h - bow);
+      s.quadraticCurveTo(b * 0.55, h - bow * 0.2, 0, h);
+      s.quadraticCurveTo(-b * 0.55, h - bow * 0.2, -b * 0.96, h - bow);
+      s.bezierCurveTo(-b, h * 0.2, -b, -h * 0.6, -b * 0.86, -h);
+      function slab(y0, y1, m, sc) {
+        var geo = new THREE.ExtrudeGeometry(s, { depth: y1 - y0, bevelEnabled: false, curveSegments: 10 });
+        geo.rotateX(-Math.PI / 2); geo.translate(0, y0, 0); if (sc) geo.scale(sc, 1, 1);
+        var mm = new THREE.Mesh(geo, m); mm.castShadow = true; mm.receiveShadow = true; g.add(mm); return mm;
+      }
+      slab(-draft, 0.6, CSG_M.boot, 0.97);          // below and at the waterline
+      slab(0.6, free, CSG_M.haze);                  // topsides
+      var dk = slab(free, free + 0.25, CSG_M.deck);  // the weather deck
+      return dk;
+    }
+    // an Aegis SPY array: the octagonal face on a deckhouse
+    function csgSpy(g, x, y, z, yaw, r) {
+      var p = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.35, 8), CSG_M.spy);
+      p.rotation.set(Math.PI / 2 - 0.18, 0, Math.PI / 8); var w = new THREE.Group(); w.add(p); w.position.set(x, y, z); w.rotation.y = yaw; g.add(w);
+    }
+    function csgVls(g, x, y, z, rows, cols) {
+      csgBox(g, cols * 1.1 + 0.6, 0.5, rows * 1.1 + 0.6, CSG_M.dark, x, y + 0.25, z);
+      for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++) csgBox(g, 0.85, 0.12, 0.85, CSG_M.haze, x + (c - (cols - 1) / 2) * 1.1, y + 0.56, z + (r - (rows - 1) / 2) * 1.1);
+    }
+    function csgGun(g, x, y, z, yaw) {
+      var t = new THREE.Group(); t.position.set(x, y, z); t.rotation.y = yaw || 0; g.add(t);
+      csgCyl(t, 2.2, 2.4, 0.6, CSG_M.haze, 0, 0.3, 0, 16);
+      var house = csgBox(t, 3.4, 2.2, 4.4, CSG_M.haze, 0, 1.6, 0.2); house.scale.set(1, 1, 1);
+      csgBox(t, 2.6, 1.0, 1.6, CSG_M.haze, 0, 2.2, 2.4);
+      var br = csgCyl(t, 0.18, 0.24, 7.5, CSG_M.dark, 0, 1.9, 5.6, 8); br.rotation.x = Math.PI / 2 - 0.06;
+      return t;
+    }
+    function csgCiws(g, x, y, z) {
+      var t = new THREE.Group(); t.position.set(x, y, z); g.add(t);
+      csgCyl(t, 1.0, 1.2, 1.6, CSG_M.haze, 0, 0.8, 0);
+      var d = new THREE.Mesh(new THREE.SphereGeometry(0.9, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), CSG_M.white); d.position.y = 2.6; d.scale.y = 1.8; t.add(d);
+      csgCyl(t, 0.75, 0.85, 1.2, CSG_M.white, 0, 2.0, 0);
+      var gun = new THREE.Group(); gun.position.set(0, 1.9, 0.6); t.add(gun);
+      for (var i = 0; i < 6; i++) { var b = csgCyl(gun, 0.05, 0.05, 2.2, CSG_M.dark, Math.cos(i) * 0.14, Math.sin(i) * 0.14, 1.1, 5); b.rotation.x = Math.PI / 2; }
+      return { t: t, gun: gun };
+    }
+    function csgMast(g, x, y, z, h, rake) {
+      var m = new THREE.Group(); m.position.set(x, y, z); m.rotation.x = -(rake || 0); g.add(m);
+      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function(o) { var l = csgCyl(m, 0.12, 0.22, h, CSG_M.haze, o[0] * 1.1, h / 2, o[1] * 1.1, 5); l.rotation.z = -o[0] * 0.04; l.rotation.x = o[1] * 0.04; });
+      for (var k = 1; k < 4; k++) csgBox(m, 2.6 - k * 0.3, 0.2, 2.6 - k * 0.3, CSG_M.haze, 0, h * k / 4, 0);
+      csgBox(m, 4.5, 0.25, 0.4, CSG_M.dark, 0, h * 0.82, 0);                       // yardarm
+      csgCyl(m, 0.5, 0.5, 1.2, CSG_M.white, 0, h + 0.6, 0, 10);                     // radome
+      return m;
+    }
+    function csgHelo(g, z, len, beam, y) {
+      csgBox(g, beam * 0.92, 0.12, len, CSG_M.deck, 0, y + 0.06, z);
+      var ring = new THREE.Mesh(new THREE.RingGeometry(3.2, 3.6, 28), new THREE.MeshBasicMaterial({ color: 0xe8e8e0 })); ring.rotation.x = -Math.PI / 2; ring.position.set(0, y + 0.14, z); g.add(ring);
+      csgBox(g, 0.25, 0.02, len * 0.9, new THREE.MeshBasicMaterial({ color: 0xe8e8e0 }), 0, y + 0.14, z);
+    }
+    // hull numbers painted on both bows
+    function csgNumber(g, txt, len, free, beam) {
+      var cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+      var c = cv.getContext('2d'); c.fillStyle = '#ffffff'; c.font = 'bold 96px Arial'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.strokeStyle = '#222'; c.lineWidth = 6; c.strokeText(txt, 128, 68); c.fillText(txt, 128, 68);
+      var tex = new THREE.CanvasTexture(cv), m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, fog: true });
+      [-1, 1].forEach(function(s) {
+        var p = new THREE.Mesh(new THREE.PlaneGeometry(7, 3.5), m);
+        p.position.set(s * (beam / 2 * 0.86 + 0.05), free * 0.62, len / 2 - len * 0.16); p.rotation.y = s * Math.PI / 2; g.add(p);
+      });
+    }
+    // ---- the ships ----
+    function csgCruiser(num) {
+      var g = new THREE.Group(), L = 173, B = 16.8, F = 7.2;
+      csgHull(g, L, B, F, 6.5, 30);
+      var D = F + 0.25, ciws = [];
+      csgGun(g, 0, D, 62, 0); csgGun(g, 0, D, -62, Math.PI);
+      csgVls(g, 0, D, 47, 8, 8); csgVls(g, 0, D, -46, 8, 8);
+      // forward deckhouse with two arrays, aft deckhouse with two more
+      csgBox(g, 13, 6, 26, CSG_M.haze, 0, D + 3, 22); csgBox(g, 11, 4, 16, CSG_M.haze, 0, D + 8, 24); csgBox(g, 9, 3, 6, CSG_M.dark, 0, D + 11.5, 29);
+      csgSpy(g, 4.6, D + 7.5, 28.5, 0.9, 3.3); csgSpy(g, -4.6, D + 7.5, 28.5, -0.9, 3.3);
+      csgBox(g, 12, 6, 30, CSG_M.haze, 0, D + 3, -24); csgBox(g, 10, 4, 12, CSG_M.haze, 0, D + 8, -30);
+      csgSpy(g, 4.6, D + 7.5, -34.5, Math.PI - 0.9, 3.3); csgSpy(g, -4.6, D + 7.5, -34.5, Math.PI + 0.9, 3.3);
+      // twin uptakes, two masts
+      csgBox(g, 5, 7, 6, CSG_M.haze, 0, D + 9.5, 6); csgBox(g, 5.4, 0.6, 6.4, CSG_M.dark, 0, D + 13.2, 6);
+      csgBox(g, 5, 6, 6, CSG_M.haze, 0, D + 9, -10); csgBox(g, 5.4, 0.6, 6.4, CSG_M.dark, 0, D + 12.2, -10);
+      csgMast(g, 0, D + 13, 16, 20, 0.08); csgMast(g, 0, D + 10, -18, 16, 0.08);
+      ciws.push(csgCiws(g, 0, D + 6, 36)); ciws.push(csgCiws(g, 0, D + 6, -40));
+      csgHelo(g, -76, 20, B, D);
+      csgNumber(g, num, L, F, B);
+      return { g: g, len: L, ciws: ciws, aegis: true };
+    }
+    function csgDestroyer(num) {
+      var g = new THREE.Group(), L = 155, B = 20, F = 7.6;
+      csgHull(g, L, B, F, 6.3, 34);
+      var D = F + 0.25, ciws = [];
+      csgGun(g, 0, D, 56, 0);
+      csgVls(g, 0, D, 42, 4, 8); csgVls(g, 0, D, -42, 8, 8);
+      // the deckhouse: sloped faces carrying all four arrays
+      csgBox(g, 15, 6.5, 40, CSG_M.haze, 0, D + 3.25, 10);
+      csgBox(g, 13, 5, 18, CSG_M.haze, 0, D + 9, 18); csgBox(g, 10, 2.8, 6, CSG_M.dark, 0, D + 12.4, 24);
+      csgSpy(g, 5.4, D + 8.5, 26.5, 0.8, 3.4); csgSpy(g, -5.4, D + 8.5, 26.5, -0.8, 3.4);
+      csgSpy(g, 5.4, D + 8.5, 9.5, Math.PI - 0.8, 3.4); csgSpy(g, -5.4, D + 8.5, 9.5, Math.PI + 0.8, 3.4);
+      csgMast(g, 0, D + 11.5, 14, 17, 0.2);
+      // two raked funnels
+      [-2, -16].forEach(function(z) { var f = csgBox(g, 6, 7, 7, CSG_M.haze, 0, D + 9, z); f.rotation.x = 0.08; csgBox(g, 6.2, 0.6, 7.2, CSG_M.dark, 0, D + 12.6, z - 0.4); });
+      csgBox(g, 14, 5.5, 14, CSG_M.haze, 0, D + 2.75, -55);       // hangars
+      ciws.push(csgCiws(g, 0, D + 5.5, -26));
+      csgHelo(g, -68, 18, B, D);
+      csgNumber(g, num, L, F, B);
+      return { g: g, len: L, ciws: ciws, aegis: true };
+    }
+    function csgSupply(num) {
+      var g = new THREE.Group(), L = 229, B = 33, F = 10;
+      csgHull(g, L, B, F, 11, 40);
+      var D = F + 0.25;
+      csgBox(g, 26, 12, 22, CSG_M.haze, 0, D + 6, 88); csgBox(g, 22, 4, 12, CSG_M.haze, 0, D + 14, 90); csgBox(g, 20, 2.4, 6, CSG_M.dark, 0, D + 17, 94);
+      csgMast(g, 0, D + 16, 88, 14, 0.05);
+      // UNREP kingposts with their hose rigs
+      [55, 25, -5].forEach(function(z) {
+        [-1, 1].forEach(function(s) { csgCyl(g, 0.5, 0.7, 22, CSG_M.haze, s * 9, D + 11, z, 8); });
+        csgBox(g, 20, 1.2, 1.2, CSG_M.haze, 0, D + 21.5, z);
+        [-1, 1].forEach(function(s) { var boom = csgCyl(g, 0.25, 0.25, 14, CSG_M.dark, s * 13, D + 16, z, 6); boom.rotation.z = s * 1.0; });
+      });
+      // cargo deck, aft house, funnel and hangar
+      csgBox(g, 28, 3, 50, CSG_M.deck, 0, D + 1.5, 25);
+      csgBox(g, 28, 12, 34, CSG_M.haze, 0, D + 6, -62); csgBox(g, 12, 9, 10, CSG_M.haze, 0, D + 16, -60); csgBox(g, 12.4, 0.8, 10.4, CSG_M.dark, 0, D + 20.8, -60);
+      csgHelo(g, -96, 26, B, D);
+      csgNumber(g, num, L, F, B);
+      return { g: g, len: L, ciws: [csgCiws(g, 0, D + 12, 82)], aegis: false };
+    }
+    function csgSub(num) {
+      var g = new THREE.Group(), body = new THREE.Group(); g.add(body);
+      var hull = new THREE.Mesh(new THREE.CapsuleGeometry ? new THREE.CylinderGeometry(5.2, 5.2, 100, 20) : new THREE.CylinderGeometry(5.2, 5.2, 100, 20), CSG_M.boot);
+      hull.rotation.x = Math.PI / 2; body.add(hull);
+      var nose = new THREE.Mesh(new THREE.SphereGeometry(5.2, 20, 12), CSG_M.boot); nose.position.z = 50; nose.scale.z = 1.6; body.add(nose);
+      var tail = new THREE.Mesh(new THREE.ConeGeometry(5.2, 22, 20), CSG_M.boot); tail.rotation.x = -Math.PI / 2; tail.position.z = -61; body.add(tail);
+      var sail = csgBox(body, 3, 8, 12, CSG_M.boot, 0, 8, 22); sail.scale.set(1, 1, 1);
+      csgBox(body, 13, 0.35, 2.2, CSG_M.boot, 0, 9.5, 24);                               // sail planes
+      csgBox(body, 0.4, 7, 4, CSG_M.boot, 0, 4, -66); csgBox(body, 12, 0.4, 4, CSG_M.boot, 0, 0, -66);
+      csgCyl(body, 0.18, 0.18, 4, CSG_M.dark, 0.6, 13.5, 24, 6); csgCyl(body, 0.25, 0.25, 3, CSG_M.dark, -0.6, 13, 22, 6);
+      return { g: g, len: 115, body: body, ciws: [], aegis: false, sub: true };
+    }
+    // formation: stations on the carrier (u ahead, v to starboard)
+    var CSG_ORDER = [
+      { kind: 'cg', name: 'CG-62 CAPE HOLLIS', num: '62', u: 1300, v: -850 },
+      { kind: 'ddg', name: 'DDG-118 MARROW', num: '118', u: 2900, v: 1300 },
+      { kind: 'ddg', name: 'DDG-121 KESTREL', num: '121', u: 2500, v: -900 },
+      { kind: 'ddg', name: 'DDG-124 HALVARD', num: '124', u: -2400, v: 350 },
+      { kind: 'aoe', name: 'T-AOE 8 SUPPLY HALE', num: '8', u: -1600, v: 1700 },
+      { kind: 'ssn', name: 'SSN-796 TARPON', num: '796', u: 4800, v: 500 }
+    ];
+    var _csgV = new THREE.Vector3();
+    (function csgBuild() {
+      // the strike group replaces the carrier's two placeholder escorts
+      if (typeof CV2 !== 'undefined') { CV2.escorts.forEach(function(E) { scene.remove(E.g); scene.remove(E.wake.g); }); CV2.escorts = []; }
+      CSG_ORDER.forEach(function(o, i) {
+        var S = o.kind === 'cg' ? csgCruiser(o.num) : o.kind === 'ddg' ? csgDestroyer(o.num) : o.kind === 'aoe' ? csgSupply(o.num) : csgSub(o.num);
+        S.kind = o.kind; S.name = o.name; S.u = o.u; S.v = o.v; S.i = i;
+        var w = carrierToWorld(o.u, o.v);
+        S.pos = new THREE.Vector3(w.x, 0, w.z); S.yaw = CARRIER.yaw; S.speed = CV2.v; S.cd = Math.random() * 3; S.ph = Math.random() * 6;
+        S.g.traverse(function(c) { c.frustumCulled = true; });
+        scene.add(S.g);
+        // its own wake
+        var wk = new THREE.Mesh(CV2.wake.main.geometry, CV2.wake.main.material); wk.scale.set(S.sub ? 0.25 : 0.4, 1, S.sub ? 0.3 : 0.55); scene.add(wk); S.wake = wk;
+        CSG.ships.push(S);
+      });
+    })();
+    function csgStation(S) {
+      var w = carrierToWorld(S.u, S.v);
+      // never station a ship on the shoals: pull it in toward the carrier until there's water
+      for (var k = 0; k < 6 && getTerrainHeight(w.x, w.z) > WATER_LEVEL - 12; k++) w = carrierToWorld(S.u * (1 - (k + 1) * 0.15), S.v * (1 - (k + 1) * 0.15));
+      return w;
+    }
+    // ---- defending the group: Standard missiles and Phalanx, through the base's fire-control code ----
+    function csgDefend(dt) {
+      var threats = baseThreats().filter(function(th) { return Math.hypot(th.pos.x - CARRIER.x, th.pos.z - CARRIER.z) < 22000; });
+      if (!threats.length) return;
+      CSG.ships.forEach(function(S) {
+        var p = S.pos;
+        if (S.aegis) {
+          S.cd -= dt;
+          var best = null, bd = 15000;
+          threats.forEach(function(th) { var d = Math.hypot(th.pos.x - p.x, th.pos.z - p.z); if (d < bd && !BASE.shots.some(function(sh) { return sh.th.pos === th.pos; })) { bd = d; best = th; } });
+          if (best && S.cd <= 0) {
+            S.cd = S.kind === 'cg' ? 2.2 : 3.2;
+            // vertical launch out of the cells
+            baseFireSam(null, _csgV.set(p.x + Math.sin(S.yaw) * 40, WATER_LEVEL + 10, p.z + Math.cos(S.yaw) * 40).clone(), best);
+            BASE.shots[BASE.shots.length - 1].vel.set(0, 90, 0);
+            if (!CSG.said[S.name] || CSG.t - CSG.said[S.name] > 8) { CSG.said[S.name] = CSG.t; cv2Say(S.name.split(' ').slice(1).join(' '), '"Birds away!"', '#7fd0ff'); }
+          }
+        }
+        S.ciws.forEach(function(C) {
+          var tg = null, td = 2000;
+          threats.forEach(function(th) { var d = th.pos.distanceTo(_csgV.set(p.x, WATER_LEVEL + 15, p.z)); if (d < td) { td = d; tg = th; } });
+          if (!tg) return;
+          C.t.getWorldPosition(_csgV);
+          C.t.rotation.y = Math.atan2(tg.pos.x - _csgV.x, tg.pos.z - _csgV.z) - S.yaw; C.gun.rotation.z += dt * 40;
+          C.gun.rotation.x = -Math.atan2(tg.pos.y - _csgV.y, Math.hypot(tg.pos.x - _csgV.x, tg.pos.z - _csgV.z));
+          if (Math.random() < dt * 30) baseTracer(_csgV.clone().add(new THREE.Vector3(0, 2, 0)), tg.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 12)));
+          if (Math.random() < dt * (2.4 - td / 1100)) baseKill(tg, 18);
+        });
+      });
+    }
+    // ---- the enemy's answer to a carrier: anti-ship missile salvoes ----
+    function csgLaunchRaid() {
+      var n = 3 + Math.floor(Math.random() * 4), from = (Math.random() - 0.5) * 2.2;   // out of the open sea to the south
+      for (var i = 0; i < n; i++) {
+        var a = from + (Math.random() - 0.5) * 0.35, r = 24000 + i * 600;
+        var x = CARRIER.x + Math.sin(a) * r, z = CARRIER.z + Math.cos(a) * r;
+        var g = baseMissileModel();
+        var t = stAddTarget({ kind: 'missile', label: 'ANTI-SHIP MISSILE', group: g, hitR: 4, maxHp: 30, bounty: 150 });
+        var M = { t: t, g: g, pos: new THREE.Vector3(x, WATER_LEVEL + 20, z), tgt: null, tx: CARRIER.x, tz: CARRIER.z, v: 260, smokeT: 0, follow: true, onHit: csgCarrierHit };
+        g.position.copy(M.pos); t.center.copy(M.pos);
+        BASE.missiles.push(M);
+      }
+      var brg = String(Math.round(((Math.atan2(Math.sin(from), -Math.cos(from)) * 180 / Math.PI) + 360) % 360)).padStart(3, '0');
+      cv2Say('CAPE HOLLIS', '"Vampire, vampire! ' + n + ' inbound, bearing ' + brg + ', sea-skimmers. All units, weapons free."', '#ff9a7a', 'vampire vampire');
+      samToast('STRIKE GROUP UNDER ATTACK — ' + n + ' ANTI-SHIP MISSILES', '#ff7a5a', 3);
+    }
+    function csgCarrierHit(M) {
+      CSG.deckFireT = 60;
+      samToast('CARRIER HIT — FLIGHT DECK FIRE, DECK CLOSED', '#ff3b30', 3.2);
+      cv2Say('CV-71', '"We\'ve been hit! Fire on the flight deck — the deck is foul, hold your landing."', '#ff6a4a', 'carrier hit');
+      for (var i = 0; i < 4; i++) { var w = carrierToWorld(-60 + Math.random() * 160, (Math.random() - 0.5) * 50); stIgniteFire(new THREE.Vector3(w.x, CARRIER.deckY + 1, w.z), 14, 60); }
+    }
+    function csgMinimap(ctx, toS, scale) {
+      CSG.ships.forEach(function(S) {
+        if (S.sub && !S.surfaced) return;
+        var p = toS(S.pos.x, S.pos.z);
+        ctx.save(); ctx.translate(p.x, p.y);
+        ctx.fillStyle = S.kind === 'ssn' ? '#7fb8ff' : '#5aa8ff'; ctx.strokeStyle = 'rgba(0,0,0,.6)';
+        ctx.beginPath(); ctx.arc(0, 0, S.kind === 'aoe' ? 3 : 2.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+      });
+    }
+    function csgUpdate(dt) {
+      CSG.t += dt;
+      CSG.ships.forEach(function(S, i) {
+        // sail to the station: steer for it when out of position, then hold the carrier's course and speed
+        var w = csgStation(S), dx = w.x - S.pos.x, dz = w.z - S.pos.z, d = Math.hypot(dx, dz);
+        var wantYaw = d > 160 ? Math.atan2(dx, dz) : CARRIER.yaw;
+        var dy = Math.atan2(Math.sin(wantYaw - S.yaw), Math.cos(wantYaw - S.yaw));
+        S.yaw += THREE.MathUtils.clamp(dy, -0.035 * dt, 0.035 * dt);
+        var wantV = d > 160 ? Math.min(17, CV2.v + d * 0.01) : CV2.v + (d - 0) * 0.004 * Math.cos(Math.atan2(dx, dz) - S.yaw);
+        S.speed += THREE.MathUtils.clamp(wantV - S.speed, -0.6 * dt, 0.4 * dt);
+        S.pos.x += Math.sin(S.yaw) * S.speed * dt; S.pos.z += Math.cos(S.yaw) * S.speed * dt;
+        // the sea moves them too; the submarine comes up for a while and goes back down
+        var sea = typeof currentWind === 'number' ? currentWind : 0, heave = (0.25 + 1.6 * sea) * Math.sin(CSG.t * 0.75 + S.ph);
+        var y = heave;
+        if (S.sub) {
+          var cyc = (CSG.t * 0.004 + S.ph * 0.1) % 1; S.surfaced = cyc < 0.45;
+          var target = S.surfaced ? -1.5 : -16; S.depth = S.depth === undefined ? target : S.depth + (target - S.depth) * Math.min(1, dt * 0.05);
+          y = S.depth + (S.surfaced ? heave * 0.4 : 0);
+        }
+        S.g.position.set(S.pos.x, WATER_LEVEL + y, S.pos.z);
+        S.g.rotation.set(Math.sin(CSG.t * 0.6 + S.ph) * (0.004 + 0.016 * sea), S.yaw, Math.sin(CSG.t * 0.47 + S.ph) * (0.005 + 0.02 * sea) - dy * 2.5);
+        var st = S.len / 2 + 2;
+        S.wake.position.set(S.pos.x - Math.sin(S.yaw) * st, WATER_LEVEL + 0.22, S.pos.z - Math.cos(S.yaw) * st);
+        S.wake.rotation.y = S.yaw; S.wake.visible = !S.sub || S.depth > -6;
+      });
+      if (!started || (typeof HY !== 'undefined' && HY.on)) return;
+      // attacks on the group come only while you're around to see them
+      var near = Math.hypot(position.x - CARRIER.x, position.z - CARRIER.z) < 20000;
+      if (near && (CSG.raidT -= dt) <= 0) { CSG.raidT = 480 + Math.random() * 180; csgLaunchRaid(); }
+      csgDefend(dt);
+      // a burning deck: the LSO waves everyone off until the crews have it out
+      if (CSG.deckFireT > 0) {
+        CSG.deckFireT -= dt;
+        if (CSG.lsoT === undefined || (CSG.lsoT -= dt) <= 0) {
+          CSG.lsoT = 1;
+          if (CV2.lso && !CV2.lso.waveoff) { CV2.lso.waveoff = true; CV2.lso.waveWhy = 'DECK FIRE'; cv2Say('PADDLES', '"Wave off — deck\'s foul, fire on the deck!"', '#ff6a4a', 'wave off'); }
+        }
+        if (CSG.deckFireT <= 0) cv2Say('CV-71', '"Fire\'s out. Deck is clear — resume recovery."', '#7dff9a');
       }
     }
 
