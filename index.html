@@ -27264,7 +27264,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     function csgSub(num) {
       var g = new THREE.Group(), body = new THREE.Group(); g.add(body);
-      var hull = new THREE.Mesh(new THREE.CapsuleGeometry ? new THREE.CylinderGeometry(5.2, 5.2, 100, 20) : new THREE.CylinderGeometry(5.2, 5.2, 100, 20), CSG_M.boot);
+      var hull = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.2, 100, 20), CSG_M.boot);
       hull.rotation.x = Math.PI / 2; body.add(hull);
       var nose = new THREE.Mesh(new THREE.SphereGeometry(5.2, 20, 12), CSG_M.boot); nose.position.z = 50; nose.scale.z = 1.6; body.add(nose);
       var tail = new THREE.Mesh(new THREE.ConeGeometry(5.2, 22, 20), CSG_M.boot); tail.rotation.x = -Math.PI / 2; tail.position.z = -61; body.add(tail);
