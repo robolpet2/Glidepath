@@ -25800,12 +25800,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // a saddle blanket and a load on some: everyone gets a striped blanket
       p.push(wlP(new THREE.BoxGeometry(0.9, 0.06, 0.5), 0xa8322a, 0, null, [0, 2.12, 0.42]));
       var nk = [0, 1.9, 0.82];
-      p.push(wlP(wlRod([0, 1.85, 0.8], [0, 1.6, 1.25], 0.17, 0.12), hide, 3, nk));                       // the neck dips
-      p.push(wlP(wlRod([0, 1.6, 1.25], [0, 2.25, 1.5], 0.12, 0.1), hide, 3, nk));                        // and rises
-      p.push(wlP(wlSph(1, 10, 8), hide, 3, nk, [0, 2.32, 1.66], [0.3, 0, 0], [0.12, 0.13, 0.27]));
-      [-1, 1].forEach(function(s) { p.push(wlP(wlSph(1, 6, 5), dark, 3, nk, [s * 0.09, 2.44, 1.56], null, [0.03, 0.06, 0.03])); });
+      p.push(wlP(wlRod([0, 1.95, 0.8], [0, 1.5, 1.45], 0.2, 0.13), hide, 3, nk));                        // the neck swoops forward and down
+      p.push(wlP(wlSph(0.14, 8, 6), hide, 3, nk, [0, 1.5, 1.45]));
+      p.push(wlP(wlRod([0, 1.5, 1.45], [0, 2.1, 1.85], 0.13, 0.1), hide, 3, nk));                        // and up to the head
+      p.push(wlP(wlSph(1, 10, 8), hide, 3, nk, [0, 2.18, 2.02], [0.35, 0, 0], [0.13, 0.14, 0.3]));
+      p.push(wlP(wlSph(1, 8, 6), dark, 3, nk, [0, 2.1, 2.28], null, [0.09, 0.08, 0.08]));                  // muzzle
+      [-1, 1].forEach(function(s) { p.push(wlP(wlSph(1, 6, 5), dark, 3, nk, [s * 0.09, 2.32, 1.92], null, [0.03, 0.06, 0.03])); });
       p.push(wlP(wlRod([0, 1.85, -0.9], [0, 1.25, -1.0], 0.04, 0.02), dark, 4, [0, 1.85, -0.9]));
-      wlLegs(p, hide, hoof, 1.55, 0.62, -0.62, 0.22, 0.07, 0.1);
+      wlLegs(p, hide, hoof, 1.55, 0.62, -0.62, 0.22, 0.09, 0.1);
       return wlMerge(p);
     }
     function wlBuildBear() {
@@ -25843,7 +25845,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       p.push(wlP(wlSph(1, 18, 12), back, 0, null, [0, 0, 1.0], null, [1.55, 1.45, 5.2]));
       p.push(wlP(wlSph(1, 14, 10), belly, 0, null, [0, -0.45, 1.7], null, [1.25, 1.0, 4.0]));            // pale grooved throat
       // knobbly tubercles along the head
-      for (var i = 0; i < 6; i++) p.push(wlP(wlSph(0.14, 6, 4), back, 0, null, [(i % 2 ? 0.35 : -0.35), 1.18, 4.2 + i * 0.4]));
+      for (var i = 0; i < 6; i++) { var tz = 3.6 + i * 0.45, ty = 1.45 * Math.sqrt(Math.max(0, 1 - Math.pow((tz - 1.0) / 5.2, 2))) - 0.06; p.push(wlP(wlSph(0.13, 6, 4), back, 0, null, [(i % 2 ? 0.3 : -0.3), ty, tz])); }
       p.push(wlP(wlSph(1, 14, 10), back, 8, [0, 0, -2.5], [0, 0.05, -4.2], null, [0.95, 0.9, 3.0]));       // tail stock
       p.push(wlP(new THREE.ConeGeometry(0.35, 0.7, 6), back, 8, [0, 0, -2.5], [0, 0.95, -2.8], [-0.6, 0, 0]));    // small dorsal fin
       // flukes: dark on top, white and mottled underneath
@@ -25951,7 +25953,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (window.__citySpot && Math.hypot(x - window.__citySpot.x, z - window.__citySpot.z) < (window.__citySpot.radius || 600) + 500) return null;
         if (dtNear(x, z, REG_VOLC, REG_VOLC.r * 1.4)) return null;
       } else if (kind === 'camel') { if (dw < 0.9 || h > 34) return null; }
-      else if (kind === 'bear' || kind === 'seal') { if (aw < 0.85) return null; if (kind === 'seal' && h > WATER_LEVEL + 9) return null; }
+      else if (kind === 'bear' || kind === 'seal') { if (aw < 0.85) return null; if (kind === 'seal' && h > 90) return null; }
       // level enough to stand around on
       var s = Math.abs(getTerrainHeight(x + 8, z) - h) + Math.abs(getTerrainHeight(x, z + 8) - h);
       return s < 4.5 ? h : null;
