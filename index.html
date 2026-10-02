@@ -2386,6 +2386,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     //   · MOUNT KAELA, a volcanic island 9 km offshore: black basalt, a steaming crater with a lava
     //     lake, lava channels down its flanks, and eruptions that throw burning rock into the sky
     var REG_VOLC = { x: -3600, z: 10800, r: 2700, h: 640, crater: 290 };
+    // the enemy-held island, 2,000 km due south of the home field across open ocean
+    var EI = { x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z + 2000000, R: 1500, hqX: RUNWAY_CENTER_X + 380, hqZ: RUNWAY_CENTER_Z + 2000000 - 140 };
     function regArcticW(x, z) { return z > -12500 ? 0 : gfxSmoothstepJS(-12500, -15500, z); }
     function regDesertW(x, z) {
       if (x < 11500) return 0;
@@ -2421,6 +2423,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (vd < V.crater) top -= Math.pow(1 - vd / V.crater, 1.6) * 170;   // the crater bowl
         if (top > h) h = top;
       }
+      if (eiInRange(x, z, EI.R * 1.7)) h = enemyIslandHeight(x, z, h);
       return h;
     }
     // trees: none on the sand or the lava, thin and stunted in the far north, jungle low on Kaela
@@ -2428,6 +2431,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var m = (1 - regDesertW(x, z)) * (1 - regArcticW(x, z) * 0.85);
       var V = REG_VOLC, vd = Math.hypot(x - V.x, z - V.z);
       if (vd < V.r * 1.35) m *= h < 70 && vd > V.r * 0.55 ? 1.4 : 0;
+      if (eiInRange(x, z, EI.R * 1.7)) m *= Math.hypot(x - EI.hqX + 100, z - EI.hqZ - 80) < 480 ? 0 : 0.18;   // the garrison has cleared the island
       return m;
     }
     // ground colour + the biome mask the terrain shader reads (desert, arctic, lava)
@@ -15888,6 +15892,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       else if (SAM_BASE) pointers.push({ x: SAM_BASE.x, z: SAM_BASE.z, color: '#ff4a3a', text: 'SAM' });
       if (csarPt) pointers.push({ x: csarPt.x, z: csarPt.z, color: csarPt.color, text: 'PILOT' });
       qolMapPointers(pointers);
+      eiMapPointers(pointers);
       if (rtb || (!exp && Math.hypot(position.x - RUNWAY_CENTER_X, position.z - RUNWAY_CENTER_Z) > range)) pointers.push({ x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z, color: rtb ? '#7dff8a' : '#e8e6de', text: 'BASE' });
       pointers.forEach(function(pt) {
         var p = toS(pt.x, pt.z);
@@ -16607,6 +16612,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       navyUpdate(dt);
       aarUpdate(dt);
       qolUpdate(dt);
+      eiUpdate(dt);
       qolbUpdate(dt);
       qolcUpdate(dt);
       updateStrike(dt);
@@ -19620,6 +19626,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       } else if (t.kind === 'truck') {
         t.group.rotation.z = (Math.random() - 0.5) * 0.35;
         if (fx) stIgniteFire(p, 5.5, 45);
+      } else if (t.kind === 'troops') {
+        t.group.scale.y = 0.18;                                    // the squad goes down
+        if (fx) stIgniteFire(p, 4, 30);
       } else if (t.kind === 'ship') navyOnSunk(t, fx);
       if (strikeTrack === t) strikeTrack = null;
       if (t.navy) { navyKillMsg(t, quiet); return; }
@@ -24372,7 +24381,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (t.isAA) return 'aa';
       if (t.navy || t.kind === 'ship') return 'ship';
       if (t === samRadar || samLaunchers.indexOf(t) >= 0 || /SAM|RADAR|LAUNCH/i.test(t.label || '')) return 'sam';
-      if (t.wheels || t.kind === 'vehicle' || t.kind === 'truck' || /TRUCK|TANK|APC|JEEP|CONVOY/i.test(t.label || '')) return 'veh';
+      if (t.wheels || t.kind === 'vehicle' || t.kind === 'truck' || t.kind === 'troops' || /TRUCK|TANK|APC|JEEP|CONVOY/i.test(t.label || '')) return 'veh';
       return 'bldg';
     }
     function qolTgtOk(t) { var f = QB_FILTERS[QB.filt][0]; return f === 'all' || qbTgtClass(t) === f; }
@@ -24819,6 +24828,174 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (!QC.init) { QC.init = true; qcPerfFirstRun(); qcPhotoUi(); }
       qcPerfTick();
     }
+
+    /* ============================================================
+       ENEMY ISLAND — a small rock 2,000 km out in the southern ocean, packed with troops
+       · Terrain: enemyIslandHeight() raises a ~3 km island with beaches and a central hill
+         out of the deep floor (hooked into regionHeight, like Mt. Kaela).
+       · Garrison: infantry squads (one InstancedMesh each), armour and trucks, flak guns in
+         rings, bunkers, ammo and fuel in an HQ compound, and a tent camp. Built once at load so
+         every client's strike-target list lines up for multiplayer kills; each piece only draws
+         when you're close enough to see it.
+       · On the chart as ENEMY ISLAND (a nav waypoint, so NAV autopilot can take you there).
+       ============================================================ */
+    var EI_SOLDIER_M = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0 });
+    var EI_PARTS = [];          // everything the island built, with how far out it should still draw
+    var EI_STATE = { built: false, seen: false, cullT: 0, near: false };
+    function eiSoldierGeo() {
+      return nhMerge([
+        { geo: new THREE.BoxGeometry(0.17, 0.86, 0.2), pos: [-0.11, 0.43, 0] },              // legs
+        { geo: new THREE.BoxGeometry(0.17, 0.86, 0.2), pos: [0.11, 0.43, 0.04], rot: [0.12, 0, 0] },
+        { geo: new THREE.BoxGeometry(0.46, 0.6, 0.27), pos: [0, 1.16, 0] },                   // torso
+        { geo: new THREE.BoxGeometry(0.34, 0.42, 0.18), pos: [0, 1.2, 0.2] },                 // pack
+        { geo: new THREE.BoxGeometry(0.12, 0.56, 0.13), pos: [-0.3, 1.12, -0.06] },           // arms
+        { geo: new THREE.BoxGeometry(0.12, 0.5, 0.13), pos: [0.27, 1.18, -0.2], rot: [-1.0, 0, 0] },
+        { geo: new THREE.BoxGeometry(0.2, 0.22, 0.2), pos: [0, 1.58, 0] },                    // head
+        { geo: new THREE.SphereGeometry(0.16, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), pos: [0, 1.66, 0], rot: [0, 0, 0] },  // helmet
+        { geo: new THREE.BoxGeometry(0.06, 0.09, 0.95), pos: [0.2, 1.3, -0.32], rot: [0.25, 0, 0] }  // rifle
+      ]);
+    }
+    function enemyIslandHeight(x, z, h) {
+      var dx = x - EI.x, dz = z - EI.z, d2 = dx * dx + dz * dz, Rmax = EI.R * 1.6;
+      if (d2 > Rmax * Rmax) return h;
+      var d = Math.sqrt(d2), a = Math.atan2(dz, dx);
+      var rr = EI.R * (1 + 0.13 * Math.sin(a * 3 + 1.1) + 0.07 * Math.sin(a * 5 + 2.3) + 0.04 * Math.sin(a * 9 + 0.4));
+      var t = d / rr, top;
+      if (t < 1) {
+        var base = WATER_LEVEL + 3 + 13 * gfxSmoothstepJS(1, 0.72, t);               // beach rising to a low plateau
+        var hill = 55 * Math.pow(Math.max(0, 1 - t / 0.5), 1.7);                     // the hill in the middle
+        var bump = (smoothNoise(x * 0.006, z * 0.006) - 0.5) * 8 * gfxSmoothstepJS(1, 0.8, t);
+        top = base + hill + bump;
+      } else {
+        top = WATER_LEVEL + 3 - (t - 1) / 0.5 * (WATER_LEVEL + 3 - OCEAN_FLOOR);       // shelf down to the deep floor
+      }
+      return Math.max(h, top);
+    }
+    function eiInRange(x, z, r) { return Math.abs(x - EI.x) < r && Math.abs(z - EI.z) < r; }
+    function eiLand(x, z) { return getTerrainHeight(x, z) > WATER_LEVEL + 2.5; }
+    function eiPart(o, far, target) { EI_PARTS.push({ o: o, far: far, x: o.position.x, z: o.position.z, t: target || null }); o.visible = false; }
+    function eiBuild() {
+      if (EI_STATE.built) return;
+      EI_STATE.built = true;
+      var rnd = mulberry32(20240611), cx = EI.x, cz = EI.z;
+      function spot(rMin, rMax, tries) {
+        for (var k = 0; k < (tries || 30); k++) {
+          var a = rnd() * Math.PI * 2, r = rMin + (rMax - rMin) * Math.sqrt(rnd());
+          var x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+          if (eiLand(x, z)) return { x: x, z: z, y: getTerrainHeight(x, z) };
+        }
+        return null;
+      }
+      var hq = { x: EI.hqX, z: EI.hqZ }; hq.y = getTerrainHeight(hq.x, hq.z);
+      // --- infantry: squads dug in everywhere, thicker toward the HQ and the beaches ---
+      var soldier = eiSoldierGeo(), mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s1 = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
+      var tints = [0x4d5634, 0x5a5c3a, 0x434a2e, 0x625e44, 0x3f452c].map(function(c) { return new THREE.Color(c).convertSRGBToLinear(); });
+      var squads = 0;
+      for (var sq = 0; sq < 120 && squads < 96; sq++) {
+        var p = sq < 16 ? spot(EI.R * 0.82, EI.R * 0.98) : (sq < 30 ? spot(20, 260) : spot(0, EI.R * 0.95));
+        if (!p) continue;
+        var n = 8 + Math.floor(rnd() * 7);
+        var im = new THREE.InstancedMesh(soldier, EI_SOLDIER_M, n);
+        im.frustumCulled = false; im.castShadow = true;
+        var face = rnd() * Math.PI * 2, gy = p.y;
+        for (var i = 0; i < n; i++) {
+          var oa = rnd() * Math.PI * 2, orr = 1.5 + rnd() * 9;
+          var ox = Math.cos(oa) * orr, oz = Math.sin(oa) * orr;
+          var oy = getTerrainHeight(p.x + ox, p.z + oz) - gy;
+          e.set(0, face + (rnd() - 0.5) * 1.2, 0); q.setFromEuler(e);
+          var sc = 0.94 + rnd() * 0.12; s1.set(sc, sc, sc);
+          mtx.compose(v.set(ox, oy, oz), q, s1);
+          im.setMatrixAt(i, mtx);
+          im.setColorAt(i, tints[Math.floor(rnd() * tints.length)]);
+        }
+        var g = new THREE.Group(); g.position.set(p.x, gy, p.z); g.add(im);
+        var t = stAddTarget({ kind: 'troops', label: 'INFANTRY', group: g, hitR: 11, maxHp: 50 + n * 4, fixed: true, ei: true });
+        t.center.set(p.x, gy + 1.2, p.z);
+        eiPart(g, 6000, t); squads++;
+      }
+      // --- armour, trucks and technicals parked in the open and along the coast road ---
+      var vehicles = [['APC', stBuildApc, 5.5, 160], ['APC', stBuildApc, 5.5, 160], ['TRUCK', function() { return stBuildTruck('cargo'); }, 5, 100],
+                      ['FUEL TRUCK', function() { return stBuildTruck('tanker'); }, 5, 100], ['TECHNICAL', stBuildTechnical, 4, 80]];
+      for (var vi = 0; vi < 22; vi++) {
+        var vp = vi < 8 ? spot(10, 180) : spot(60, EI.R * 0.9);
+        if (!vp) continue;
+        var kind = vehicles[vi % vehicles.length], b = kind[1]();
+        b.group.position.set(vp.x, vp.y, vp.z); b.group.rotation.y = rnd() * Math.PI * 2;
+        var vt = stAddTarget({ kind: 'truck', label: kind[0], group: b.group, wheels: b.wheels, hitR: kind[2], maxHp: kind[3], fixed: true, ei: true, fuel: kind[0] === 'FUEL TRUCK' });
+        vt.center.set(vp.x, vp.y + 2, vp.z);
+        eiPart(b.group, 6500, vt);
+      }
+      // --- the HQ: bunkers, an ammo dump, a fuel farm ---
+      [[0, 0], [70, 40], [-60, 55], [30, -75]].forEach(function(o, i) {
+        var x = hq.x + o[0], z = hq.z + o[1]; if (!eiLand(x, z)) return;
+        var y = getTerrainHeight(x, z), g = stBuildBunker(); g.position.set(x, y - 0.3, z); g.rotation.y = i * 1.6;
+        var bt = stAddTarget({ kind: 'bunker', label: i ? 'BUNKER' : 'COMMAND BUNKER', group: g, hitR: 8.5, maxHp: i ? 220 : 320, fixed: true, ei: true });
+        bt.center.set(x, y + 3, z); eiPart(g, 8000, bt);
+      });
+      [[-120, -30], [-110, 10]].forEach(function(o) {
+        var x = hq.x + o[0], z = hq.z + o[1]; if (!eiLand(x, z)) return;
+        var y = getTerrainHeight(x, z), g = stBuildAmmoDump(); g.position.set(x, y, z);
+        var at = stAddTarget({ kind: 'ammo', label: 'AMMO DUMP', group: g, hitR: 10, maxHp: 160, fixed: true, ei: true });
+        at.center.set(x, y + 3, z); eiPart(g, 8000, at);
+      });
+      [[110, -60], [123, -60], [136, -60]].forEach(function(o) {
+        var x = hq.x + o[0], z = hq.z + o[1]; if (!eiLand(x, z)) return;
+        var y = getTerrainHeight(x, z), g = stBuildFuelTank(); g.position.set(x, y, z);
+        var ft = stAddTarget({ kind: 'fuel', label: 'FUEL DEPOT', group: g, hitR: 7, maxHp: 140, fixed: true, ei: true });
+        ft.center.set(x, y + 3, z); eiPart(g, 8000, ft);
+      });
+      // --- flak: an outer ring on the shore and an inner ring around the hill ---
+      for (var ai = 0; ai < 18; ai++) {
+        var ring = ai < 11 ? EI.R * 0.78 : EI.R * 0.32, aa = ai / (ai < 11 ? 11 : 7) * Math.PI * 2 + (ai < 11 ? 0.2 : 0.6);
+        var ax = cx + Math.cos(aa) * ring, az = cz + Math.sin(aa) * ring;
+        if (!eiLand(ax, az)) { var sp = spot(ring * 0.6, ring * 0.95); if (!sp) continue; ax = sp.x; az = sp.z; }
+        var gun = aaBuild(ax, az); gun.ei = true; gun.label = 'ISLAND FLAK';
+        eiPart(gun.group, 9000);
+      }
+      // --- a tent camp: decoration, one draw call ---
+      var tentGeo = nhMerge([
+        { geo: new THREE.CylinderGeometry(0.01, 3.2, 2.6, 4, 1), pos: [0, 1.3, 0], rot: [0, Math.PI / 4, 0] },
+        { geo: new THREE.BoxGeometry(1.2, 1.4, 0.1), pos: [0, 0.7, 2.25] }
+      ]);
+      tentGeo.scale(1, 1, 1.5);
+      var tents = new THREE.InstancedMesh(tentGeo, SAM_M.olive, 70), tn = 0;
+      tents.frustumCulled = false; tents.castShadow = true; tents.receiveShadow = true;
+      for (var ti = 0; ti < 140 && tn < 70; ti++) {
+        var tx = hq.x - 260 + (ti % 10) * 14 + (rnd() - 0.5) * 3, tz = hq.z + 120 + Math.floor(ti / 10) * 16 + (rnd() - 0.5) * 3;
+        if (ti >= 70) { var tp = spot(100, EI.R * 0.8); if (!tp) continue; tx = tp.x; tz = tp.z; }
+        if (!eiLand(tx, tz)) continue;
+        e.set(0, (ti < 70 ? 0.1 : rnd() * 6), 0); q.setFromEuler(e); s1.set(1, 1, 1);
+        mtx.compose(v.set(tx - cx, getTerrainHeight(tx, tz) - 0.2, tz - cz), q, s1);
+        tents.setMatrixAt(tn++, mtx);
+      }
+      tents.count = tn;
+      var camp = new THREE.Group(); camp.position.set(cx, 0, cz); camp.add(tents); scene.add(camp);
+      EI_PARTS.push({ o: camp, far: 12000, x: cx, z: cz, t: null }); camp.visible = false;
+      EI.squads = squads;
+      WAYPOINTS.push({ name: 'ENEMY ISLAND', x: EI.x, z: EI.z, color: '#ff5a48', icon: 'island' });
+    }
+    function eiUpdate(dt) {
+      if (!EI_STATE.built) return;
+      var dx = position.x - EI.x, dz = position.z - EI.z;
+      var near = Math.abs(dx) < 15000 && Math.abs(dz) < 15000;
+      if (!near && !EI_STATE.near) return;
+      if ((EI_STATE.cullT -= dt) > 0 && near === EI_STATE.near) return;
+      EI_STATE.cullT = 0.4; EI_STATE.near = near;
+      var cxp = typeof CMDX !== 'undefined' && CMDX.focus ? CMDX.focus : position;
+      for (var i = 0; i < EI_PARTS.length; i++) {
+        var P = EI_PARTS[i], ddx = P.x - cxp.x, ddz = P.z - cxp.z;
+        P.o.visible = near && ddx * ddx + ddz * ddz < P.far * P.far;
+      }
+      if (near && !EI_STATE.seen && Math.hypot(dx, dz) < 12000) {
+        EI_STATE.seen = true;
+        var alive = strikeTargets.filter(function(t) { return t.ei && t.alive; }).length;
+        if (typeof samToast === 'function') samToast('ENEMY ISLAND — ' + alive + ' TARGETS, HEAVY FLAK', '#ff5a48', 4);
+      }
+    }
+    function eiMapPointers(pointers) {
+      if (EI_STATE.built && !WAR.on) pointers.push({ x: EI.x, z: EI.z, color: '#ff5a48', text: 'ENEMY ISLAND' });
+    }
+    eiBuild();
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
