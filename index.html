@@ -1396,12 +1396,18 @@
             <div><b>F</b>Flaps</div>
             <div><b>C</b>Cruise / hover</div>
             <div><b>P</b>Cockpit view</div>
+            <div><b>.</b>Autopilot: level</div>
+            <div><b>;</b>Autopilot: waypoint</div>
+            <div><b>/</b>Autopilot: home</div>
+            <div><b>'</b>Clear waypoint</div>
+            <div><b>🎮</b>Gamepad supported</div>
           </div>
           <div class="col">
             <h5>Weapons</h5>
             <div><b>1 – 5</b>Pick weapon</div>
             <div><b>M / X</b>Fire</div>
             <div><b>T</b>Next target</div>
+            <div><b>[ / ]</b>Target type</div>
             <div><b>J / K</b>Gun · AIM-9</div>
             <div><b>`</b>Night vision</div>
             <div><b>G</b>Flares (hold)</div>
@@ -8137,6 +8143,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     function triggerLightning() {
+      qcCaption('[THUNDER]', 1.4);
       var cam = camera.position;
       bolt.t = 0;
       bolt.cloud = Math.random() < 0.45;
@@ -8197,7 +8204,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // the screen-wide flash only for near strikes — distant ones light the sky, not your eyeballs
       var target = env * Math.max(0, near - 0.45) * (bolt.hitYou ? 1.6 : 0.5);
       lightningFlashOpacity = Math.max(target, lightningFlashOpacity - dt * 3.2);
-      lightningFlashEl.style.opacity = lightningFlashOpacity;
+      lightningFlashEl.style.opacity = gpSet.noFlash ? lightningFlashOpacity * 0.15 : lightningFlashOpacity;
 
       for (var i = pendingThunder.length - 1; i >= 0; i--) {
         pendingThunder[i].t -= dt;
@@ -9624,7 +9631,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       mainRotorPivot.visible = show && isHelicopterMode;
       tailRotorPivot.visible = show && isHelicopterMode;
     }
-    function toggleCockpit() { cockpitView = !cockpitView; ckBtn.classList.toggle('active', cockpitView); samToast(cockpitView ? 'COCKPIT VIEW' : 'CHASE VIEW', '#dfe8f2', 1.2); }
+    function toggleCockpit() { cockpitView = !cockpitView; ckBtn.classList.toggle('active', cockpitView); samToast(cockpitView ? 'COCKPIT VIEW' : 'CHASE VIEW', '#dfe8f2', 1.2); qolSetupNote('cockpit', cockpitView); }
 
     // toggle button, next to the settings / full-screen buttons
     var ckStyle = document.createElement('style');
@@ -11781,6 +11788,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         case 'KeyK': if (val) pvpFireAAM(); return true;
         case 'KeyL': if (val) carrierLaunchPress(); return true;
         case 'KeyP': if (val) toggleCockpit(); return true;
+        case 'Period': if (val) qolApToggle('level'); return true;
+        case 'Semicolon': if (val) qolApToggle('nav'); return true;
+        case 'Slash': if (val) qolApToggle('home'); return true;
+        case 'Quote': if (val) qolNavClear(); return true;
+        case 'BracketRight': if (val) qbFilterCycle(1); return true;
+        case 'BracketLeft': if (val) qbFilterCycle(-1); return true;
       }
       return false;
     }
@@ -12454,7 +12467,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (flapsDeployed !== down) esFlaps();
       flapsDeployed = down;
     }
-    function toggleFlaps() { setFlaps(!flapsDeployed); }
+    function toggleFlaps() { setFlaps(!flapsDeployed); if (wasGrounded) qolSetupNote('flaps', flapsDeployed); }
 
     /* ---------- cruise control ---------- */
     // Holds the current altitude automatically: while engaged, pitch is computed each frame
@@ -12470,6 +12483,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (isHelicopterMode || isCarMode) { cruiseActive = false; return; }
       if (on && (wasGrounded || speed < STALL_SPEED * 1.05)) return; // nothing to hold yet
       if (on) cruiseTargetAlt = position.y; // lock in altitude at the moment of engaging
+      if (on !== cruiseActive && typeof QB !== 'undefined' && QB) qolCruiseHook(on);
+      if (on && typeof QOL !== 'undefined' && QOL && QOL.ap) QOL.ap = null;
       cruiseActive = on;
     }
     function toggleCruise() { if (isHelicopterMode) { heliSetAssist(!heliAssist); return; } setCruise(!cruiseActive); }
@@ -12984,6 +12999,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       camera.position.copy(camPos);
       if (typeof pvpOnReset === 'function' && typeof pvp !== 'undefined') pvpOnReset();
       if (ARS) arsRearm(true);
+      if (typeof QB !== 'undefined' && QB) qolSetupSpawn();
     }
 
     var touchdownMsgTimeout = null;
@@ -13853,6 +13869,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       kjOnCrash(intoWater, viaEject);
       csarOnCrash();
       pvpOnCrash();
+      qolOnCrash();
       cruiseActive = false;
       setDroneCam(false);
       var crashAgl = kjAgl();
@@ -13888,7 +13905,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         // normal (non-eject) crash: reset and hand control back after a short freeze
         // long enough to watch it come apart (longer if it's still falling out of the sky)
         if (WRECK.resetTimer) clearTimeout(WRECK.resetTimer);
-        WRECK.resetTimer = setTimeout(function() { WRECK.resetTimer = null; if (crashing) resetAfterCrash(); }, crashAgl > 30 ? CRASH_RESET_DELAY * 3.4 : CRASH_RESET_DELAY * 2.6);
+        var rspMs = crashAgl > 30 ? CRASH_RESET_DELAY * 3.4 : CRASH_RESET_DELAY * 2.6;
+        WRECK.resetTimer = setTimeout(function() { WRECK.resetTimer = null; if (crashing) qolRespawn('air'); }, rspMs);
+        qolRspShow(rspMs);
       }
       // crashes that happen mid-eject are reset later instead — once the pilot has landed
       // and the respawn delay has elapsed, see finishEjectRespawn()
@@ -15018,6 +15037,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (e.target.closest && e.target.closest('.mapBtn')) return;
       // flying the AWACS, a tap on the open chart marks the strike point instead of closing it
       if (miniMapExpanded && isAwacsMode && cmdMapClick(e)) return;
+      // otherwise a tap on the open chart drops (or clears) a nav waypoint; the header closes it
+      if (miniMapExpanded && !isAwacsMode && qolMapClick(e)) return;
       setMiniMapExpanded(!miniMapExpanded);
     });
     function mapZoom(dir) {
@@ -15145,6 +15166,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       cmdMinimap(ctx, toS, exp);
       navyMap(ctx, toS, exp, inView, label, rot);
       aarMap(ctx, toS, exp, inView, label, rot);
+      qolMap(ctx, toS, exp, inView, label, scale);
       warMapOver(ctx, toS, exp, inView, label, scale, rot);
       var hel = window.__airwingHelo;
       if (hel) { var hq = toS(hel.pos.x, hel.pos.z); ctx.fillStyle = '#7dff8a'; ctx.beginPath(); ctx.arc(hq.x, hq.y, 3, 0, Math.PI * 2); ctx.fill(); }
@@ -15246,6 +15268,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (WAR.on) { if (WAR.objective) pointers.push({ x: WAR.objective.x, z: WAR.objective.z, color: '#ffd25a', text: WAR.objective.name }); }
       else if (SAM_BASE) pointers.push({ x: SAM_BASE.x, z: SAM_BASE.z, color: '#ff4a3a', text: 'SAM' });
       if (csarPt) pointers.push({ x: csarPt.x, z: csarPt.z, color: csarPt.color, text: 'PILOT' });
+      qolMapPointers(pointers);
       if (rtb || (!exp && Math.hypot(position.x - RUNWAY_CENTER_X, position.z - RUNWAY_CENTER_Z) > range)) pointers.push({ x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z, color: rtb ? '#7dff8a' : '#e8e6de', text: 'BASE' });
       pointers.forEach(function(pt) {
         var p = toS(pt.x, pt.z);
@@ -15348,13 +15371,18 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           pitchInput = 0; rollInput = 0; // never let the dpad also fly the plane while aiming
         }
 
+        // a gamepad stick flies the aircraft when it's being moved; then the player's stick shaping
+        var qcPad = droneCamActive ? null : qcStick();
+        if (qcPad) { pitchInput = qcPad.p; rollInput = qcPad.r; }
+        if (!droneCamActive) { var qcS = qcShape(pitchInput, rollInput, !!qcPad || (touchActive && !dpadActive)); pitchInput = qcS.p; rollInput = qcS.r; }
+
         // --- cruise control: hold current altitude, pilot just steers ---
         // Grabbing the pitch stick (keyboard up/down, or a real vertical drag on touch) always
         // wins and disengages cruise immediately — it should feel like tapping the brakes on
         // cruise control in a car, not like fighting an autopilot. It also bows out on its own
         // if it can't safely hold altitude right now (grounded, stalled/too slow for lift
         // authority, or the plane is crashing).
-        var manualPitchInput = !droneCamActive && (keys.up || keys.down || (touchActive && !dpadActive && Math.abs(touchDY) > 6));
+        var manualPitchInput = !droneCamActive && (keys.up || keys.down || QC.manP || (touchActive && !dpadActive && Math.abs(touchDY) > 6));
         if (cruiseActive && manualPitchInput) cruiseActive = false;
         if (cruiseActive && (wasGrounded || speed < STALL_SPEED * 1.05 || isHelicopterMode || isCarMode)) cruiseActive = false;
         if (cruiseActive) {
@@ -15364,6 +15392,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           // pitch-inertia/lift-authority/stall physics as manual flight instead of teleporting.
           var cruisePitchCmd = THREE.MathUtils.clamp(altError * CRUISE_ALT_GAIN - verticalVel * CRUISE_RATE_GAIN, -1, 1);
           pitchInput = cruisePitchCmd;
+        }
+        // autopilot (LEVEL / NAV / HOME): any real stick input hands control straight back
+        if (QOL.ap) {
+          var apCmd = qolApControl(dt, manualPitchInput || (!droneCamActive && (keys.left || keys.right || QC.manR || (touchActive && !dpadActive && Math.abs(touchDX) > 6))));
+          if (apCmd) { pitchInput = apCmd.p; rollInput = apCmd.r; }
         }
 
         // sustained high-G strain (from last frame's loading) dulls control authority before
@@ -15714,6 +15747,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             wasGrounded = true;
             showTouchdownMessage();
             kjOnTouchdown(verticalSpeed);
+            qolOnTouchdown(verticalSpeed);
             if (overWater && isSeaplaneMode) seaTouchdownSplash(-verticalSpeed, speed);
           } else {
             triggerCrash(overWater);
@@ -15732,9 +15766,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
         if (wasGrounded && !crashing && speed < RUMBLE_MIN_SPEED * 2.5 &&
             (isOverRunway(position.x, position.z, RUNWAY_LANDING_MARGIN + 40) || isOnAirportPavement(position.x, position.z) || nearGasStation ||
-             isOverCarrierDeck(position.x, position.z) || warRearmAt(position.x, position.z) || regStripAt(position.x, position.z))) {
+             isOverCarrierDeck(position.x, position.z) || warRearmAt(position.x, position.z) || regStripAt(position.x, position.z) || qbOldStripAt(position.x, position.z))) {
           isRefueling = fuel < FUEL_MAX;
-          if (!nearGasStation) samRearmAtBase();
+          if (!nearGasStation) { qolService(dt); qbFlightSummary(); }
           if (WAR.on && !nearGasStation) crOnLanded();
           if (isRefueling) {
             fuel = Math.min(FUEL_MAX, fuel + FUEL_REFILL_RATE * dt);
@@ -15950,6 +15984,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       regUpdate(dt);
       navyUpdate(dt);
       aarUpdate(dt);
+      qolUpdate(dt);
+      qolbUpdate(dt);
+      qolcUpdate(dt);
       updateStrike(dt);
       updateStrikePostCamera(dt);
       updateCSAR(dt);
@@ -17430,6 +17467,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         'uniform float time; uniform vec2 res; uniform vec2 sunUV;',
         'uniform float golden; uniform float night; uniform float sunVeil; uniform vec3 sunTint;',
         'uniform vec4 shock; uniform vec2 hazeUV; uniform float haze; uniform float hazeR; uniform float speedBlur; uniform float hurt; uniform float nvg;',
+        'uniform float dof; uniform vec2 dofUV; uniform float dofR;',
         'varying vec2 vUv;',
         'float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }',
         'void main() {',
@@ -17452,6 +17490,15 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         '  vec2 ca = d * r2 * (0.012 + speedBlur * 0.03);',
         '  vec3 col = vec3(texture2D(tScene, uv - ca).r, texture2D(tScene, uv).g, texture2D(tScene, uv + ca).b);',
         // speed blur: radial streaking toward the frame edges at high speed / on the afterburner
+        // photo-mode depth of field: the subject stays sharp, everything further off it goes soft
+        '  if (dof > 0.001) {',
+        '    float fb = smoothstep(dofR, dofR * 2.4 + 0.1, length((vUv - dofUV) * asp)) * dof;',
+        '    if (fb > 0.01) {',
+        '      vec3 acc = vec3(0.0);',
+        '      for (int i = 0; i < 20; i++) { float a = float(i) * 2.39996; float rr = sqrt((float(i) + 0.5) / 20.0) * fb * 0.016; acc += texture2D(tScene, uv + vec2(cos(a), sin(a)) * rr / asp).rgb; }',
+        '      col = mix(col, acc / 20.0, min(1.0, fb * 1.6));',
+        '    }',
+        '  }',
         '  if (speedBlur > 0.001) {',
         '    vec3 acc = col;',
         '    for (int i = 1; i <= 6; i++) acc += texture2D(tScene, uv - d * (float(i) / 6.0) * speedBlur * 0.07).rgb;',
@@ -17511,7 +17558,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         time: { value: 0 }, res: { value: new THREE.Vector2(sz.x, sz.y) }, sunUV: { value: P.sunUV },
         golden: { value: 0 }, night: { value: 0 }, sunVeil: { value: 0 }, sunTint: { value: new THREE.Color(1, 0.9, 0.75) },
         shock: { value: new THREE.Vector4() }, hazeUV: { value: new THREE.Vector2() }, haze: { value: 0 }, hazeR: { value: 0.1 },
-        speedBlur: { value: 0 }, hurt: { value: 0 }, nvg: { value: 0 }
+        speedBlur: { value: 0 }, hurt: { value: 0 }, nvg: { value: 0 },
+        dof: { value: 0 }, dofUV: { value: new THREE.Vector2(0.5, 0.5) }, dofR: { value: 0.15 }
       });
       return P;
     }
@@ -18067,6 +18115,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       src.connect(hp).connect(g).connect(audioCtx.destination); src.start(now);
     }
     function samSetRwrTone(mode, t) {
+      if (mode !== QC.rwrMode) { QC.rwrMode = mode; if (mode === 'lock') qcCaption('[RADAR LOCK TONE]', 2); else if (mode === 'launch') qcCaption('[MISSILE LAUNCH WARNING]', 2.5); }
       samEnsureRwrAudio();
       if (!rwrOsc) return;
       var now = audioCtx.currentTime, vol = 0, freq = 1000;
@@ -18910,6 +18959,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
     }
     function stKill(t, quiet, byName) {
+      qolOnKill(t, quiet, byName);
       if (!t.war || !WAR.on || t.war === WAR.iron) { if (!WAR.loading) netEmit('kill', { t: strikeTargets.indexOf(t) }); }
       var fx = !quiet;
       t.alive = false; t.deadTimer = STRIKE_REPAIR_TIME;
@@ -19469,7 +19519,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var best = null, bestA = Infinity, tg = arsTargets();
       for (var i = 0; i < tg.length; i++) {
         var t = tg[i];
-        if (!t.alive || L.locked.indexOf(t) >= 0 || t === L.skip) continue;
+        if (!t.alive || L.locked.indexOf(t) >= 0 || t === L.skip || !qolTgtOk(t)) continue;
         var r = arsAngleTo(t, _arsOrg, _arsDir);
         if (r.d > w.range || r.a > cone) continue;
         if (r.a < bestA) { bestA = r.a; best = t; }
@@ -23145,6 +23195,999 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     wxfEnable(true);
 
+
+    /* ============================================================
+       QUALITY OF LIFE — flying aids
+       · NAV MARKER: tap the open chart to drop a waypoint (it snaps to anything nearby worth
+         flying to). A diamond on the HUD shows its bearing and distance, and an arrow on the
+         screen edge points the way when it's off-screen.
+       · AUTOPILOT (AP pill, or . / ; / '/'): LEVEL rolls the wings level and holds height;
+         NAV flies to the waypoint; HOME takes you to the nearest friendly runway or the carrier,
+         lines you up on a long final and hands the aircraft back at thirty metres.
+       · LANDING AIDS: lined up on any runway or the carrier deck, an ILS box shows the
+         centreline and glideslope needles, and a voice calls out the height: 100, 50, 30, 20, 10.
+       · WARNINGS: a terrain-closure check looks ahead along your flight path and shouts PULL UP;
+         SPEED and STALL go up in the middle of the screen too.
+       · The chart also shows every flak gun's reach and where you last went down.
+       ============================================================ */
+    var QOL = { gsCache: {}, nav: null, ap: null, crash: null, ils: null, warn: '', gpwsT: 0, gpwsTti: 99, sayT: 0, aglPrev: 999, calls: {}, stallSaid: false, ilsT: 0 };
+    var QOL_CALLS = [100, 50, 30, 20, 10];
+    (function qolBuild() {
+      var st = document.createElement('style');
+      st.textContent = [
+        '#qolNav{position:fixed;left:0;top:0;z-index:12;pointer-events:none;display:flex;flex-direction:column;align-items:center;color:#e86bff;will-change:transform}',
+        '#qolNav .qd{width:16px;height:16px;border:2px solid currentColor;transform:rotate(45deg);box-shadow:0 0 8px currentColor}',
+        '#qolNav .qa{display:none;width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:14px solid currentColor;transform:rotate(var(--rot,0deg));filter:drop-shadow(0 0 4px rgba(0,0,0,.8))}',
+        '#qolNav.edge .qd{display:none}#qolNav.edge .qa{display:block}',
+        '#qolNav .ql{margin-top:6px;font:800 10px ui-monospace,Menlo,monospace;letter-spacing:.06em;white-space:nowrap;text-shadow:0 0 3px #000,0 0 6px #000}',
+        '#qolWarn{position:fixed;left:50%;top:31%;transform:translate(-50%,-50%);z-index:13;pointer-events:none;text-align:center;font:900 30px ui-monospace,Menlo,monospace;letter-spacing:.14em;color:#ff3b2f;text-shadow:0 0 10px rgba(255,40,30,.65),0 0 2px #000;display:none}',
+        '#qolWarn.blink{animation:qolBlink .5s steps(2) infinite}#qolWarn.amber{color:#ffc23a;text-shadow:0 0 10px rgba(255,180,40,.5),0 0 2px #000;font-size:20px}',
+        'body.qolNoFlash #qolWarn.blink{animation:none}',
+        '@keyframes qolBlink{50%{opacity:.25}}',
+        '#qolIls{position:fixed;left:calc(50% + 150px);top:calc(50% - 56px);width:84px;height:84px;z-index:11;pointer-events:none;border:1px solid rgba(125,255,154,.55);border-radius:6px;background:rgba(6,14,10,.28);display:none}',
+        '#qolIls i{position:absolute;background:rgba(125,255,154,.35)}',
+        '#qolIls .h0{left:6px;right:6px;top:41px;height:1px}#qolIls .v0{top:6px;bottom:6px;left:41px;width:1px}',
+        '#qolIls .loc{top:4px;bottom:4px;left:41px;width:3px;margin-left:-1px;background:#ffd84a;box-shadow:0 0 6px #ffd84a}',
+        '#qolIls .gs{left:4px;right:4px;top:41px;height:3px;margin-top:-1px;background:#e86bff;box-shadow:0 0 6px #e86bff}',
+        '#qolIls b{position:absolute;left:-30px;right:-30px;top:88px;text-align:center;font:800 9.5px ui-monospace,Menlo,monospace;letter-spacing:.06em;color:#7dff9a;text-shadow:0 0 3px #000;white-space:nowrap}',
+        '#qolAp{position:fixed;left:50%;top:calc(74px + env(safe-area-inset-top));transform:translateX(-50%);z-index:11;pointer-events:none;font:800 10.5px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#9fe0ff;background:rgba(8,20,30,.55);border:1px solid rgba(110,200,255,.55);border-radius:10px;padding:3px 10px;display:none;white-space:nowrap}',
+        '#apBtn{position:fixed;z-index:12;left:calc(98px + env(safe-area-inset-left));bottom:calc(300px + env(safe-area-inset-bottom));width:56px;height:40px;border-radius:12px;background:rgba(20,22,26,.35);border:2px solid rgba(255,255,255,.4);color:#fff;font-size:11px;font-weight:700;letter-spacing:.06em;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;user-select:none}',
+        '#apBtn.active{background:rgba(46,150,196,.45);border-color:#5ac8ff}#apBtn:active{transform:scale(.94)}',
+        '@media (orientation: landscape) and (max-height: 500px){#apBtn{left:calc(190px + env(safe-area-inset-left));bottom:auto;top:calc(44px + env(safe-area-inset-top));width:52px;height:30px;border-radius:9px;font-size:9.5px}#qolWarn{font-size:24px;top:34%}#qolIls{left:calc(50% + 120px);transform:scale(.85)}#qolAp{top:calc(50px + env(safe-area-inset-top))}}'
+      ].join('\n');
+      document.head.appendChild(st);
+      function el(id, html) { var d = document.createElement('div'); d.id = id; if (html) d.innerHTML = html; document.body.appendChild(d); return d; }
+      QOL.navEl = el('qolNav', '<div class="qd"></div><div class="qa"></div><div class="ql"></div>');
+      QOL.navEl.style.display = 'none';
+      QOL.navLbl = QOL.navEl.querySelector('.ql');
+      QOL.warnEl = el('qolWarn');
+      QOL.ilsEl = el('qolIls', '<i class="h0"></i><i class="v0"></i><i class="loc"></i><i class="gs"></i><b></b>');
+      QOL.ilsLoc = QOL.ilsEl.querySelector('.loc'); QOL.ilsGs = QOL.ilsEl.querySelector('.gs'); QOL.ilsLbl = QOL.ilsEl.querySelector('b');
+      QOL.apEl = el('qolAp');
+      QOL.apBtn = el('apBtn', 'AP'); QOL.apBtn.classList.add('hidden');
+      function tap(e) { e.preventDefault(); e.stopPropagation(); qolApCycle(); }
+      QOL.apBtn.addEventListener('touchstart', tap, { passive: false });
+      QOL.apBtn.addEventListener('mousedown', tap);
+    })();
+
+    function qolWrap(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
+    function qolHdgTo(dx, dz) { return Math.atan2(-dx, -dz); }          // the game's heading that points along (dx, dz)
+    function qolBrgDeg(dx, dz) { return ((Math.atan2(dx, -dz) * 180 / Math.PI) + 360) % 360; }
+    function qolSay(text, beepHz) {
+      qcCaption('🔊 ' + text.toUpperCase(), 1.6);
+      if (!soundEnabled || (typeof gpSet !== 'undefined' && gpSet.voice === false)) return;
+      var ss = window.speechSynthesis;
+      if (ss && window.SpeechSynthesisUtterance) {
+        try { ss.cancel(); var u = new SpeechSynthesisUtterance(text); u.rate = 1.25; u.pitch = 0.75; u.volume = 0.9; ss.speak(u); return; } catch (e) {}
+      }
+      if (typeof samBeep === 'function') samBeep(beepHz || 900, 0.09, 0.1);
+    }
+
+    /* ---------- landing fields ---------- */
+    function qolFields() {
+      var f = [];
+      f.push({ name: 'HOME', x: RUNWAY_CENTER_X, z: RUNWAY_CENTER_Z, y: getTerrainHeight(RUNWAY_CENTER_X, RUNWAY_CENTER_Z), ux: 0, uz: 1, L: RUNWAY_HALF_LENGTH * 2, gs: 3 });
+      if (CARRIER_READY) {
+        var c = carrierToWorld(-10, 0);
+        f.push({ name: 'CARRIER', x: c.x, z: c.z, y: CARRIER.deckY, ux: CV_F.x, uz: CV_F.z, L: 300, gs: 3.5, oneWay: true, carrier: true });
+      }
+      if (OLD_STRIP && (!WAR.on || WAR.sectors.some(function(s) { return s.type === 'field' && !s.strip && s.owner === 'blue'; }))) f.push({ name: 'OLD STRIP', x: OLD_STRIP.x, z: OLD_STRIP.z, y: OLD_STRIP.y, ux: OLD_STRIP.ux, uz: OLD_STRIP.uz, L: OLD_STRIP.L, gs: 3 });
+      REG_STRIPS.forEach(function(s) { f.push({ name: s.name, x: s.x, z: s.z, y: s.y, ux: s.ux, uz: s.uz, L: s.L, gs: 3 }); });
+      if (WAR.on) WAR.sectors.forEach(function(s) { if (s.owner === 'blue' && s.strip) f.push({ name: s.name, x: s.strip.x, z: s.strip.z, y: s.strip.y, ux: s.strip.ux, uz: s.strip.uz, L: s.strip.L, gs: 3 }); });
+      return f;
+    }
+    // the approach to field f flying direction D (unit, ±runway axis): aim point a sixth of the way in
+    function qolApproach(f, sgn) {
+      var dx = f.ux * sgn, dz = f.uz * sgn;
+      var aim = f.carrier ? 0 : Math.min(160, f.L * 0.18);
+      var ax = f.x - dx * (f.L / 2 - aim), az = f.z - dz * (f.L / 2 - aim);
+      var brg = qolBrgDeg(dx, dz), num = Math.round(brg / 10) || 36, ay = f.y + (f.carrier ? 0 : 0.5);
+      // a glideslope steep enough to clear the ground on the way in (worked out once per approach)
+      var key = f.name + '|' + sgn + '|' + Math.round(f.x), gs = QOL.gsCache[key];
+      if (gs === undefined) {
+        var need = 0;
+        for (var d = 300; d <= 4500; d += 150) {
+          var gx = ax - dx * d, gz = az - dz * d;
+          need = Math.max(need, Math.atan2(Math.max(getEffectiveGroundHeight(gx, gz), WATER_LEVEL) + 35 - ay, d) * 180 / Math.PI);
+        }
+        gs = QOL.gsCache[key] = THREE.MathUtils.clamp(Math.max(f.gs, need + 0.4), f.gs, 9);
+      }
+      return { f: f, dx: dx, dz: dz, ax: ax, az: az, ay: ay, gs: gs, tan: Math.tan(gs * Math.PI / 180), hdg: qolHdgTo(dx, dz),
+               name: f.carrier ? 'CARRIER' : 'RWY ' + String(num).padStart(2, '0') + (f.name === 'HOME' ? '' : ' ' + f.name) };
+    }
+    // where you are relative to an approach: distance to go along the centreline, metres off it
+    function qolRel(a) {
+      var rx = position.x - a.ax, rz = position.z - a.az;
+      return { along: -(rx * a.dx + rz * a.dz), lat: rx * -a.dz + rz * a.dx };
+    }
+
+    /* ---------- navigation marker ---------- */
+    function qolNavSet(x, z, name, color) {
+      QOL.nav = { x: x, z: z, name: name || 'WPT', color: color || '#e86bff' };
+      samBeep(1180, 0.06, 0.09);
+      samToast('WAYPOINT SET · ' + QOL.nav.name, QOL.nav.color, 1.6);
+    }
+    function qolNavClear() { if (!QOL.nav) return; QOL.nav = null; if (QOL.ap && QOL.ap.mode === 'nav') qolApOff('NAV CLEARED'); samToast('WAYPOINT CLEARED', '#bbb', 1.2); }
+    // the things a tap on the chart snaps to
+    function qolPois() {
+      var p = [];
+      qolFields().forEach(function(f) { p.push({ x: f.x, z: f.z, name: f.name === 'HOME' ? 'HOME BASE' : f.name, color: '#7dff9a' }); });
+      WAYPOINTS.forEach(function(w) { p.push({ x: w.x, z: w.z, name: w.name, color: w.color }); });
+      if (QOL.crash) p.push({ x: QOL.crash.x, z: QOL.crash.z, name: 'WRECK', color: '#ff8a4a' });
+      if (SAM_BASE && !WAR.on) p.push({ x: SAM_BASE.x, z: SAM_BASE.z, name: 'SAM SITE', color: '#ff5a48' });
+      if (WAR.on && WAR.sectors) WAR.sectors.forEach(function(s) { if (s.known !== false) p.push({ x: s.x, z: s.z, name: s.name, color: s.owner === 'blue' ? '#7fb8ff' : '#ff6a5a' }); });
+      if (typeof AAR !== 'undefined' && AAR.pos) p.push({ x: AAR.pos.x, z: AAR.pos.z, name: 'TANKER', color: '#9fe0ff' });
+      if (typeof csar !== 'undefined' && csar.active && csar.pilotPos) p.push({ x: csar.pilotPos.x, z: csar.pilotPos.z, name: 'PILOT', color: '#ffb347' });
+      if (typeof strikeTargets !== 'undefined') strikeTargets.forEach(function(t) { if (t.alive && !(t.war && (!t.war.known || t.surrendered))) p.push({ x: t.center.x, z: t.center.z, name: t.label || 'TARGET', color: '#ffb020' }); });
+      return p;
+    }
+    function qolMapClick(e) {
+      var X = window.__mapX; if (!X || !X.exp) return false;
+      var r = miniMapWrapEl.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top;
+      if (Math.abs(sx - X.cx) > X.R || Math.abs(sy - X.cy) > X.R) return false;
+      var wx = X.px + (sx - X.cx) / X.scale, wz = X.pz + (sy - X.cy) / X.scale;
+      // tapping the current waypoint again clears it
+      if (QOL.nav && Math.hypot(QOL.nav.x - wx, QOL.nav.z - wz) * X.scale < 14) { qolNavClear(); return true; }
+      var best = null, bd = 16;
+      qolPois().forEach(function(p) { var d = Math.hypot(p.x - wx, p.z - wz) * X.scale; if (d < bd) { bd = d; best = p; } });
+      if (best) qolNavSet(best.x, best.z, best.name, best.color);
+      else qolNavSet(wx, wz, 'WPT ' + String(Math.round(qolBrgDeg(wx - position.x, wz - position.z))).padStart(3, '0'), '#e86bff');
+      return true;
+    }
+    var _qolP = new THREE.Vector3();
+    function qolNavHud() {
+      var n = QOL.nav, show = n && started && !crashing && !kj.photoOn;
+      QOL.navEl.style.display = show ? '' : 'none';
+      if (!show) return;
+      var dx = n.x - position.x, dz = n.z - position.z, d = Math.hypot(dx, dz);
+      _qolP.set(n.x, Math.max(getTerrainHeight(n.x, n.z), WATER_LEVEL) + 25, n.z);
+      camera.updateMatrixWorld();
+      _qolP.project(camera);
+      var W = window.innerWidth, H = window.innerHeight, behind = _qolP.z > 1;
+      var nx = behind ? -_qolP.x : _qolP.x, ny = behind ? -_qolP.y : _qolP.y;
+      var sx = (nx * 0.5 + 0.5) * W, sy = (-ny * 0.5 + 0.5) * H, m = 56;
+      var off = behind || sx < m || sx > W - m || sy < m || sy > H - m;
+      if (off) {
+        var cx = W / 2, cy = H / 2, ex = sx - cx, ey = sy - cy;
+        if (behind && Math.abs(ex) + Math.abs(ey) < 1) ey = 1;
+        var k = Math.min((W / 2 - m) / Math.max(Math.abs(ex), 1e-3), (H / 2 - m) / Math.max(Math.abs(ey), 1e-3));
+        sx = cx + ex * k; sy = cy + ey * k;
+        QOL.navEl.style.setProperty('--rot', (Math.atan2(ey, ex) * 180 / Math.PI + 90) + 'deg');
+      }
+      QOL.navEl.classList.toggle('edge', off);
+      QOL.navEl.style.transform = 'translate(' + sx.toFixed(1) + 'px,' + sy.toFixed(1) + 'px) translate(-50%,-50%)';
+      QOL.navEl.style.color = n.color;
+      var txt = n.name + ' · ' + mapFmtDist(d) + ' · ' + String(Math.round(qolBrgDeg(dx, dz))).padStart(3, '0') + '°';
+      if (txt !== QOL.navTxt) { QOL.navTxt = txt; QOL.navLbl.textContent = txt; }
+      if (d < 250 && !QOL.navArrived) { QOL.navArrived = true; samBeep(1320, 0.08, 0.1); samToast('ARRIVED · ' + n.name, n.color, 1.6); }
+      if (d > 600) QOL.navArrived = false;
+    }
+
+    /* ---------- autopilot ---------- */
+    function qolApAvailable() { return started && !isHelicopterMode && !isCarMode && !crashing && !ejecting; }
+    function qolApOff(why) {
+      if (!QOL.ap) return;
+      QOL.ap = null;
+      samBeep(520, 0.12, 0.12); setTimeout(function() { samBeep(390, 0.16, 0.12); }, 140);
+      samToast(why || 'AUTOPILOT DISCONNECT', '#9fe0ff', 1.8);
+    }
+    function qolApOn(mode) {
+      if (!qolApAvailable()) return;
+      if (wasGrounded) { samToast('AUTOPILOT NEEDS YOU AIRBORNE', '#9fe0ff', 1.6); return; }
+      if (mode === 'nav' && !QOL.nav) { samToast('NO WAYPOINT — TAP THE CHART TO SET ONE', '#e86bff', 2); return; }
+      var ap = { mode: mode, alt: Math.max(position.y, Math.max(getEffectiveGroundHeight(position.x, position.z), WATER_LEVEL) + 120), t: 0 };
+      if (mode === 'home') {
+        // the nearest friendly field; land from whichever end you're already closest to
+        var best = null, bd = 1e9;
+        qolFields().forEach(function(f) { var d = Math.hypot(f.x - position.x, f.z - position.z); if (d < bd) { bd = d; best = f; } });
+        if (!best) return;
+        // land from whichever end has the clearer approach; between two clean ones, the nearer end
+        var near = (position.x - best.x) * best.ux + (position.z - best.z) * best.uz > 0 ? -1 : 1, sgn = 1;
+        if (!best.oneWay) sgn = qolApproach(best, -near).gs < qolApproach(best, near).gs - 1 ? -near : near;
+        else sgn = 1;
+        ap.appr = qolApproach(best, sgn); ap.phase = 'inbound';
+      }
+      if (cruiseActive) setCruise(false);
+      QOL.ap = ap;
+      samBeep(880, 0.07, 0.1);
+      samToast('AUTOPILOT · ' + (mode === 'home' ? 'HOME — ' + ap.appr.name : mode === 'nav' ? 'NAV — ' + QOL.nav.name : 'WINGS LEVEL'), '#9fe0ff', 2);
+    }
+    function qolApToggle(mode) { if (QOL.ap && QOL.ap.mode === mode) qolApOff('AUTOPILOT OFF'); else qolApOn(mode); }
+    function qolApCycle() {
+      var order = ['level', 'nav', 'home'], cur = QOL.ap ? order.indexOf(QOL.ap.mode) : -1;
+      for (var i = cur + 1; i < order.length; i++) { if (order[i] === 'nav' && !QOL.nav) continue; qolApOn(order[i]); return; }
+      qolApOff('AUTOPILOT OFF');
+    }
+    // the highest ground over the next few km toward where you're heading, plus a margin
+    function qolTerrainFloor(hdg, margin) {
+      var fx = -Math.sin(hdg), fz = -Math.cos(hdg), top = WATER_LEVEL;
+      for (var d = 0; d <= 3000; d += 500) top = Math.max(top, getEffectiveGroundHeight(position.x + fx * d, position.z + fz * d));
+      return top + margin;
+    }
+    // called from update() right after cruise control; returns the stick it wants, like a pilot would
+    function qolApControl(dt, manual) {
+      var ap = QOL.ap;
+      if (!ap) return null;
+      if (!qolApAvailable() || wasGrounded) { QOL.ap = null; return null; }
+      if (manual) { qolApOff('AUTOPILOT DISCONNECT — YOUR AIRCRAFT'); return null; }
+      ap.t += dt;
+      var wantHdg = heading, wantAlt = ap.alt, wantVs = 0, wantSpd = null, bank = 0.85;
+      if (ap.mode === 'nav') {
+        var n = QOL.nav;
+        if (!n) { QOL.ap = null; return null; }
+        var dx = n.x - position.x, dz = n.z - position.z;
+        if (Math.hypot(dx, dz) < 400) { ap.mode = 'level'; ap.alt = position.y; samToast('WAYPOINT REACHED — WINGS LEVEL', '#9fe0ff', 2); }
+        else wantHdg = qolHdgTo(dx, dz);
+        wantAlt = Math.max(ap.alt, qolTerrainFloor(wantHdg, 150));
+      } else if (ap.mode === 'home') {
+        var a = ap.appr, rel = qolRel(a), gate = a.f.carrier ? 3000 : 3500;
+        if (ap.phase === 'inbound') {
+          // fly to a gate on the extended centreline, then turn onto final
+          var gx = a.ax - a.dx * gate, gz = a.az - a.dz * gate;
+          var gdx = gx - position.x, gdz = gz - position.z, gd = Math.hypot(gdx, gdz);
+          wantHdg = qolHdgTo(gdx, gdz);
+          wantAlt = Math.max(a.ay + gate * a.tan, qolTerrainFloor(wantHdg, 160));
+          if (gd > 9000) wantAlt = Math.max(wantAlt, ap.alt);
+          wantSpd = Math.max(STALL_SPEED * 1.7, throttle);
+          var aligned = Math.abs(qolWrap(heading - a.hdg)) < 0.9;
+          if (gd < 900 || (rel.along > 1800 && rel.along < gate + 1500 && Math.abs(rel.lat) < rel.along * 0.25 && aligned)) {
+            ap.phase = 'final'; awRadio((a.f.carrier ? 'Mother' : 'Tower') + ': established on final, ' + a.name + '.', '#7dff9a');
+          }
+        } else {
+          // cross-track steering onto the centreline, ride the glideslope down
+          var corr = THREE.MathUtils.clamp(rel.lat / Math.max(300, rel.along * 0.35), -0.6, 0.6);
+          wantHdg = a.hdg + corr;
+          wantAlt = a.ay + Math.max(0, rel.along) * a.tan;
+          wantVs = -speed * a.tan;
+          // never ride the slope into a hill: hold clear of the ground ahead until the runway's close
+          if (rel.along > 900) {
+            var floor = -1e9, fx = -Math.sin(heading), fz = -Math.cos(heading);
+            for (var fd = 0; fd <= 1200; fd += 200) floor = Math.max(floor, Math.max(getEffectiveGroundHeight(position.x + fx * fd, position.z + fz * fd), WATER_LEVEL) + 40);
+            if (floor > wantAlt) { wantAlt = floor; wantVs = 0; }
+          }
+          wantSpd = Math.max(STALL_SPEED * 1.4, TAKEOFF_SPEED * (a.f.carrier ? 1.05 : 1.15));
+          bank = 0.6;
+          if (rel.along < 8000 && !flapsDeployed && typeof setFlaps === 'function') setFlaps(true);
+          var agl = position.y - Math.max(getEffectiveGroundHeight(position.x, position.z), WATER_LEVEL);
+          if ((agl < 30 && rel.along < 1500) || rel.along < 250) { qolApOff('AUTOPILOT OFF — YOUR AIRCRAFT, FLARE'); return null; }
+          if (rel.along < -200) { QOL.ap = null; return null; }
+        }
+      } else {
+        // LEVEL: wings level, hold the height it was engaged at (or climb clear of the ground)
+        wantHdg = heading;
+        wantAlt = Math.max(ap.alt, qolTerrainFloor(heading, 120));
+      }
+      var herr = qolWrap(wantHdg - heading);
+      var r = ap.mode === 'level' ? -rollAngle * 0.4 : THREE.MathUtils.clamp(-herr * 2.4, -bank, bank);
+      var altErr = wantAlt - position.y;
+      var p = THREE.MathUtils.clamp(altErr * CRUISE_ALT_GAIN - (verticalVel - wantVs) * CRUISE_RATE_GAIN, -0.45, 0.6);
+      // banking costs lift: add a touch of back-pressure in the turn
+      p += Math.abs(Math.sin(rollAngle)) * 0.15;
+      if (wantSpd !== null) throttle = THREE.MathUtils.lerp(throttle, wantSpd, Math.min(1, dt * 0.8));
+      else if (throttle < STALL_SPEED * 1.5) throttle = STALL_SPEED * 1.5;
+      return { p: p, r: r };
+    }
+    function qolApHud() {
+      var ap = QOL.ap, txt = '';
+      if (ap) {
+        if (ap.mode === 'level') txt = 'AP · LEVEL · ' + Math.round(ap.alt) + ' m';
+        else if (ap.mode === 'nav' && QOL.nav) txt = 'AP · NAV ' + QOL.nav.name + ' · ' + mapFmtDist(Math.hypot(QOL.nav.x - position.x, QOL.nav.z - position.z));
+        else if (ap.mode === 'home') { var rl = qolRel(ap.appr); txt = 'AP · HOME ' + ap.appr.name + ' · ' + (ap.phase === 'final' ? 'FINAL ' + mapFmtDist(Math.max(0, rl.along)) : 'INBOUND ' + mapFmtDist(Math.hypot(ap.appr.ax - position.x, ap.appr.az - position.z))); }
+      }
+      if (txt !== QOL.apTxt) { QOL.apTxt = txt; QOL.apEl.textContent = txt; QOL.apEl.style.display = txt ? '' : 'none'; }
+      var lbl = ap ? (ap.mode === 'level' ? 'LVL ✓' : ap.mode === 'nav' ? 'NAV ✓' : 'HOME ✓') : 'AP';
+      if (lbl !== QOL.apLbl) { QOL.apLbl = lbl; QOL.apBtn.textContent = lbl; QOL.apBtn.classList.toggle('active', !!ap); }
+      var hide = !started || isCarMode || isHelicopterMode;
+      if (hide !== QOL.apHid) { QOL.apHid = hide; QOL.apBtn.classList.toggle('hidden', hide); }
+    }
+
+    /* ---------- landing aids ---------- */
+    function qolFindIls() {
+      if (!started || wasGrounded || isCarMode) return null;
+      var best = null;
+      qolFields().forEach(function(f) {
+        if (Math.hypot(f.x - position.x, f.z - position.z) > 14000) return;
+        var fwd = -Math.sin(heading) * f.ux - Math.cos(heading) * f.uz;
+        var sgn = f.oneWay ? 1 : (fwd >= 0 ? 1 : -1);
+        var a = qolApproach(f, sgn), rel = qolRel(a);
+        if (rel.along < -50 || rel.along > 12000) return;
+        if (Math.abs(rel.lat) > rel.along * 0.45 + 120) return;
+        if (Math.abs(qolWrap(heading - a.hdg)) > 0.8) return;
+        if (!best || rel.along < best.rel.along) best = { a: a, rel: rel };
+      });
+      return best;
+    }
+    function qolIlsHud(I) {
+      QOL.ilsEl.style.display = I ? 'block' : 'none';
+      if (!I) return;
+      var a = I.a, rel = I.rel, along = Math.max(1, rel.along);
+      var gsAlt = a.ay + along * a.tan;
+      // full scale: ±2.5° off the centreline, ±0.7° off the glideslope
+      var loc = THREE.MathUtils.clamp(-rel.lat / (along * Math.tan(2.5 * Math.PI / 180) + 25), -1, 1);
+      var gs = THREE.MathUtils.clamp((gsAlt - position.y) / (along * Math.tan(0.7 * Math.PI / 180) + 6), -1, 1);
+      QOL.ilsLoc.style.transform = 'translateX(' + (loc * 36).toFixed(1) + 'px)';
+      QOL.ilsGs.style.transform = 'translateY(' + (-gs * 36).toFixed(1) + 'px)';
+      var t = a.name + ' · ' + mapFmtDist(along) + (a.gs > 3.6 ? ' · ' + a.gs.toFixed(1) + '°' : '');
+      if (t !== QOL.ilsTxt) { QOL.ilsTxt = t; QOL.ilsLbl.textContent = t; }
+      I.onSlope = Math.abs(gs) < 0.8 && Math.abs(loc) < 0.8;
+    }
+    function qolCallouts(agl, approaching) {
+      if (agl > 130 || !approaching) { if (agl > 130) QOL.calls = {}; QOL.aglPrev = agl; return; }
+      if (verticalVel < -0.3) {
+        for (var i = 0; i < QOL_CALLS.length; i++) {
+          var h = QOL_CALLS[i];
+          if (QOL.aglPrev >= h && agl < h && !QOL.calls[h]) { QOL.calls[h] = true; qolSay(String(h), 700 + i * 90); break; }
+        }
+      }
+      QOL.aglPrev = agl;
+    }
+
+    /* ---------- warnings ---------- */
+    // time until the flight path meets the ground, sampled every half second over the next six
+    function qolTimeToImpact() {
+      var vx = velocityVec.x, vy = velocityVec.y, vz = velocityVec.z;
+      if (Math.abs(vx) + Math.abs(vz) < 1) { vx = -Math.sin(heading) * speed; vz = -Math.cos(heading) * speed; vy = verticalVel; }
+      for (var t = 0.5; t <= 6; t += 0.5) {
+        var x = position.x + vx * t, y = position.y + vy * t, z = position.z + vz * t;
+        var g = Math.max(getEffectiveGroundHeight(x, z), WATER_LEVEL);
+        if (y < g + 4) return t;
+      }
+      return 99;
+    }
+    function qolWarnSet(txt, cls) {
+      if (txt === QOL.warn && cls === QOL.warnCls) return;
+      QOL.warn = txt; QOL.warnCls = cls;
+      QOL.warnEl.textContent = txt;
+      QOL.warnEl.style.display = txt ? 'block' : 'none';
+      QOL.warnEl.className = cls || '';
+    }
+
+    function qolUpdate(dt) {
+      qolApHud();
+      qolNavHud();
+      var flying = started && !crashing && !ejecting && !isCarMode && !wasGrounded && !kj.paused;
+      if (!flying) { qolWarnSet(''); qolIlsHud(null); QOL.ils = null; QOL.gpwsTti = 99; QOL.aglPrev = 999; return; }
+      QOL.ilsT -= dt;
+      if (QOL.ilsT <= 0) {
+        QOL.ilsT = 0.1; QOL.ils = isHelicopterMode ? null : qolFindIls();
+        QOL.fieldNear = qolFields().some(function(f) { return Math.hypot(f.x - position.x, f.z - position.z) < f.L / 2 + 2500; });
+      }
+      qolIlsHud(QOL.ils);
+      var gh = Math.max(getEffectiveGroundHeight(position.x, position.z), WATER_LEVEL), agl = position.y - gh;
+      var nearField = QOL.ils || (QOL.ap && QOL.ap.mode === 'home' && QOL.ap.phase === 'final');
+      var slow = speed < Math.max(STALL_SPEED * 1.9, TAKEOFF_SPEED * 1.6);
+      qolCallouts(agl, (nearField || QOL.fieldNear) && slow);
+      // ground proximity: suppressed when you're clearly landing (on the glideslope, slow) and on the helicopter
+      QOL.gpwsT -= dt;
+      if (QOL.gpwsT <= 0) {
+        QOL.gpwsT = 0.12;
+        var landing = slow && ((QOL.ils && QOL.ils.onSlope) || (QOL.fieldNear && verticalVel > -8));
+        QOL.gpwsTti = isHelicopterMode || landing || agl > 900 ? 99 : qolTimeToImpact();
+      }
+      var tti = QOL.gpwsTti;
+      if (tti <= 3.5 && (verticalVel < -3 || tti <= 2)) {
+        qolWarnSet('PULL UP', 'blink');
+        QOL.sayT -= dt;
+        if (QOL.sayT <= 0) { QOL.sayT = 1.6; qolSay('pull up', 380); samBeep(620, 0.12, 0.13); }
+      } else if (tti <= 6 && verticalVel < -3) {
+        qolWarnSet('TERRAIN', 'amber');
+        QOL.sayT -= dt;
+        if (QOL.sayT <= 0) { QOL.sayT = 2.4; qolSay('terrain', 480); }
+      } else if (stalled && !isHelicopterMode) {
+        qolWarnSet('STALL', 'blink');
+        if (!QOL.stallSaid) { QOL.stallSaid = true; qolSay('stall', 300); }
+      } else if (!isHelicopterMode && speed < STALL_SPEED * 1.12 && agl > 15 && !nearField && !QOL.fieldNear) {
+        qolWarnSet('SPEED', 'amber');
+      } else {
+        qolWarnSet('');
+        QOL.sayT = Math.min(QOL.sayT, 0);
+      }
+      if (!stalled) QOL.stallSaid = false;
+    }
+
+    /* ---------- chart: flak reach, the wreck, the waypoint ---------- */
+    function qolMap(ctx, toS, exp, inView, label, scale) {
+      // every live flak gun's reach, faint so a cluster reads as one hazard area
+      var rng = 2800 * (isStealthMode ? 0.4 : 1) * scale;
+      if (rng > 3) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,140,60,' + (exp ? 0.42 : 0.3) + ')'; ctx.fillStyle = 'rgba(255,120,40,0.07)';
+        ctx.lineWidth = 1; ctx.setLineDash([2, 4]);
+        // one path for the lot: the fill reads as a single hazard area instead of stacking up
+        ctx.beginPath();
+        AA.forEach(function(g) {
+          if (!g.alive || g.surrendered) return;
+          if (g.war && (g.war.known === false || g.war.owner === 'blue')) return;
+          var p = toS(g.pos.x, g.pos.z);
+          ctx.moveTo(p.x + rng, p.y); ctx.arc(p.x, p.y, rng, 0, Math.PI * 2);
+        });
+        ctx.fill(); ctx.stroke();
+        ctx.restore();
+      }
+      if (QOL.crash) {
+        var c = toS(QOL.crash.x, QOL.crash.z);
+        if (inView(c, 4)) {
+          ctx.strokeStyle = '#ff8a4a'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(c.x - 4, c.y - 4); ctx.lineTo(c.x + 4, c.y + 4); ctx.moveTo(c.x + 4, c.y - 4); ctx.lineTo(c.x - 4, c.y + 4); ctx.stroke();
+          if (exp) label('WRECK', c.x, c.y + 11, '#ff8a4a', 9);
+        }
+      }
+      if (QOL.nav) {
+        var n = toS(QOL.nav.x, QOL.nav.z), me = toS(position.x, position.z);
+        ctx.strokeStyle = QOL.nav.color; ctx.globalAlpha = 0.7; ctx.lineWidth = 1.2; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(me.x, me.y); ctx.lineTo(n.x, n.y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+        if (inView(n, 4)) {
+          ctx.fillStyle = QOL.nav.color; ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+          ctx.beginPath(); ctx.moveTo(n.x, n.y - 6); ctx.lineTo(n.x + 6, n.y); ctx.lineTo(n.x, n.y + 6); ctx.lineTo(n.x - 6, n.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+          if (exp) label(QOL.nav.name, n.x, n.y - 13, QOL.nav.color, 9);
+        }
+      }
+      if (QOL.ap && QOL.ap.mode === 'home') {
+        var A = QOL.ap.appr, g0 = toS(A.ax, A.az), g1 = toS(A.ax - A.dx * 4000, A.az - A.dz * 4000);
+        ctx.strokeStyle = 'rgba(125,255,154,0.6)'; ctx.lineWidth = 1.2; ctx.setLineDash([6, 4]);
+        ctx.beginPath(); ctx.moveTo(g0.x, g0.y); ctx.lineTo(g1.x, g1.y); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+    function qolMapPointers(pointers) {
+      if (QOL.nav) pointers.push({ x: QOL.nav.x, z: QOL.nav.z, color: QOL.nav.color, text: QOL.nav.name });
+      if (QOL.crash) pointers.push({ x: QOL.crash.x, z: QOL.crash.z, color: '#ff8a4a', text: 'WRECK' });
+    }
+    function qolOnCrash() {
+      QOL.crash = { x: position.x, z: position.z, t: elapsedSeconds };
+      QOL.ap = null;
+    }
+
+
+    /* ============================================================
+       QUALITY OF LIFE — on the ground and between flights
+       · SERVICE: stop on any friendly field (the home runway and apron, the carrier deck, the
+         old strip, the far regions' airfields, any base you've taken) and the ground crew turn you
+         round: a bar fills while they rearm, repair and refuel, instead of everything snapping back.
+       · TARGET FILTER (] / [ or the chip on the weapons panel): the seeker only looks at the kind
+         of target you pick, so it stops grabbing the nearest flak gun when you want the trucks.
+       · FLIGHT SUMMARY: land and stop after a flight outside the campaign and you get a debrief —
+         time, distance, top speed and height, peak G, kills, coins and how good the landing was.
+       · RESPAWN CHOICE: after a crash pick where to come back — in the air at your last safe
+         checkpoint (the default when the timer runs out), on the runway, or on the carrier.
+       · PER-AIRCRAFT SETUP: each aircraft remembers its own paint, camera view, take-off flaps,
+         cruise speed and HUD / minimap toggles.
+       ============================================================ */
+    var QB = { svc: 0, svcNeed: 0, svcDone: false, ck: [], ckT: 0, rspOn: false, filt: 0,
+               flt: null, td: null, setup: {} };
+    var QB_FILTERS = [['all', 'ALL'], ['veh', 'VEHICLES'], ['aa', 'FLAK'], ['sam', 'SAM'], ['bldg', 'BUILDINGS'], ['ship', 'SHIPS']];
+    var QB_SETUP_KEY = 'gp-setup-v1';
+    try { QB.setup = JSON.parse(localStorage.getItem(QB_SETUP_KEY) || '{}') || {}; } catch (e) { QB.setup = {}; }
+    (function qbBuild() {
+      var st = document.createElement('style');
+      st.textContent = [
+        '#qbSvc{position:fixed;left:50%;bottom:calc(208px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:12;pointer-events:none;width:250px;padding:8px 12px 10px;border-radius:10px;background:rgba(10,16,12,.72);border:1px solid rgba(125,255,154,.45);font:800 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#cfe8d6;display:none}',
+        '#qbSvc h6{margin:0 0 6px;font:900 10.5px ui-monospace,Menlo,monospace;letter-spacing:.14em;color:#7dff9a}',
+        '#qbSvc .r{display:flex;align-items:center;gap:8px;margin-top:4px}#qbSvc .r span{width:64px}',
+        '#qbSvc .b{flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}#qbSvc .b i{display:block;height:100%;width:0;background:#7dff9a;border-radius:3px}',
+        '#qbSvc .r.f .b i{background:#ffd84a}',
+        '#qbFilt{position:fixed;z-index:12;pointer-events:auto;cursor:pointer;font:800 9.5px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#bfffd0;background:rgba(10,20,14,.7);border:1px solid rgba(125,255,154,.5);border-radius:8px;padding:4px 8px;-webkit-tap-highlight-color:transparent;user-select:none}',
+        '#qbFilt.on{color:#0c1a10;background:#7dff9a}',
+        '#qbRsp{position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:30;display:none;flex-direction:column;align-items:center;gap:8px;padding:10px 12px 12px;border-radius:12px;background:rgba(12,14,18,.82);border:1px solid rgba(255,255,255,.18)}',
+        '#qbRsp h6{margin:0;font:900 10.5px ui-monospace,Menlo,monospace;letter-spacing:.16em;color:#e8e6df}',
+        '#qbRsp .t{width:100%;height:3px;background:rgba(255,255,255,.12);border-radius:2px;overflow:hidden}#qbRsp .t i{display:block;height:100%;width:100%;background:#7dff9a;transform-origin:left}',
+        '#qbRsp .bs{display:flex;gap:8px}',
+        '#qbRsp button{min-width:96px;height:40px;border-radius:9px;border:1px solid rgba(255,255,255,.3);background:rgba(30,34,40,.85);color:#fff;font:800 10.5px ui-monospace,Menlo,monospace;letter-spacing:.08em;cursor:pointer;padding:0 10px}',
+        '#qbRsp button kbd{display:inline-block;margin-right:6px;padding:0 4px;border-radius:3px;background:rgba(255,255,255,.16);font:inherit}',
+        '#qbRsp button.def{border-color:#7dff9a;color:#bfffd0}',
+        '@media (orientation: landscape) and (max-height: 500px){#qbSvc{bottom:calc(150px + env(safe-area-inset-bottom));transform:translateX(-50%) scale(.9)}#qbRsp{bottom:calc(70px + env(safe-area-inset-bottom))}#qbRsp button{min-width:84px;height:34px}}'
+      ].join('\n');
+      document.head.appendChild(st);
+      QB.svcEl = document.createElement('div'); QB.svcEl.id = 'qbSvc';
+      QB.svcEl.innerHTML = '<h6>GROUND CREW</h6><div class="r a"><span>REARM</span><div class="b"><i></i></div></div><div class="r f"><span>FUEL</span><div class="b"><i></i></div></div>';
+      document.body.appendChild(QB.svcEl);
+      QB.svcBarA = QB.svcEl.querySelector('.r.a i'); QB.svcBarF = QB.svcEl.querySelector('.r.f i'); QB.svcLblA = QB.svcEl.querySelector('.r.a span');
+      QB.filtEl = document.createElement('div'); QB.filtEl.id = 'qbFilt'; QB.filtEl.style.display = 'none';
+      document.body.appendChild(QB.filtEl);
+      function ft(e) { e.preventDefault(); e.stopPropagation(); qbFilterCycle(1); }
+      QB.filtEl.addEventListener('touchstart', ft, { passive: false }); QB.filtEl.addEventListener('mousedown', ft);
+      QB.rspEl = document.createElement('div'); QB.rspEl.id = 'qbRsp';
+      document.body.appendChild(QB.rspEl);
+      QB.rspEl.addEventListener('click', function(e) { var b = e.target.closest('button'); if (b) qolRespawn(b.dataset.k); });
+      window.addEventListener('keydown', function(e) {
+        if (!QB.rspOn) return;
+        var k = { Digit1: 'air', Digit2: 'runway', Digit3: 'carrier' }[e.code];
+        if (k && (k !== 'carrier' || CARRIER_READY)) { e.preventDefault(); e.stopImmediatePropagation(); qolRespawn(k); }
+      }, { capture: true });
+    })();
+
+    /* ---------- service ---------- */
+    function qbOldStripAt(x, z) {
+      if (!OLD_STRIP || WAR.on) return false;        // in the campaign it's a sector: warRearmAt decides
+      var ox = x - OLD_STRIP.x, oz = z - OLD_STRIP.z;
+      return Math.abs(ox * OLD_STRIP.ux + oz * OLD_STRIP.uz) < OLD_STRIP.L / 2 + 30 && Math.abs(-ox * OLD_STRIP.uz + oz * OLD_STRIP.ux) < OLD_STRIP.W / 2 + 40;
+    }
+    // how many seconds of work the crew have: a base turn-round plus a bit per spent store / repair
+    function qbServiceWork() {
+      var w = 0;
+      ARS.stores.forEach(function(s) { if (s.spent) w += 0.6; });
+      if (pvp.ammo < PVP_GUN_AMMO || pvp.aam < (isHelicopterMode ? 2 : crAamCount())) w += 1;
+      if (pvp.hull < 100 || WRECK.dmg) w += 1.5;
+      if (samEngineKilled) w += 1.5;
+      if (flareCount < FLARE_MAX + crFlareBonus()) w += 0.5;
+      return w > 0 ? w + 1.5 : 0;
+    }
+    // called every frame you're stopped on a friendly field (in place of the instant top-up)
+    function qolService(dt) {
+      if (!QB.svcNeed) { QB.svcNeed = qbServiceWork(); QB.svc = 0; QB.svcDone = !QB.svcNeed; }
+      if (!QB.svcDone) {
+        QB.svc += dt;
+        if (QB.svc >= QB.svcNeed) {
+          QB.svcDone = true;
+          if (WRECK.dmg) wreckClearDamage();
+          samRearmAtBase();
+          samBeep(1320, 0.07, 0.1);
+        }
+      }
+      QB.svcActive = true;
+    }
+    function qbServiceHud() {
+      var fuelNeed = fuel < FUEL_MAX - 0.5;
+      var show = QB.svcActive && (!QB.svcDone || fuelNeed || QB.svcHold > 0);
+      if (QB.svcActive && (!QB.svcDone || fuelNeed)) QB.svcHold = 1.2; // linger a moment once it's all done
+      QB.svcEl.style.display = show ? 'block' : 'none';
+      if (show) {
+        var a = QB.svcNeed ? Math.min(1, QB.svc / QB.svcNeed) : 1;
+        QB.svcBarA.style.width = (a * 100).toFixed(0) + '%';
+        QB.svcLblA.textContent = QB.svcDone ? 'ARMED ✓' : 'REARM';
+        QB.svcBarF.style.width = THREE.MathUtils.clamp(fuel / FUEL_MAX * 100, 0, 100).toFixed(0) + '%';
+      }
+      if (!QB.svcActive) { QB.svcNeed = 0; QB.svc = 0; QB.svcDone = false; }
+      QB.svcActive = false;
+    }
+
+    /* ---------- target filter ---------- */
+    function qbTgtClass(t) {
+      if (t.isAA) return 'aa';
+      if (t.navy || t.kind === 'ship') return 'ship';
+      if (t === samRadar || samLaunchers.indexOf(t) >= 0 || /SAM|RADAR|LAUNCH/i.test(t.label || '')) return 'sam';
+      if (t.wheels || t.kind === 'vehicle' || t.kind === 'truck' || /TRUCK|TANK|APC|JEEP|CONVOY/i.test(t.label || '')) return 'veh';
+      return 'bldg';
+    }
+    function qolTgtOk(t) { var f = QB_FILTERS[QB.filt][0]; return f === 'all' || qbTgtClass(t) === f; }
+    function qbFilterCycle(dir) {
+      QB.filt = (QB.filt + dir + QB_FILTERS.length) % QB_FILTERS.length;
+      var L = ARS.lock; L.cand = null; L.prog = 0; L.forced = null;
+      L.locked = L.locked.filter(qolTgtOk);
+      samBeep(1000 + QB.filt * 80, 0.05, 0.08);
+      samToast('SEEKER · ' + QB_FILTERS[QB.filt][1], '#bfffd0', 1.2);
+    }
+    function qbFilterHud() {
+      var cur = ARS_W[arsCur()], show = started && !crashing && !ejecting && cur && cur.seek && !arsPanel.classList.contains('hidden') && !kj.photoOn && !document.body.classList.contains('gp-nohud');
+      QB.filtEl.style.display = show ? '' : 'none';
+      if (!show) return;
+      var txt = 'TGT ▸ ' + QB_FILTERS[QB.filt][1];
+      if (txt !== QB.filtTxt) { QB.filtTxt = txt; QB.filtEl.textContent = txt; QB.filtEl.classList.toggle('on', QB.filt > 0); }
+      // ride just above the weapons panel, wherever the layout put it
+      var r = arsPanel.getBoundingClientRect();
+      var k = Math.round(r.left) + ',' + Math.round(r.top);
+      if (k !== QB.filtPos) { QB.filtPos = k; QB.filtEl.style.left = Math.round(r.right - 2) + 'px'; QB.filtEl.style.top = Math.round(r.top - 24) + 'px'; QB.filtEl.style.transform = 'translateX(-100%)'; }
+    }
+
+    /* ---------- free-flight summary ---------- */
+    function qolOnTouchdown(vs) {
+      var lat = null;
+      if (isOverRunway(position.x, position.z, 0)) lat = Math.abs(position.x - RUNWAY_CENTER_X);
+      QB.td = { vs: -vs, lat: lat, carrier: isOverCarrierDeck(position.x, position.z) };
+      if (QB.flt) QB.flt.landings++;
+    }
+    function qolOnKill(t, quiet, byName) { if (QB.flt && !byName) QB.flt.kills++; }
+    function qbFlightTick(dt) {
+      if (!started || isCarMode || WAR.on) { QB.flt = null; return; }
+      if (crashing || ejecting) { QB.flt = null; return; }
+      if (!QB.flt && !wasGrounded && speed > STALL_SPEED) QB.flt = { t: 0, dist: 0, vmax: 0, hmax: 0, gmax: 1, kills: 0, coins0: coins, landings: 0, plane: selectedPlaneType };
+      var F = QB.flt;
+      if (!F) return;
+      F.t += dt; F.dist += speed * dt;
+      F.vmax = Math.max(F.vmax, speed);
+      F.hmax = Math.max(F.hmax, position.y - WATER_LEVEL);
+      F.gmax = Math.max(F.gmax, gForceSmoothed || 1);
+    }
+    // called once you're stopped on a friendly field
+    function qbFlightSummary() {
+      var F = QB.flt;
+      if (!F || !wasGrounded || speed > 1.5 || F.t < 40 || F.landings < 1) return;
+      QB.flt = null;
+      if (gpSet.debrief === false) return;
+      var td = QB.td || { vs: 0 }, v = td.vs;
+      var grade = v < 1.5 ? ['BUTTER', '#7dff9a'] : v < 3.5 ? ['SMOOTH', '#9fe0ff'] : v < 7 ? ['FIRM', '#ffd84a'] : ['HARD', '#ff8a4a'];
+      var kmh = function(ms) { return Math.round(ms * 3.6) + ' km/h'; };
+      var rows = [['FLIGHT TIME', Math.floor(F.t / 60) + ':' + String(Math.floor(F.t % 60)).padStart(2, '0')], ['DISTANCE', mapFmtDist(F.dist)], ['TOP SPEED', kmh(F.vmax)],
+                  ['MAX ALTITUDE', Math.round(F.hmax) + ' m'], ['PEAK G', F.gmax.toFixed(1) + ' G'], ['KILLS', F.kills], ['EARNED', '◆' + Math.max(0, coins - F.coins0).toLocaleString()],
+                  ['TOUCHDOWN', '<span style="color:' + grade[1] + '">' + grade[0] + '</span> · ' + v.toFixed(1) + ' m/s' + (td.lat != null ? ' · ' + td.lat.toFixed(0) + ' m off c/l' : td.carrier ? ' · deck' : '')]];
+      crDebriefEl.innerHTML = '<div class="crc ok"><h4>' + (PLANE_TYPES[F.plane] && PLANE_TYPES[F.plane].name ? PLANE_TYPES[F.plane].name.toUpperCase() : 'FLIGHT') + '</h4><h2>FLIGHT SUMMARY</h2>' +
+        '<p>Down and stopped. The ground crew are turning you round.</p>' +
+        '<div class="crg">' + rows.map(function(r) { return '<div><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div>' +
+        '<button type="button" class="crgo">Continue</button></div>';
+      crDebriefEl.classList.add('on');
+      kj.paused = true;
+      Object.keys(keys).forEach(function(k) { keys[k] = false; });
+    }
+
+    /* ---------- respawn choice ---------- */
+    function qbCheckpointTick(dt) {
+      if ((QB.ckT -= dt) > 0) return;
+      QB.ckT = 3;
+      if (!started || crashing || ejecting || wasGrounded || isCarMode || stalled) return;
+      var agl = position.y - Math.max(getEffectiveGroundHeight(position.x, position.z), WATER_LEVEL);
+      if (agl < 100 || Math.abs(rollAngle) > 0.9 || speed < STALL_SPEED * 1.3) return;
+      QB.ck.push({ x: position.x, y: position.y, z: position.z, h: heading, t: elapsedSeconds });
+      if (QB.ck.length > 8) QB.ck.shift();
+    }
+    function qbCheckpoint() {
+      // the newest one from at least eight seconds before things went wrong
+      var crashT = QOL.crash ? QOL.crash.t : elapsedSeconds;
+      for (var i = QB.ck.length - 1; i >= 0; i--) if (QB.ck[i].t <= crashT - 8) return QB.ck[i];
+      return QB.ck[0] || null;
+    }
+    function qolRspShow(ms) {
+      QB.rspOn = true;
+      var cv = CARRIER_READY && !isCarMode;
+      QB.rspEl.innerHTML = '<h6>RESPAWN</h6><div class="t"><i></i></div><div class="bs">' +
+        '<button type="button" class="def" data-k="air"><kbd>1</kbd>IN THE AIR</button>' +
+        '<button type="button" data-k="runway"><kbd>2</kbd>RUNWAY</button>' +
+        (cv ? '<button type="button" data-k="carrier"><kbd>3</kbd>CARRIER</button>' : '') + '</div>';
+      QB.rspEl.style.display = 'flex';
+      var bar = QB.rspEl.querySelector('.t i');
+      bar.style.transition = 'none'; bar.style.transform = 'scaleX(1)';
+      void bar.offsetWidth;
+      bar.style.transition = 'transform ' + (ms / 1000).toFixed(2) + 's linear'; bar.style.transform = 'scaleX(0)';
+    }
+    function qbRspHide() { if (!QB.rspOn) return; QB.rspOn = false; QB.rspEl.style.display = 'none'; }
+    function qolRespawn(kind) {
+      if (!started) return;
+      qbRspHide();
+      if (kind === 'runway') { respawnCleanSlate(); spawnAt(RUNWAY_CENTER_X, RUNWAY_CENTER_Z + RUNWAY_HALF_LENGTH - 15); samOnPlayerReset(); samToast('⟲ RESPAWNED AT THE AIRFIELD', '#7dff8a', 1.6); return; }
+      if (kind === 'carrier' && CARRIER_READY) { respawnCleanSlate(); applySelectedPlaneType(); carrierSpawn(); samOnPlayerReset(); samToast('⟲ RESPAWNED ON THE CARRIER', '#7dff8a', 1.6); return; }
+      if (!crashing) return;
+      var ck = qbCheckpoint();
+      if (ck) { position.set(ck.x, ck.y, ck.z); heading = ck.h; }
+      resetAfterCrash();
+      if (ck) {
+        position.y = Math.max(ck.y, position.y);
+        plane.position.copy(position);
+        camPos.copy(position).add(camOffset); camera.position.copy(camPos);
+        samToast('⟲ BACK AT YOUR LAST CHECKPOINT', '#7dff8a', 1.6);
+      }
+    }
+
+    /* ---------- per-aircraft setup ---------- */
+    function qbSetupSave() { try { localStorage.setItem(QB_SETUP_KEY, JSON.stringify(QB.setup)); } catch (e) {} }
+    function qbSetup(type) { type = type || selectedPlaneType; return QB.setup[type] || (QB.setup[type] = {}); }
+    function qolSetupNote(k, v) { if (typeof QB === 'undefined' || !QB || !QB.setup) return; qbSetup()[k] = v; qbSetupSave(); }
+    // before the aircraft's model is built: its paint
+    function qolSetupPre(type) {
+      var s = QB.setup[type];
+      if (s && s.livery && LIVERIES[s.livery] && ownedLiveries[s.livery]) selectedLivery = s.livery;
+    }
+    // once it's spawned: camera view, take-off flaps, HUD and minimap
+    function qolSetupSpawn() {
+      var s = QB.setup[selectedPlaneType];
+      if (!s) return;
+      if (typeof s.cockpit === 'boolean' && s.cockpit !== cockpitView) { cockpitView = s.cockpit; ckBtn.classList.toggle('active', cockpitView); }
+      if (s.flaps && !isHelicopterMode && !isCarMode && !isStealthMode) setFlaps(true);
+      var vchg = false;
+      ['hud', 'map'].forEach(function(k) { if (typeof s[k] === 'boolean' && gpSet[k] !== s[k]) { gpSet[k] = s[k]; vchg = true; } });
+      if (vchg) { gpApplyView(); gpSave(); }
+    }
+    // engaging cruise picks up this aircraft's saved cruise speed; leaving it stores the one you flew
+    function qolCruiseHook(on) {
+      var s = qbSetup();
+      if (on && s.cruise && Math.abs(throttle - s.cruise) > 1 && s.cruise <= MAX_SPEED) {
+        throttle = s.cruise;
+        if (throttleSlider) throttleSlider.value = Math.round(throttle * 3.6);
+        samToast('CRUISE · ' + Math.round(throttle * 3.6) + ' km/h', '#9fe0ff', 1.4);
+      } else if (!on && throttle > STALL_SPEED) { s.cruise = throttle; qbSetupSave(); }
+    }
+
+    function qolbUpdate(dt) {
+      qbServiceHud();
+      qbFilterHud();
+      qbCheckpointTick(dt);
+      qbFlightTick(dt);
+      if (QB.rspOn && (!crashing || ejecting)) qbRspHide();
+    }
+
+
+    /* ============================================================
+       QUALITY OF LIFE — controls, accessibility, performance, photo mode
+       · CONTROLS (Settings › Controls): stick sensitivity, a dead zone for the touch stick and
+         gamepads, invert roll, and a gamepad layout. Any standard controller works: left stick
+         flies (right stick on SOUTHPAW), triggers are throttle, A boost, B flares, X fire, Y gun,
+         bumpers barrel-roll, the d-pad runs cruise / flaps / next target / autopilot, BACK opens
+         the chart, START pauses — and in the menus the d-pad and A / B move, pick and go back.
+       · ACCESSIBILITY (Settings › Camera & HUD): a colour-blind correction for protanopia,
+         deuteranopia or tritanopia, HUD size, reduced flashing, and subtitles for the voice
+         callouts and sound-only cues.
+       · PERFORMANCE: the first time the game runs on a low-powered device it picks a lighter
+         graphics preset and says so; if the frame rate stays low in flight it offers to drop it.
+       · PHOTO MODE: a free camera you can fly anywhere (speed with [ / ] or the wheel), depth of
+         field that keeps the aircraft sharp and softens the rest, and a hide-aircraft switch.
+       ============================================================ */
+    var QC = { gp: null, gpOn: false, p: 0, r: 0, thr: 0, prevB: [], manP: false, manR: false, fpsT: 0, fpsN: 0, fpsAcc: 0, lowWin: 0, perfAsked: false,
+               free: false, fpos: new THREE.Vector3(), fyaw: 0, fpitch: 0, fspd: 20, dof: 0, hide: false };
+    var QC_PAD = {
+      // button index (standard mapping) → key code it presses, or a function
+      0: 'Space', 1: 'KeyG', 2: 'KeyM', 3: 'KeyJ', 4: 'KeyQ', 5: 'KeyE', 9: 'Escape', 11: 'KeyP',
+      12: 'KeyC', 13: 'KeyF', 14: 'KeyT',
+      8: function() { if (started) setMiniMapExpanded(!miniMapExpanded); },
+      10: function() { if (started && ARS.weapons.length > 1) arsSelect((ARS.sel + 1) % ARS.weapons.length); },
+      15: function() { if (started) qolApCycle(); }
+    };
+    (function qcBuild() {
+      var st = document.createElement('style');
+      st.textContent = [
+        '#qcSub{position:fixed;left:50%;bottom:calc(64px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:40;pointer-events:none;max-width:80vw;text-align:center;font:700 14px/1.35 ui-monospace,Menlo,monospace;letter-spacing:.04em;color:#fff;background:rgba(0,0,0,.72);border-radius:6px;padding:4px 10px;display:none}',
+        '#qcPerf{position:fixed;left:50%;top:calc(110px + env(safe-area-inset-top));transform:translateX(-50%);z-index:45;display:none;align-items:center;gap:10px;padding:8px 10px 8px 14px;border-radius:12px;background:rgba(14,16,20,.9);border:1px solid rgba(255,200,80,.5);color:#f2efe6;font:700 11px ui-monospace,Menlo,monospace;letter-spacing:.04em}',
+        '#qcPerf button{height:28px;border-radius:7px;border:1px solid rgba(255,255,255,.3);background:rgba(40,44,50,.9);color:#fff;font:800 10px ui-monospace,Menlo,monospace;letter-spacing:.06em;padding:0 10px;cursor:pointer}',
+        '#qcPerf button.go{border-color:#ffd84a;color:#ffe9a0}',
+        /* the HUD read-outs scale together */
+        '#hud,#miniMapWrap:not(.expanded),#arsPanel,#qolIls,#qolAp,#qolWarn,#aarPanel,#rwrPanel{zoom:var(--qcHud,1)}',
+        /* reduced flashing: blinking warnings hold steady */
+        'body.qcNoFlash #rwrPanel.rwr-launch #rwrText,body.qcNoFlash #kjRing,body.qcNoFlash #kjBtns button.ring,body.qcNoFlash .kjGlitch,body.qcNoFlash #qolWarn.blink,body.qcNoFlash #kjShout .w.on{animation:none!important}',
+        'body.qcNoFlash #gForceFlash{display:none}',
+        /* photo mode extras */
+        '#kjPhoto .row2{margin-top:8px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}',
+        '#kjPhoto .row2 button.on{background:rgba(125,255,154,.25);border-color:#7dff9a;color:#d9ffe0}'
+      ].join('\n');
+      document.head.appendChild(st);
+      // colour-blind correction (daltonise): simulate the missing cone, push the lost contrast into
+      // the channels that are still seen. Applied to the whole page from the root element.
+      var sims = {
+        prot: [[0.567, 0.433, 0], [0.558, 0.442, 0], [0, 0.242, 0.758]],
+        deut: [[0.625, 0.375, 0], [0.7, 0.3, 0], [0, 0.3, 0.7]],
+        trit: [[0.95, 0.05, 0], [0, 0.433, 0.567], [0, 0.475, 0.525]]
+      };
+      var E = [[0, 0, 0], [0.7, 1, 0], [0.7, 0, 1]], svg = '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute;width:0;height:0" aria-hidden="true"><defs>';
+      Object.keys(sims).forEach(function(k) {
+        var S = sims[k], M = [];
+        for (var i = 0; i < 3; i++) for (var j = 0; j < 3; j++) {
+          var v = (i === j ? 1 : 0);
+          for (var t = 0; t < 3; t++) v += E[i][t] * ((t === j ? 1 : 0) - S[t][j]);
+          M.push(v);
+        }
+        svg += '<filter id="qcCb-' + k + '" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="' +
+          [M[0], M[1], M[2], 0, 0, M[3], M[4], M[5], 0, 0, M[6], M[7], M[8], 0, 0, 0, 0, 0, 1, 0].map(function(x) { return +x.toFixed(4); }).join(' ') + '"/></filter>';
+      });
+      var holder = document.createElement('div'); holder.innerHTML = svg + '</defs></svg>';
+      document.body.appendChild(holder.firstChild);
+      QC.subEl = document.createElement('div'); QC.subEl.id = 'qcSub'; document.body.appendChild(QC.subEl);
+      QC.perfEl = document.createElement('div'); QC.perfEl.id = 'qcPerf'; document.body.appendChild(QC.perfEl);
+      QC.perfEl.addEventListener('click', function(e) {
+        var a = e.target.dataset && e.target.dataset.a; if (!a) return;
+        QC.perfEl.style.display = 'none';
+        if (a === 'low') { gpChange('quality', QC.perfTo); samToast('GRAPHICS · ' + QC.perfTo.toUpperCase(), '#ffd84a', 2); }
+        else { try { localStorage.setItem('gp-perf-v1', 'keep'); } catch (er) {} }
+      });
+      window.addEventListener('gamepadconnected', function(e) {
+        QC.gpOn = true;
+        samToast('🎮 CONTROLLER CONNECTED', '#9fe0ff', 2);
+        if (!QC.loop) { QC.loop = true; requestAnimationFrame(qcPoll); }
+      });
+      window.addEventListener('gamepaddisconnected', function() { QC.gpOn = false; QC.p = QC.r = QC.thr = 0; samToast('CONTROLLER DISCONNECTED', '#9fe0ff', 1.6); });
+    })();
+
+    /* ---------- input shaping ---------- */
+    function qcDead(v) { var dz = (gpSet.deadzone || 0) / 100; var a = Math.abs(v); return a <= dz ? 0 : Math.sign(v) * (a - dz) / (1 - dz); }
+    // applied to whatever's flying the aircraft (keys, touch stick or a pad) before the autopilots look
+    function qcShape(p, r, analog) {
+      if (analog) { p = qcDead(p); r = qcDead(r); }
+      var k = (gpSet.sens || 100) / 100;
+      p = THREE.MathUtils.clamp(p * k, -1, 1); r = THREE.MathUtils.clamp(r * k, -1, 1);
+      if (gpSet.invertRoll) r = -r;
+      return { p: p, r: r };
+    }
+
+    /* ---------- gamepad ---------- */
+    function qcKey(code, down) {
+      var ev = new KeyboardEvent(down ? 'keydown' : 'keyup', { code: code, key: code === 'Escape' ? 'Escape' : code === 'Enter' ? 'Enter' : code === 'Space' ? ' ' : code, bubbles: true, cancelable: true });
+      (document.activeElement || document.body).dispatchEvent(ev);
+    }
+    // in a menu, the d-pad walks the buttons on screen and A presses the focused one
+    function qcMenuRoot() {
+      if (typeof gpPaused !== 'undefined' && gpPaused) return gpMenuEl.querySelector('.gpm-page.on') || gpMenuEl;
+      if (crDebriefEl.classList.contains('on')) return crDebriefEl;
+      if (typeof MS !== 'undefined' && MS.boardOpen) return document.getElementById('warBoard');
+      if (!started) return document.getElementById('startScreen');
+      return null;
+    }
+    function qcMenuMove(dir) {
+      var root = qcMenuRoot(); if (!root) return;
+      var els = Array.prototype.filter.call(root.querySelectorAll('button, [role="tab"], input, [tabindex="0"]'), function(el) { return !el.disabled && el.offsetParent !== null; });
+      if (!els.length) return;
+      var i = els.indexOf(document.activeElement);
+      var n = els[(i + dir + els.length) % els.length] || els[0];
+      n.focus({ preventScroll: false });
+    }
+    function qcPoll() {
+      if (!QC.gpOn) { QC.loop = false; return; }
+      requestAnimationFrame(qcPoll);
+      var pads = navigator.getGamepads ? navigator.getGamepads() : [], g = null;
+      for (var i = 0; i < pads.length; i++) if (pads[i] && pads[i].connected) { g = pads[i]; break; }
+      if (!g) return;
+      var ax = g.axes, south = gpSet.padLayout === 'southpaw';
+      var fx = ax[south ? 2 : 0] || 0, fy = ax[south ? 3 : 1] || 0;
+      // pushing the stick forward dives, like every flight game (invert pitch flips it)
+      QC.r = fx; QC.p = (gpSet.invertY ? -1 : 1) * fy;
+      QC.manP = Math.abs(qcDead(QC.p)) > 0.05; QC.manR = Math.abs(qcDead(QC.r)) > 0.05;
+      var B = g.buttons, prev = QC.prevB, menu = !!qcMenuRoot();
+      function pressed(k) { return B[k] && (B[k].pressed || B[k].value > 0.4); }
+      // throttle: the triggers, or the other stick's vertical on southpaw
+      var up = pressed(7), dn = pressed(6);
+      if (south) { var ty = ax[1] || 0; up = up || ty < -0.4; dn = dn || ty > 0.4; }
+      if (up !== !!prev.up) qcKey('Equal', up);
+      if (dn !== !!prev.dn) qcKey('Minus', dn);
+      var now = {};
+      for (var b = 0; b < 16; b++) {
+        var on = pressed(b), was = !!prev[b];
+        now[b] = on;
+        if (on === was) continue;
+        if (menu) {
+          if (!on) continue;
+          if (b === 12 || b === 14) qcMenuMove(-1);
+          else if (b === 13 || b === 15) qcMenuMove(1);
+          else if (b === 0 && document.activeElement && document.activeElement !== document.body) document.activeElement.click();
+          else if (b === 1 || b === 9) { if (crDebriefEl.classList.contains('on')) { var c = crDebriefEl.querySelector('.crgo'); if (c) c.click(); } else qcKey('Escape', true); }
+          continue;
+        }
+        var m = QC_PAD[b];
+        if (typeof m === 'function') { if (on) m(); }
+        else if (m) qcKey(m, on);
+      }
+      now.up = up; now.dn = dn;
+      QC.prevB = now;
+    }
+    // pitch / roll from the pad, if it's being used; null otherwise
+    function qcStick() {
+      if (!QC.gpOn || (!QC.manP && !QC.manR)) return null;
+      return { p: QC.p, r: QC.r };
+    }
+
+    /* ---------- accessibility ---------- */
+    function qcApplyAccess() {
+      var cb = gpSet.cbMode && gpSet.cbMode !== 'off' ? 'url(#qcCb-' + gpSet.cbMode + ')' : '';
+      if (document.documentElement.style.filter !== cb) document.documentElement.style.filter = cb;
+      document.documentElement.style.setProperty('--qcHud', ((gpSet.hudScale || 100) / 100).toFixed(2));
+      document.body.classList.toggle('qcNoFlash', !!gpSet.noFlash);
+    }
+    function qcCaption(text, secs) {
+      if (!gpSet.subs) return;
+      QC.subEl.textContent = text;
+      QC.subEl.style.display = 'block';
+      clearTimeout(QC.subT);
+      QC.subT = setTimeout(function() { QC.subEl.style.display = 'none'; }, (secs || 2) * 1000);
+    }
+
+    /* ---------- performance ---------- */
+    // first run on this device: pick a lighter preset for weak hardware, and say so
+    function qcPerfFirstRun() {
+      var fresh = false;
+      try { fresh = !localStorage.getItem(GP_SET_KEY) && !localStorage.getItem('gp-perf-v1'); } catch (e) {}
+      if (!fresh || navigator.webdriver) return;
+      try { localStorage.setItem('gp-perf-v1', 'picked'); } catch (e) {}
+      var gpu = '';
+      try { var gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info'); if (ext) gpu = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)); } catch (e) {}
+      var mem = navigator.deviceMemory || 8, cores = navigator.hardwareConcurrency || 8, pick = null;
+      if (/swiftshader|llvmpipe|software|mali-[4t]|adreno \(tm\) [3-5]\d\d|powervr|intel.*hd graphics [2-5]\d{2,3}\b/i.test(gpu) || mem <= 2 || cores <= 2) pick = 'low';
+      else if (GFX_IS_TOUCH && (mem <= 4 || cores <= 4)) pick = 'medium';
+      if (!pick) return;
+      gpChange('quality', pick);
+      QC.firstNote = 'GRAPHICS SET TO ' + pick.toUpperCase() + ' FOR THIS DEVICE · CHANGE IT IN SETTINGS';
+    }
+    function qcPerfTick() {
+      var now = performance.now(), ms = now - (QC.fpsLast || now);
+      QC.fpsLast = now;
+      if (QC.firstNote && started) { samToast(QC.firstNote, '#ffd84a', 4); QC.firstNote = null; }
+      if (!started || kj.paused || gpPaused || ms > 250 || ms <= 0) return;
+      QC.fpsAcc += ms; QC.fpsN++;
+      if (QC.fpsAcc < 8000) return;
+      var fps = 1000 * QC.fpsN / QC.fpsAcc;
+      QC.fpsAcc = 0; QC.fpsN = 0;
+      if (fps < 28) QC.lowWin++; else QC.lowWin = 0;
+      if (QC.lowWin < 2 || QC.perfAsked || gpSet.quality === 'low') return;
+      try { if (localStorage.getItem('gp-perf-v1') === 'keep') return; } catch (e) {}
+      QC.perfAsked = true;
+      QC.perfTo = gpSet.quality === 'ultra' ? 'high' : gpSet.quality === 'high' ? 'medium' : 'low';
+      QC.perfEl.innerHTML = '<span>Running at ' + Math.round(fps) + ' fps.</span><button type="button" class="go" data-a="low">Switch to ' + QC.perfTo.toUpperCase() + '</button><button type="button" data-a="keep">Keep</button>';
+      QC.perfEl.style.display = 'flex';
+      setTimeout(function() { QC.perfEl.style.display = 'none'; }, 15000);
+    }
+
+    /* ---------- photo mode ---------- */
+    function qcPhotoUi() {
+      var row = document.createElement('div'); row.className = 'row row2';
+      row.innerHTML = '<button id="qcPhFree">FREE CAM (C)</button><button id="qcPhDof">DEPTH OF FIELD (G)</button><button id="qcPhHide">HIDE AIRCRAFT (H)</button>';
+      kjPhotoEl.appendChild(row);
+      document.getElementById('qcPhFree').addEventListener('click', function() { qcPhotoKey('KeyC', true); });
+      document.getElementById('qcPhDof').addEventListener('click', function() { qcPhotoKey('KeyG', true); });
+      document.getElementById('qcPhHide').addEventListener('click', function() { qcPhotoKey('KeyH', true); });
+      qcPhotoSync();
+    }
+    function qcPhotoSync() {
+      var f = document.getElementById('qcPhFree'); if (!f) return;
+      f.classList.toggle('on', QC.free); f.textContent = QC.free ? 'FREE CAM · ' + Math.round(QC.fspd) + ' m/s ([ ])' : 'FREE CAM (C)';
+      var d = document.getElementById('qcPhDof'); d.classList.toggle('on', QC.dof > 0); d.textContent = 'DEPTH OF FIELD (G)' + (QC.dof ? ' · ' + (QC.dof > 0.6 ? 'STRONG' : 'SOFT') : '');
+      document.getElementById('qcPhHide').classList.toggle('on', QC.hide);
+      var hint = kjPhotoEl.firstChild, fl = document.getElementById('kjPhF');
+      if (hint && fl) hint.innerHTML = '<b>PHOTO MODE</b> · ' + (QC.free ? 'arrows fly · Q / E down / up · drag to look · [ ] or wheel for speed' : 'drag / arrows to orbit · wheel or ± to zoom') + ' · <b id="kjPhF">' + fl.textContent + '</b>';
+    }
+    function qcPhotoKey(c, down) {
+      if (!down) {
+        if (c === 'KeyQ') kjPh.keys.sink = false;
+        if (c === 'KeyE') kjPh.keys.rise = false;
+        return c === 'KeyC' || c === 'KeyG' || c === 'KeyH' || c === 'BracketLeft' || c === 'BracketRight' || c === 'KeyQ' || c === 'KeyE';
+      }
+      if (c === 'KeyC') {
+        QC.free = !QC.free;
+        if (QC.free) {
+          QC.fpos.copy(camera.position);
+          var dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+          QC.fyaw = Math.atan2(dir.x, dir.z); QC.fpitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+        }
+      } else if (c === 'KeyG') QC.dof = QC.dof === 0 ? 0.5 : QC.dof < 0.6 ? 1 : 0;
+      else if (c === 'KeyH') { QC.hide = !QC.hide; plane.visible = !QC.hide; }
+      else if (c === 'BracketRight') QC.fspd = Math.min(400, QC.fspd * 2);
+      else if (c === 'BracketLeft') QC.fspd = Math.max(2, QC.fspd / 2);
+      else if (c === 'KeyQ' || c === 'KeyE') { kjPh.keys[c === 'KeyE' ? 'rise' : 'sink'] = true; return true; }
+      else return false;
+      qcPhotoSync();
+      return true;
+    }
+    // returns true when it has placed the camera itself (free cam)
+    function qcPhotoTick(rdt) {
+      var cu = gfxPost && gfxPost.compMat.uniforms;
+      if (cu && cu.dof) {
+        cu.dof.value = QC.dof;
+        if (QC.dof) {
+          // the aircraft (or the middle of the frame) stays sharp; the further off it, the softer
+          var p = new THREE.Vector3().copy(position).project(camera), sharpR;
+          var fx = 0.5, fy = 0.5;
+          if (!QC.hide && p.z < 1 && Math.abs(p.x) < 1.2 && Math.abs(p.y) < 1.2) { fx = p.x * 0.5 + 0.5; fy = p.y * 0.5 + 0.5; }
+          sharpR = THREE.MathUtils.clamp(6 / Math.max(3, camera.position.distanceTo(position)), 0.05, 0.35);
+          cu.dofUV.value.set(fx, fy); cu.dofR.value = QC.hide ? 0.12 : sharpR;
+        }
+      }
+      if (!QC.free) return false;
+      var k = kjPh.keys, s = QC.fspd * rdt;
+      var fwd = new THREE.Vector3(Math.sin(QC.fyaw) * Math.cos(QC.fpitch), Math.sin(QC.fpitch), Math.cos(QC.fyaw) * Math.cos(QC.fpitch));
+      var right = new THREE.Vector3(-Math.cos(QC.fyaw), 0, Math.sin(QC.fyaw));
+      if (k.up) QC.fpos.addScaledVector(fwd, s);
+      if (k.down) QC.fpos.addScaledVector(fwd, -s);
+      if (k.right) QC.fpos.addScaledVector(right, s);
+      if (k.left) QC.fpos.addScaledVector(right, -s);
+      if (k.zin || k.rise) QC.fpos.y += s;
+      if (k.zout || k.sink) QC.fpos.y -= s;
+      var gy = getEffectiveGroundHeight(QC.fpos.x, QC.fpos.z) + 1;
+      if (QC.fpos.y < gy) QC.fpos.y = gy;
+      camera.position.copy(QC.fpos);
+      camera.up.set(0, 1, 0);
+      camera.lookAt(QC.fpos.x + fwd.x, QC.fpos.y + fwd.y, QC.fpos.z + fwd.z);
+      return true;
+    }
+    function qcPhotoDrag(dx, dy) {
+      if (!QC.free) return false;
+      QC.fyaw -= dx * 0.004;
+      QC.fpitch = THREE.MathUtils.clamp(QC.fpitch - dy * 0.004, -1.45, 1.45);
+      return true;
+    }
+    function qcPhotoExit() {
+      QC.free = false;
+      if (QC.hide) { QC.hide = false; plane.visible = true; }
+      var cu = gfxPost && gfxPost.compMat.uniforms;
+      if (cu && cu.dof) cu.dof.value = 0;
+      kjPh.keys.rise = kjPh.keys.sink = false;
+      qcPhotoSync();
+    }
+
+    function qolcUpdate(dt) {
+      if (!QC.init) { QC.init = true; qcPerfFirstRun(); qcPhotoUi(); }
+      qcPerfTick();
+    }
+
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
        After an ejection, once the pilot is on the ground you can fly a
@@ -25665,6 +26708,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function kjPhotoToggle() {
       if (kj.photoOn) {
         kj.photoOn = false; kj.paused = kj.codecOpen;
+        qcPhotoExit();
         document.body.classList.remove('kj-photo');
         renderer.domElement.style.filter = '';
         return;
@@ -25683,6 +26727,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       document.getElementById('kjPhF').textContent = 'FILTER: ' + KJ_FILTERS[kjPh.f][0];
     }
     function kjPhotoTick(rdt) {
+      if (qcPhotoTick(rdt)) return;
       var k = kjPh.keys, sp = 1.6 * rdt;
       if (k.left) kjPh.yaw -= sp; if (k.right) kjPh.yaw += sp;
       if (k.up) kjPh.pitch = Math.min(1.45, kjPh.pitch + sp * 0.7); if (k.down) kjPh.pitch = Math.max(-0.3, kjPh.pitch - sp * 0.7);
@@ -25731,12 +26776,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     renderer.domElement.addEventListener('pointerdown', function(e) { if (kj.photoOn) kjPh.drag = { x: e.clientX, y: e.clientY }; });
     window.addEventListener('pointermove', function(e) {
       if (!kj.photoOn || !kjPh.drag) return;
+      if (qcPhotoDrag(e.clientX - kjPh.drag.x, e.clientY - kjPh.drag.y)) { kjPh.drag = { x: e.clientX, y: e.clientY }; return; }
       kjPh.yaw -= (e.clientX - kjPh.drag.x) * 0.006;
       kjPh.pitch = THREE.MathUtils.clamp(kjPh.pitch + (e.clientY - kjPh.drag.y) * 0.005, -0.3, 1.45);
       kjPh.drag = { x: e.clientX, y: e.clientY };
     });
     window.addEventListener('pointerup', function() { kjPh.drag = null; });
-    window.addEventListener('wheel', function(e) { if (kj.photoOn) kjPh.dist = THREE.MathUtils.clamp(kjPh.dist * (e.deltaY > 0 ? 1.1 : 0.9), 3, 120); }, { passive: true });
+    window.addEventListener('wheel', function(e) {
+      if (!kj.photoOn) return;
+      if (QC.free) { QC.fspd = THREE.MathUtils.clamp(QC.fspd * (e.deltaY > 0 ? 0.8 : 1.25), 2, 400); qcPhotoSync(); }
+      else kjPh.dist = THREE.MathUtils.clamp(kjPh.dist * (e.deltaY > 0 ? 1.1 : 0.9), 3, 120);
+    }, { passive: true });
 
     /* ---------- the loop ---------- */
     // real-time part: runs every frame even while paused (codec, photo mode, reflex timing)
@@ -25861,6 +26911,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         return true;
       }
       if (kj.photoOn) {
+        if (qcPhotoKey(c, down)) return true;
         var map = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', Equal: 'zin', NumpadAdd: 'zin', Minus: 'zout', NumpadSubtract: 'zout' };
         if (map[c]) { kjPh.keys[map[c]] = down; return true; }
         if (!down) return true;
@@ -26991,6 +28042,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function selectPlaneType(type) {
       selectedPlaneType = type;
       planeOptBtns.forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-plane') === type); });
+      qolSetupPre(type);
       applySelectedPlaneType();
       planePreview.refreshModel();
       renderLiveryRow(); // stock swatch color reflects whichever plane is now selected
@@ -27034,6 +28086,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           b.classList.toggle('active', b.getAttribute('data-plane') === selectedPlaneType);
         });
         respawnCleanSlate();     // works mid-ejection or mid-crash too, not just once you've landed
+        qolSetupPre(selectedPlaneType);
         applySelectedPlaneType();
         renderLiveryRow();
         spawnAt(RUNWAY_CENTER_X, RUNWAY_CENTER_Z + RUNWAY_HALF_LENGTH - 15);
@@ -27089,6 +28142,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       window.storage.set('glidepath-owned-liveries', JSON.stringify(ownedLiveries)).catch(function() {});
     }
     function saveSelectedLivery() {
+      qolSetupNote('livery', selectedLivery);
       if (!window.storage) return;
       window.storage.set('glidepath-selected-livery', selectedLivery).catch(function() {});
     }
@@ -27324,7 +28378,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       quality: 'auto', res: 100, shadows: 'high', refl: 'high', forest: 'high', post: true, grain: true, fps: false,
       vol: 100, volEngine: 100, volFx: 100, volMusic: 100, mute: false,
       invertY: false, touchSens: 100, autoPause: true,
-      fov: 60, shake: 100, hud: true, map: true
+      fov: 60, shake: 100, hud: true, map: true, debrief: true,
+      sens: 100, deadzone: 8, invertRoll: false, padLayout: 'modern', cbMode: 'off', hudScale: 100, noFlash: false, subs: false, voice: true
     };
     var GP_QUALITY = {
       low:    { res: 70,  shadows: 'off',   refl: 'off',   forest: 'low' },
@@ -27335,8 +28390,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var GP_TABS = {
       graphics: ['quality', 'res', 'shadows', 'refl', 'forest', 'post', 'grain', 'fps'],
       audio: ['mute', 'vol', 'volEngine', 'volFx', 'volMusic'],
-      controls: ['invertY', 'touchSens', 'autoPause'],
-      camera: ['fov', 'shake', 'hud', 'map']
+      controls: ['invertY', 'invertRoll', 'sens', 'deadzone', 'touchSens', 'padLayout', 'autoPause'],
+      camera: ['fov', 'shake', 'hud', 'map', 'debrief', 'cbMode', 'hudScale', 'noFlash', 'subs', 'voice']
     };
     var gpSet = (function() {
       var s = null;
@@ -27429,6 +28484,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       document.body.classList.toggle('gp-nohud', !gpSet.hud);
       document.body.classList.toggle('gp-nomap', !gpSet.map);
       gpFpsEl.classList.toggle('hidden', !gpSet.fps);
+      qcApplyAccess();
     }
 
     /* ---------- setting rows ---------- */
@@ -27452,7 +28508,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       fov: { t: 'range', label: 'Field of view', help: 'Chase camera; the cockpit view widens with it', min: 45, max: 90, step: 1, fmt: function(v) { return v + '°'; } },
       shake: { t: 'range', label: 'Camera shake', help: 'Turbulence, G-forces, explosions and crashes', min: 0, max: 150, step: 5, fmt: function(v) { return v + '%'; } },
       hud: { t: 'switch', label: 'Show HUD', help: 'Gauges, status pills and warnings. Touch controls stay' },
-      map: { t: 'switch', label: 'Show minimap' }
+      map: { t: 'switch', label: 'Show minimap' },
+      debrief: { t: 'switch', label: 'Flight summary', help: 'A debrief card when you land and stop after a free flight' },
+      invertRoll: { t: 'switch', label: 'Invert roll', help: 'Left banks right — keys, touch stick and gamepad' },
+      sens: { t: 'range', label: 'Stick sensitivity', help: 'How hard the aircraft answers the stick, keys included', min: 50, max: 150, step: 5, fmt: function(v) { return v + '%'; } },
+      deadzone: { t: 'range', label: 'Dead zone', help: 'Small stick movements ignored (touch stick and gamepad)', min: 0, max: 30, step: 1, fmt: function(v) { return v + '%'; } },
+      padLayout: { t: 'seg', label: 'Gamepad layout', help: 'Modern: left stick flies, triggers throttle. Southpaw: right stick flies, left stick throttle', opts: [['modern', 'Modern'], ['southpaw', 'Southpaw']] },
+      cbMode: { t: 'seg', label: 'Colour-blind mode', help: 'Corrects the whole picture so reds and greens stay apart', opts: [['off', 'Off'], ['prot', 'Protan'], ['deut', 'Deutan'], ['trit', 'Tritan']] },
+      hudScale: { t: 'range', label: 'HUD size', help: 'Gauges, chart, weapons panel and warnings', min: 70, max: 140, step: 5, fmt: function(v) { return v + '%'; } },
+      noFlash: { t: 'switch', label: 'Reduce flashing', help: 'No blinking warnings or screen-wide lightning flashes' },
+      subs: { t: 'switch', label: 'Subtitles', help: 'Captions for voice callouts and sound-only warnings' },
+      voice: { t: 'switch', label: 'Voice callouts', help: 'Spoken height callouts and PULL UP / STALL warnings' }
     };
     var gpRowEls = {};
     function gpBuildRow(key) {
@@ -27509,6 +28575,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function gpChange(key, v) {
       if (key === 'mute') { gpSetMute(v); gpSave(); gpSyncRow('mute'); return; }
       gpSet[key] = v;
+      if (key === 'hud' || key === 'map') qolSetupNote(key, v);
       if (key === 'quality' && GP_QUALITY[v]) Object.keys(GP_QUALITY[v]).forEach(function(k) { gpSet[k] = GP_QUALITY[v][k]; });
       else if (GP_ROWS[key].gfx) {
         // touching a single option turns the preset into a custom one (or back into a preset, if it matches)
@@ -27528,7 +28595,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     Object.keys(GP_TABS).forEach(function(tab) {
       var pane = document.querySelector('#gpMenu [data-pane="' + tab + '"]');
       GP_TABS[tab].forEach(function(key) {
-        if (key === 'post') { var g = document.createElement('div'); g.className = 'gpm-group'; g.textContent = 'Effects'; pane.appendChild(g); }
+        var grp = { post: 'Effects', cbMode: 'Accessibility', padLayout: 'Gamepad' }[key];
+        if (grp) { var g = document.createElement('div'); g.className = 'gpm-group'; g.textContent = grp; pane.appendChild(g); }
         pane.appendChild(gpBuildRow(key));
       });
     });
