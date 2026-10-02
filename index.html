@@ -10985,6 +10985,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     // ---- salvo smoke trails: one particle cloud (a single draw call) for every missile's exhaust ----
     // Puffs are laid every few metres along the flight path (not per frame, so fast missiles leave a
     // continuous rope, not dots), start thick, keep swelling for half a minute and drift on the wind.
+    var CMD_WARHEAD = { radius: 190, dmg: 1800 };   // per missile (was 75 m / 700)
     var CMD_TRAIL = { n: 2400, i: 0, pts: null, pos: null, born: null, size: null, seed: null, t: 0 };
     function cmdTrailInit() {
       var T = CMD_TRAIL; if (T.pts) return;
@@ -11074,15 +11075,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       m.pad.missile.visible = false; m.pad.flame.material.opacity = 0;
       var gy = Math.max(getEffectiveGroundHeight(p.x, p.z), WATER_LEVEL);
       var at = new THREE.Vector3(p.x, gy + 1, p.z);
-      for (var k = 0; k < 4; k++) triggerMissileBlast(at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 26, Math.random() * 10, (Math.random() - 0.5) * 26)));
-      for (var s = 0; s < 10; s++) samEmitSmoke(at, new THREE.Vector3((Math.random() - 0.5) * 30, 10 + Math.random() * 18, (Math.random() - 0.5) * 30), 24, 9, 0.8, 0.3);
-      if (typeof stIgniteFire === 'function') stIgniteFire(at.clone(), 12, 60);
-      if (typeof gfxShockwave === 'function') gfxShockwave(at, 2.4);
+      // a heavy warhead: a core fireball with a second one thrown up off it, a towering smoke column
+      triggerMissileBlast(at.clone().add(new THREE.Vector3(0, 6, 0)), 4.2);
+      triggerMissileBlast(at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 40, 20 + Math.random() * 20, (Math.random() - 0.5) * 40)), 2.6);
+      for (var s = 0; s < 18; s++) samEmitSmoke(at, new THREE.Vector3((Math.random() - 0.5) * 70, 18 + Math.random() * 34, (Math.random() - 0.5) * 70), 60, 16, 0.85, 0.28);
+      if (typeof stIgniteFire === 'function') { stIgniteFire(at.clone(), 26, 90); stIgniteFire(at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 60, 0, (Math.random() - 0.5) * 60)), 16, 70); }
+      if (typeof gfxShockwave === 'function') gfxShockwave(at, 4.5);
       var dist = at.distanceTo(position);
-      if (dist < 1500) fxShake = Math.max(fxShake, 1.4 * (1 - dist / 1500));
-      if (dist < 4000) playMissileImpactSound();
+      if (dist < 2600) fxShake = Math.max(fxShake, 2.0 * (1 - dist / 2600));
+      if (dist < 6000) playMissileImpactSound();
       netEmit('boom', { p: [Math.round(at.x), Math.round(at.y), Math.round(at.z)] });
-      arsDamage(at, 75, 700, false, true);
+      arsDamage(at, CMD_WARHEAD.radius, CMD_WARHEAD.dmg, false, true);
       if (CMD.missiles.length === CMD.silo.pads.length) awRadio('Silo Kilo: first impact. Splash one', '#ff9a7a');
       cmdRefresh();
     }
@@ -13235,28 +13238,29 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     var missileBlastCursor = 0;
 
-    function triggerMissileBlast(pos) {
-      if (typeof gfxShockwave === 'function') gfxShockwave(pos, 0.7);
+    function triggerMissileBlast(pos, scale) {
+      var k = scale || 1;
+      if (typeof gfxShockwave === 'function') gfxShockwave(pos, 0.7 * Math.min(k, 3));
       var b = missileBlasts[missileBlastCursor];
       missileBlastCursor = (missileBlastCursor + 1) % missileBlasts.length;
       var i, p;
       for (i = 0; i < b.fire.length; i++) {
         p = b.fire[i];
-        p.vel.copy(explosionRandomDir(0.9)).multiplyScalar(7 + Math.random() * 12);
+        p.vel.copy(explosionRandomDir(0.9)).multiplyScalar((7 + Math.random() * 12) * k);
         p.sprite.position.copy(pos);
         p.life = 0;
-        p.maxLife = 0.6 + Math.random() * 0.55;
-        p.growTo = 4.6 + Math.random() * 4.8;
+        p.maxLife = (0.6 + Math.random() * 0.55) * Math.sqrt(k);
+        p.growTo = (4.6 + Math.random() * 4.8) * k;
         p.sprite.scale.set(0.5, 0.5, 1);
         p.sprite.material.opacity = 1;
       }
       for (i = 0; i < b.smoke.length; i++) {
         p = b.smoke[i];
-        p.vel.copy(explosionRandomDir(0.6)).multiplyScalar(2.6 + Math.random() * 5.2);
+        p.vel.copy(explosionRandomDir(0.6)).multiplyScalar((2.6 + Math.random() * 5.2) * k);
         p.sprite.position.copy(pos);
         p.life = 0;
-        p.maxLife = 1.5 + Math.random() * 1.1;
-        p.growTo = 6.5 + Math.random() * 6.5;
+        p.maxLife = (1.5 + Math.random() * 1.1) * Math.sqrt(k);
+        p.growTo = (6.5 + Math.random() * 6.5) * k;
         p.sprite.scale.set(0.32, 0.32, 1);
         p.sprite.material.opacity = 0;
       }
