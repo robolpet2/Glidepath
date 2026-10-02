@@ -13873,6 +13873,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
          cloud  — a fireball that rises and cools into a rolling mushroom cap on a dust stem,
                   a condensation collar, a base surge rolling out over the ground, fires
                   burning across the blast zone, and a scorched scar left on the land.
+       TIMER (the ⏱ TIMER button, before release): AUTO airbursts at the burst height once armed;
+       a set delay (15 s – 2 min) goes off exactly when it runs out — in the air if it's still under the
+       chute, on the ground if it has landed — buying you the time to get further away.
        YIELD (the ☢ YIELD button while flying the B-2, before release): 20 kt, 300 kt (default),
        1.2 Mt or 5 Mt. Every radius scales with the cube root of the yield, and so does the cloud.
        At 300 kt: fireball 380 m · lethal 1.8 km · heavy blast 3.8 km · thermal burns 5 km ·
@@ -13891,6 +13894,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       R_FIREBALL: 380, R_LETHAL: 1800, R_HEAVY: 3800, R_FELT: 9000, R_THERMAL: 5000, R_EMP: 12000, VS: 2.2,
       SHOCK_SPEED: 430, ARM_TIME: 14, BURST_AGL: 520, FUSE_MAX: 40, REARM_TIME: 60,
       YIELDS: [{ name: '20 kt', kt: 20 }, { name: '300 kt', kt: 300 }, { name: '1.2 Mt', kt: 1200 }, { name: '5 Mt', kt: 5000 }], yi: 1,
+      TIMERS: [0, 15, 30, 45, 60, 90, 120], ti: 0, timer: 0,      // 0 = AUTO (airburst fuze); else a fixed delay set before release
       fallout: [], dose: 0, doseRate: 0, geigerT: 0, empT: 0, sickSaid: 0,
       state: 'ready', t: 0, pos: new THREE.Vector3(), vel: new THREE.Vector3(), chute: 0, landed: false,
       blasts: [], history: [], beep: 0
@@ -13969,6 +13973,20 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       samToast('☢ YIELD ' + NUKE.YIELDS[NUKE.yi].name + ' · LETHAL ' + nukeFmtR(NUKE.R_LETHAL) + ' · BLAST ' + nukeFmtR(NUKE.R_HEAVY), '#ff7a5a', 2.6);
     });
     document.body.appendChild(nukeYieldEl);
+    var nukeTimerEl = nukeYieldEl.cloneNode(false);
+    nukeTimerEl.style.bottom = 'calc(342px + env(safe-area-inset-bottom))';
+    nukeTimerEl.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (NUKE.state === 'falling') { samToast('⏱ TIMER IS SET — WEAPON ALREADY AWAY', '#ff7a5a', 1.6); return; }
+      NUKE.ti = (NUKE.ti + 1) % NUKE.TIMERS.length;
+      var s = NUKE.TIMERS[NUKE.ti];
+      samToast(s ? '⏱ DETONATION TIMER ' + s + ' s AFTER RELEASE' : '⏱ TIMER AUTO — AIRBURST AT ' + Math.round(NUKE.BURST_AGL) + ' m ONCE ARMED', '#ff7a5a', 2.4);
+    });
+    document.body.appendChild(nukeTimerEl);
+    var nukeCountEl = document.createElement('div');
+    nukeCountEl.style.cssText = 'position:fixed;left:50%;top:calc(176px + env(safe-area-inset-top));transform:translateX(-50%);z-index:30;pointer-events:none;display:none;' +
+      'font:900 44px/1 "Courier New",monospace;letter-spacing:.06em;color:#ff4b3a;text-shadow:0 0 14px rgba(255,40,20,.8),0 0 2px #000';
+    document.body.appendChild(nukeCountEl);
     var nukeFlashEl = document.createElement('div');
     nukeFlashEl.style.cssText = 'position:fixed;inset:0;z-index:8;pointer-events:none;background:#fffaf0;opacity:0';
     document.body.appendChild(nukeFlashEl);
@@ -14205,6 +14223,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       if (wasGrounded) { samToast('☢ RELEASE INHIBITED — WEIGHT ON WHEELS', '#ffcc33', 2); return; }
       NUKE.state = 'falling'; NUKE.t = 0; NUKE.chute = 0; NUKE.landed = false; NUKE.beep = 0;
+      NUKE.timer = NUKE.TIMERS[NUKE.ti];
       NUKE.pos.copy(position); NUKE.pos.y -= 2.2;
       NUKE.vel.copy(velocityVec && velocityVec.lengthSq() > 1 ? velocityVec : forwardVec.clone().multiplyScalar(Math.max(speed, 60)));
       NUKE.vel.y -= 2;
@@ -14260,19 +14279,24 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       nukeStrobe.position.copy(N.pos);
       nukeStrobe.material.opacity = (Math.floor(N.t * 2.5) % 2) ? 0.9 : 0.1;
       // arming beeps — faster toward the end
-      var left = Math.max(0, N.ARM_TIME - N.t);
+      var left = Math.max(0, (N.timer || N.ARM_TIME) - N.t);
       N.beep -= dt;
       if (N.beep <= 0) { N.beep = left > 5 ? 1 : left > 2 ? 0.5 : 0.18; nukeBeep(left > 2 ? 1250 : 1800, 0.07, 0.05); }
       // fuze: armed after ARM_TIME; airburst at the burst height, on the ground when the timer runs
       // out, or on the backup clock if it was dropped very high
       var agl = N.pos.y - gy;
-      var fire = N.t >= N.ARM_TIME && (agl <= N.BURST_AGL || N.landed) || N.t >= N.FUSE_MAX;
+      var fire = N.timer ? N.t >= N.timer : (N.t >= N.ARM_TIME && (agl <= N.BURST_AGL || N.landed) || N.t >= N.FUSE_MAX);
       // HUD
       var d = N.pos.distanceTo(position);
       var zone = d < N.R_LETHAL ? ['LETHAL ZONE', '#ff4b3a'] : d < N.R_HEAVY ? ['BLAST ZONE', '#ffb13a'] : d < N.R_THERMAL ? ['BURN ZONE', '#ffd06a'] : ['CLEAR', '#7dff8a'];
-      var tt = N.t < N.ARM_TIME ? (N.ARM_TIME - N.t).toFixed(1) : (N.landed ? '0.0' : 'ARMED');
+      var tt = N.timer ? Math.max(0, N.timer - N.t).toFixed(1) : N.t < N.ARM_TIME ? (N.ARM_TIME - N.t).toFixed(1) : (N.landed ? '0.0' : 'ARMED');
       // will you make it? where you'll be when it goes, plus the time the shock takes to reach you
-      var tLeft = Math.max(0, N.ARM_TIME - N.t) + (N.landed ? 0 : Math.max(0, (agl - N.BURST_AGL) / 19));
+      var tLeft = N.timer ? Math.max(0, N.timer - N.t) : Math.max(0, N.ARM_TIME - N.t) + (N.landed ? 0 : Math.max(0, (agl - N.BURST_AGL) / 19));
+      // the big countdown: minutes, seconds, tenths — it pulses for the last five seconds
+      var cl = Math.max(0, N.timer ? N.timer - N.t : tLeft);
+      nukeCountEl.style.display = 'block';
+      nukeCountEl.textContent = (N.timer ? '' : '~') + Math.floor(cl / 60) + ':' + String(Math.floor(cl % 60)).padStart(2, '0') + '.' + Math.floor((cl * 10) % 10);
+      nukeCountEl.style.opacity = cl < 5 ? (0.55 + 0.45 * Math.abs(Math.sin(N.t * 9))).toFixed(2) : 1;
       var ax = position.x - N.pos.x, az = position.z - N.pos.z, al = Math.hypot(ax, az) || 1;
       var radial = (velocityVec.x * ax + velocityVec.z * az) / al;
       var dAt = Math.max(0, al + radial * tLeft), dShock = dAt + radial * nukeArrive(dAt);
@@ -14282,7 +14306,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       nukeHudEl.innerHTML = '☢ ' + N.YIELDS[N.yi].name + ' · T-' + tt + ' &nbsp;·&nbsp; ' + nukeFmtR(d) +
         ' &nbsp;·&nbsp; <span style="color:' + zone[1] + '">' + zone[0] + '</span><br><span style="color:' + verdict[1] + '">' + verdict[0] + '</span>' +
         '<br><span style="opacity:.7;font-size:11px">LETHAL ' + nukeFmtR(N.R_LETHAL) + ' · BLAST ' + nukeFmtR(N.R_HEAVY) + ' · BURNS ' + nukeFmtR(N.R_THERMAL) + ' · EMP ' + nukeFmtR(N.R_EMP) + '</span>';
-      if (fire) nukeDetonate(N.pos.clone(), gy);
+      if (fire) { nukeCountEl.style.display = 'none'; nukeDetonate(N.pos.clone(), gy); }
     }
 
     function nukeDetonate(pos, gy) {
@@ -14528,6 +14552,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       nukeYieldEl.style.display = isStealthMode && started && !crashing ? 'flex' : 'none';
       nukeYieldEl.textContent = '☢ YIELD ' + N.YIELDS[N.yi].name;
       nukeYieldEl.style.opacity = N.state === 'falling' ? 0.5 : 1;
+      nukeTimerEl.style.display = nukeYieldEl.style.display;
+      nukeTimerEl.textContent = '⏱ TIMER ' + (N.TIMERS[N.ti] ? N.TIMERS[N.ti] + ' s' : 'AUTO');
+      nukeTimerEl.style.opacity = nukeYieldEl.style.opacity;
+      if (N.state !== 'falling') nukeCountEl.style.display = 'none';
       if (N.empT > 0) { N.empT -= dt; throttle = Math.min(throttle, MIN_SPEED); keys.boost = false; if (N.empT <= 0) samToast('ENGINE RELIT', '#7dff8a', 1.4); }
       nukeFallout(dt);
       nukeFlashOp = Math.max(0, nukeFlashOp - dt * 0.55);
