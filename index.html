@@ -8893,7 +8893,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var CV_WIRE_HALF = 17;
     var CV_RUNOUT = 88;                       // metres of cable payout to a stop
     var CV_CATS = [ { v: 9, u0: 55, u1: 150 }, { v: -8, u0: 55, u1: 150 } ];
-    var CV_GLIDE_DEG = 3.5, CV_GLIDE_AIM_S = 80;   // on the ball, the wheels touch at ~72 m and the hook takes the 3-wire
+    var CV_GLIDE_DEG = 3.5, CV_GLIDE_AIM_S = 94;   // fly the ball and the wheels meet the deck at ~68 m: the hook takes the 3-wire
 
     var carrierGroup = new THREE.Group();
     carrierGroup.position.set(CARRIER.x, 0, CARRIER.z);
@@ -16632,7 +16632,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (clearance >= CRASH_BUFFER) {
             wasGrounded = false; // cleared the ground — now flying
           }
-        } else if (clearance < CRASH_BUFFER && !(cvLaunchGrace > 0 && isOverCarrierDeck(position.x, position.z))) {
+        } else if (clearance < CRASH_BUFFER && !(cvLaunchGrace > 0 && isOverCarrierDeck(position.x, position.z)) &&
+                   // over the carrier a jet flies all the way down to the deck: the hook needs to meet it on the glide path
+                   !(isOverCarrierDeck(position.x, position.z) && !isHelicopterMode && clearance > 0.6 && position.y > CARRIER.deckY && verticalSpeed > SAFE_DESCENT_RATE)) {
           // helicopters can set down anywhere on dry land at a safe descent rate — jets are
           // restricted to paved surfaces they can actually roll out on: the runway, or the
           // highway running out to the city, which is flat and wide enough to serve as a
