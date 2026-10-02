@@ -16909,6 +16909,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       cv2Frame(dt);
       baseUpdate(dt);
       csgUpdate(dt);
+      if (!(typeof HY !== 'undefined' && HY.on)) cvaaUpdate(dt);
       hyUpdate(dt);
       qolbUpdate(dt);
       qolcUpdate(dt);
@@ -26957,6 +26958,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (dd < 45 && started && !crashing) pvpDamage(50 * (1 - dd / 45), null);
       scene.remove(M.g);
       var i = strikeTargets.indexOf(M.t); if (i >= 0) strikeTargets.splice(i, 1);
+      if (hitBase && M.decoy) { samToast('DECOYED — MISSILE DETONATED IN THE CHAFF', '#7dff9a', 2.4); return; }
       if (hitBase && M.onHit) { M.onHit(M); return; }
       if (hitBase) {
         if (M.tgt && BASE.built[M.tgt.id] && !BASE.dmg[M.tgt.id]) {
@@ -27404,6 +27406,141 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (CV2.lso && !CV2.lso.waveoff) { CV2.lso.waveoff = true; CV2.lso.waveWhy = 'DECK FIRE'; cv2Say('PADDLES', '"Wave off — deck\'s foul, fire on the deck!"', '#ff6a4a', 'wave off'); }
         }
         if (CSG.deckFireT <= 0) cv2Say('CV-71', '"Fire\'s out. Deck is clear — resume recovery."', '#7dff9a');
+      }
+    }
+
+    /* ============================================================
+       CV-71 SHIP SELF-DEFENSE — the carrier's own air defence, in layers
+         · SEA SPARROW (2 × 8-cell box launchers on the bow and quarter sponsons): out to 8 km.
+           16 rounds; the magazine crews reload a launcher in a minute.
+         · RAM (2 × 21-cell launchers): fast two-round salvos inside 3.5 km
+         · PHALANX (3 mounts on the deck edge): the last ditch, inside 1.5 km
+         · SRBOC CHAFF: when anything gets inside 6 km the ship fires chaff; each incoming missile
+           has a chance of being seduced into the cloud and blowing up harmlessly in it
+       Layered on top of the strike group's Aegis screen. A status panel shows what's ready.
+       ============================================================ */
+    var CVAA = { mounts: [], chaffT: 0, panel: null, sayT: {}, active: 0 };
+    (function cvaaBuild() {
+      var ud = carrierGroup.userData, Y = CV2.base - 2.6;
+      function mount(kind, u, v) {
+        var g = new THREE.Group(); g.position.copy(cvL(u, Y, v)); carrierGroup.add(g);
+        // the sponson the mount sits on
+        var sp = new THREE.Mesh(new THREE.BoxGeometry(9, 1.2, 9), CSG_M.haze); sp.position.y = -0.6; g.add(sp);
+        var M = { kind: kind, g: g, u: u, v: v, cd: Math.random() * 2 };
+        if (kind === 'sparrow') {
+          M.ammo = 8; M.reload = 0;
+          var ped = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.4, 2, 12), CSG_M.haze); ped.position.y = 1; g.add(ped);
+          M.train = new THREE.Group(); M.train.position.y = 2.2; g.add(M.train);
+          M.elev = new THREE.Group(); M.elev.position.y = 0.6; M.train.add(M.elev);
+          var box = new THREE.Mesh(new THREE.BoxGeometry(3.4, 1.9, 4.4), CSG_M.haze); M.elev.add(box);
+          for (var r = 0; r < 2; r++) for (var c = 0; c < 4; c++) { var cell = new THREE.Mesh(new THREE.CircleGeometry(0.33, 10), CSG_M.dark); cell.position.set(-1.2 + c * 0.8, -0.45 + r * 0.9, 2.21); M.elev.add(cell); }
+          var ill = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.3, 14), CSG_M.dark); ill.rotation.x = Math.PI / 2; ill.position.set(3, 1.5, 0); M.train.add(ill);   // illuminator
+        } else if (kind === 'ram') {
+          M.ammo = 21;
+          var pd = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.2, 1.8, 12), CSG_M.haze); pd.position.y = 0.9; g.add(pd);
+          M.train = new THREE.Group(); M.train.position.y = 2; g.add(M.train);
+          M.elev = new THREE.Group(); M.elev.position.y = 0.7; M.train.add(M.elev);
+          var rb = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 3.2), CSG_M.white); M.elev.add(rb);
+          for (var i = 0; i < 21; i++) { var cc = new THREE.Mesh(new THREE.CircleGeometry(0.15, 8), CSG_M.dark); cc.position.set(-0.8 + (i % 5) * 0.4, -0.8 + Math.floor(i / 5) * 0.4, 1.61); M.elev.add(cc); }
+          var sensor = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8), CSG_M.white); sensor.position.set(0, 1.5, 0.6); M.train.add(sensor);
+        } else {
+          var cw = csgCiws(g, 0, 0, 0); M.t = cw.t; M.gun = cw.gun;
+        }
+        CVAA.mounts.push(M);
+        return M;
+      }
+      mount('sparrow', 138, 26); mount('sparrow', -148, -34);
+      mount('ram', 146, -18); mount('ram', -156, 30);
+      mount('ciws', 112, -27); mount('ciws', -160, 6); mount('ciws', 62, 40);
+      // the SRBOC chaff launchers by the island, decoration plus the cloud they throw
+      [[0, 26], [14, 26]].forEach(function(p) {
+        var t = new THREE.Group(); t.position.copy(cvL(p[0], CV2.base + 0.2, p[1])); carrierGroup.add(t);
+        for (var k = 0; k < 6; k++) { var tube = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.2, 8), CSG_M.dark); tube.position.set((k % 3 - 1) * 0.4, 0.6, Math.floor(k / 3) * 0.4); tube.rotation.x = -0.6; t.add(tube); }
+      });
+      var css = document.createElement('style');
+      css.textContent = '#cvaa{position:fixed;z-index:12;right:calc(16px + env(safe-area-inset-right));top:calc(300px + env(safe-area-inset-top));display:none;pointer-events:none;' +
+        'font:700 11px/1.45 ui-monospace,Menlo,monospace;color:#e6f2ff;background:rgba(24,8,6,.72);border:1px solid rgba(255,120,90,.55);border-radius:8px;padding:6px 10px;min-width:170px}' +
+        '#cvaa b{color:#ff9a7a;letter-spacing:.1em}#cvaa .r{display:flex;justify-content:space-between;gap:10px}' +
+        '@media (orientation: landscape) and (max-height: 500px){#cvaa{top:auto;bottom:calc(120px + env(safe-area-inset-bottom));right:calc(240px + env(safe-area-inset-right))}}';
+      document.head.appendChild(css);
+      CVAA.panel = document.createElement('div'); CVAA.panel.id = 'cvaa'; document.body.appendChild(CVAA.panel);
+    })();
+    var _aaW = new THREE.Vector3(), _aaV = new THREE.Vector3();
+    function cvaaSay(key, msg, gap) {
+      if (CVAA.sayT[key] && CSG.t - CVAA.sayT[key] < (gap || 8)) return;
+      CVAA.sayT[key] = CSG.t; cv2Say('CV-71', msg, '#ff9a7a');
+    }
+    function cvaaUpdate(dt) {
+      var threats = baseThreats().filter(function(th) { return Math.hypot(th.pos.x - CARRIER.x, th.pos.z - CARRIER.z) < 12000; });
+      CVAA.active = threats.length;
+      var near = started && Math.hypot(position.x - CARRIER.x, position.z - CARRIER.z) < 20000;
+      CVAA.mounts.forEach(function(M) {
+        M.g.getWorldPosition(_aaW);
+        if (M.kind === 'sparrow' && M.ammo <= 0) { M.reload += dt; if (M.reload > 60) { M.ammo = 8; M.reload = 0; } }
+        if (!threats.length) return;
+        var range = M.kind === 'sparrow' ? 8000 : M.kind === 'ram' ? 3500 : 1500;
+        var best = null, bd = range;
+        threats.forEach(function(th) {
+          var d = th.pos.distanceTo(_aaW);
+          // the missile launchers don't double up on something already being engaged
+          if (M.kind !== 'ciws' && BASE.shots.some(function(s) { return s.th.pos === th.pos; })) d += 3000;
+          if (d < bd) { bd = d; best = th; }
+        });
+        if (!best) return;
+        var yaw = Math.atan2(best.pos.x - _aaW.x, best.pos.z - _aaW.z) - CARRIER.yaw;
+        var el = Math.atan2(best.pos.y - _aaW.y, Math.hypot(best.pos.x - _aaW.x, best.pos.z - _aaW.z));
+        if (M.kind === 'ciws') {
+          M.t.rotation.y = yaw; M.gun.rotation.x = -el; M.gun.rotation.z += dt * 40;
+          if (Math.random() < dt * 30) baseTracer(_aaW.clone().add(_aaV.set(0, 3, 0)), best.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 10)));
+          if (Math.random() < dt * (2.6 - bd / 700)) baseKill(best, 18);
+          if (near && Math.random() < dt * 6 && typeof wNoise === 'function') wNoise(0.12, 0.05 * Math.max(0, 1 - _aaW.distanceTo(position) / 3000), 'bandpass', 1500, 1.2, 0.005);
+          cvaaSay('ciws', '"Phalanx engaging!"', 6);
+          return;
+        }
+        // the launchers train round and come up before they fire
+        var dy = Math.atan2(Math.sin(yaw - M.train.rotation.y), Math.cos(yaw - M.train.rotation.y));
+        M.train.rotation.y += THREE.MathUtils.clamp(dy, -2.2 * dt, 2.2 * dt);
+        M.elev.rotation.x += (-(Math.max(0.35, el + 0.2)) - M.elev.rotation.x) * Math.min(1, dt * 3);
+        M.cd -= dt;
+        if (Math.abs(dy) < 0.15 && M.cd <= 0 && M.ammo > 0) {
+          var salvo = M.kind === 'ram' ? 2 : 1;
+          for (var k = 0; k < salvo && M.ammo > 0; k++) {
+            M.ammo--;
+            baseFireSam(null, _aaW.clone().add(_aaV.set(0, 3, 0)), best);
+            var S = BASE.shots[BASE.shots.length - 1];
+            S.vel.set(Math.sin(M.train.rotation.y + CARRIER.yaw), Math.max(0.4, el + 0.25), Math.cos(M.train.rotation.y + CARRIER.yaw)).normalize().multiplyScalar(140 + k * 10);
+            if (M.kind === 'ram') S.s.scale.set(3.5, 3.5, 1);
+          }
+          M.cd = M.kind === 'ram' ? 2.2 : 3.5;
+          cvaaSay(M.kind, M.kind === 'ram' ? '"RAM away — two birds."' : '"Sea Sparrow away!"', 5);
+        }
+      });
+      // chaff: anything inside 6 km and the decoys go up; seduced missiles fly into the cloud
+      CVAA.chaffT -= dt;
+      var close = BASE.missiles.filter(function(M) { return M.t.alive && M.follow && Math.hypot(M.pos.x - CARRIER.x, M.pos.z - CARRIER.z) < 6000; });
+      if (close.length && CVAA.chaffT <= 0) {
+        CVAA.chaffT = 9;
+        var a = Math.atan2(close[0].pos.x - CARRIER.x, close[0].pos.z - CARRIER.z) + (Math.random() < 0.5 ? 0.9 : -0.9);
+        var cx = CARRIER.x + Math.sin(a) * 700, cz = CARRIER.z + Math.cos(a) * 700;
+        for (var i = 0; i < 14; i++) samEmitSmoke(_aaV.set(cx + (Math.random() - 0.5) * 160, WATER_LEVEL + 40 + Math.random() * 80, cz + (Math.random() - 0.5) * 160), new THREE.Vector3((Math.random() - 0.5) * 3, 0.5, (Math.random() - 0.5) * 3), 70 + Math.random() * 40, 14, 0.55, 0.78);
+        cvaaSay('chaff', '"Chaff, chaff! Decoys away."', 8);
+        close.forEach(function(M) {
+          if (M.decoyTried) return;
+          M.decoyTried = true;
+          if (Math.random() < 0.35) { M.follow = false; M.decoy = true; M.tx = cx; M.tz = cz; M.onHit = null; }
+        });
+      }
+      // the panel, while there's a fight on and you're around to see it
+      var show = near && threats.length > 0;
+      CVAA.panel.style.display = show ? 'block' : 'none';
+      if (show && Math.random() < dt * 6) {
+        var sp = CVAA.mounts.filter(function(M) { return M.kind === 'sparrow'; }), rm = CVAA.mounts.filter(function(M) { return M.kind === 'ram'; });
+        CVAA.panel.innerHTML = '<b>CV-71 SELF-DEFENSE</b>' +
+          '<div class="r"><span>THREATS</span><span style="color:#ff6a4a">' + threats.length + '</span></div>' +
+          '<div class="r"><span>SEA SPARROW</span><span>' + sp.map(function(M) { return M.ammo > 0 ? M.ammo : 'RLD ' + Math.ceil(60 - M.reload) + 's'; }).join(' / ') + '</span></div>' +
+          '<div class="r"><span>RAM</span><span>' + rm.map(function(M) { return M.ammo; }).join(' / ') + '</span></div>' +
+          '<div class="r"><span>PHALANX</span><span>3 ONLINE</span></div>' +
+          '<div class="r"><span>CHAFF</span><span>' + (CVAA.chaffT > 0 ? 'AWAY' : 'READY') + '</span></div>';
       }
     }
 
