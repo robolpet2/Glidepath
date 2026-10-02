@@ -27551,14 +27551,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
        Codes come from Glidepath's X/Twitter posts. Each one works once per browser; they're stored
        here only as hashes. One of them unlocks a classified capability for the AWACS:
        ORBITAL STRIKES called down from a destroyer in orbit, Helldivers-style —
-         open the STRATAGEM panel (☄ button or \), punch in the arrow code (arrow keys / WASD or the
-         on-screen arrows), then mark the target: tap the open chart, or CALL IN to send it to your
+         open the STRATAGEM panel (☄ button or \), pick a strike from the list (or keys 1-4),
+         then mark the target: tap the open chart, or CALL IN to send it to your
          command marker, your NAV point, or the ground ahead. A red beacon goes up, a countdown runs,
          and it comes down.
-           ORBITAL PRECISION STRIKE   → → ↑            one heavy shell, 3 s
-           ORBITAL RAILCANNON STRIKE  → ↑ ↓ ↓ →        hits the toughest target near the beacon
-           ORBITAL LASER              → ↓ ↑ → ↓        a beam that hunts targets for 12 s
-           ORBITAL 380MM HE BARRAGE   → ↓ ↑ ↑ ← ↓ ↓    fourteen shells walked across 220 m
+           ORBITAL PRECISION STRIKE   one heavy shell, 3 s
+           ORBITAL RAILCANNON STRIKE  hits the toughest target near the beacon
+           ORBITAL LASER              a beam that hunts targets for 12 s
+           ORBITAL 380MM HE BARRAGE   fourteen shells walked across 220 m
        ============================================================ */
     var CODES_KEY = 'gp-codes-v1';
     var CODES = { redeemed: [], orbital: false, tsar: false };
@@ -27632,10 +27632,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
     // ---- ORBITAL STRIKES ----
     var ORB_DEFS = [
-      { id: 'prec', name: 'ORBITAL PRECISION STRIKE', seq: 'RRU', delay: 3, cd: 90 },
-      { id: 'rail', name: 'ORBITAL RAILCANNON STRIKE', seq: 'RUDDR', delay: 2, cd: 150 },
-      { id: 'laser', name: 'ORBITAL LASER', seq: 'RDURD', delay: 4, cd: 300 },
-      { id: 'barrage', name: 'ORBITAL 380MM HE BARRAGE', seq: 'RDUULDD', delay: 6, cd: 240 }
+      { id: 'prec', name: 'ORBITAL PRECISION STRIKE', delay: 3, cd: 90, info: 'One heavy shell · 3 s' },
+      { id: 'rail', name: 'ORBITAL RAILCANNON STRIKE', delay: 2, cd: 150, info: 'Hits the toughest target near the beacon' },
+      { id: 'laser', name: 'ORBITAL LASER', delay: 4, cd: 300, info: 'Target-hunting beam for 12 s' },
+      { id: 'barrage', name: 'ORBITAL 380MM HE BARRAGE', delay: 6, cd: 240, info: '14 shells across 220 m' }
     ];
     var ORB = { open: false, input: '', armed: null, cds: {}, strikes: [], btn: null, panel: null };
     var ORB_ARROW = { U: '↑', D: '↓', L: '←', R: '→' };
@@ -27647,7 +27647,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         '#orbPanel{position:fixed;z-index:31;left:calc(16px + env(safe-area-inset-left));top:50%;transform:translateY(-50%);width:min(330px,calc(100vw - 32px));display:none;box-sizing:border-box;padding:12px;border-radius:12px;' +
         'background:rgba(8,10,12,.9);border:1px solid #ffd23a;color:#f2ead2;font:700 12px/1.3 ui-monospace,Menlo,monospace}' +
         '#orbPanel h4{margin:0 0 8px;font-size:12px;letter-spacing:.18em;color:#ffd23a}#orbPanel .s{padding:6px 8px;margin:4px 0;border-radius:8px;background:rgba(255,255,255,.05)}' +
-        '#orbPanel .s.cd{opacity:.45}#orbPanel .s.armed{background:rgba(255,210,58,.22);outline:1px solid #ffd23a}#orbPanel .seq{font-size:15px;letter-spacing:.12em;margin-top:2px}#orbPanel .seq i{font-style:normal;color:#ffd23a}' +
+        '#orbPanel .s{display:block;width:100%;text-align:left;border:1px solid transparent;color:#f2ead2;font:800 12px/1.3 ui-monospace,monospace;cursor:pointer}#orbPanel .s small{display:block;opacity:.7;font-weight:600;font-size:10.5px;margin-top:2px}' +
+        '#orbPanel .s .k{display:inline-block;width:18px;color:#ffd23a}#orbPanel .s:hover:not(:disabled){border-color:#ffd23a}' +
+        '#orbPanel .s.cd{opacity:.45;cursor:default}#orbPanel .s.armed{background:rgba(255,210,58,.22);outline:1px solid #ffd23a}#orbPanel .seq{font-size:15px;letter-spacing:.12em;margin-top:2px}#orbPanel .seq i{font-style:normal;color:#ffd23a}' +
         '#orbPanel .pad{display:grid;grid-template-columns:repeat(3,48px);grid-template-rows:repeat(2,40px);gap:6px;justify-content:center;margin:10px 0 4px}' +
         '#orbPanel .pad button,#orbPanel .act button{font:900 18px ui-monospace,monospace;border-radius:9px;border:1px solid #ffd23a;background:rgba(255,210,58,.12);color:#ffe9a8;cursor:pointer;touch-action:manipulation}' +
         '#orbPanel .act{display:flex;gap:6px;margin-top:6px}#orbPanel .act button{flex:1;font-size:11px;padding:9px 4px;letter-spacing:.08em}';
@@ -27659,7 +27661,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       ORB.panel.addEventListener('click', function(e) {
         var b = e.target.closest('button'); if (!b) return;
         var a = b.getAttribute('data-a');
-        if (a === 'U' || a === 'D' || a === 'L' || a === 'R') orbKey(a);
+        if (a === 'pick') orbPick(b.getAttribute('data-id'));
         else if (a === 'call') orbCallIn(null);
         else if (a === 'close') orbOpen(false);
       });
@@ -27667,8 +27669,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       window.addEventListener('keydown', function(e) {
         if (e.code === 'Backslash' && !e.repeat && orbAvail()) { orbOpen(!ORB.open); e.preventDefault(); return; }
         if (!ORB.open) return;
-        var m = { ArrowUp: 'U', KeyW: 'U', ArrowDown: 'D', KeyS: 'D', ArrowLeft: 'L', KeyA: 'L', ArrowRight: 'R', KeyD: 'R' }[e.code];
-        if (m) { if (!e.repeat) orbKey(m); e.preventDefault(); e.stopImmediatePropagation(); return; }
+        var n = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3 }[e.code];
+        if (n !== undefined) { if (!e.repeat) orbPick(ORB_DEFS[n].id); e.preventDefault(); e.stopImmediatePropagation(); return; }
         if (e.code === 'Enter' && ORB.armed) { orbCallIn(null); e.preventDefault(); e.stopImmediatePropagation(); }
         if (e.code === 'Escape') { orbOpen(false); e.preventDefault(); e.stopImmediatePropagation(); }
       }, true);
@@ -27677,14 +27679,20 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function orbRender() {
       ORB.panel.style.display = ORB.open ? 'block' : 'none';
       if (!ORB.open) return;
-      ORB.panel.innerHTML = '<h4>☄ STRATAGEMS — ORBITAL</h4>' + ORB_DEFS.map(function(d) {
+      ORB.panel.innerHTML = '<h4>☄ STRATAGEMS — ORBITAL</h4>' + ORB_DEFS.map(function(d, i) {
         var cd = ORB.cds[d.id] || 0, armed = ORB.armed === d;
-        var seq = d.seq.split('').map(function(c, i) { var hit = !cd && !ORB.armed && d.seq.indexOf(ORB.input) === 0 && i < ORB.input.length; return hit ? '<i>' + ORB_ARROW[c] + '</i>' : ORB_ARROW[c]; }).join(' ');
-        return '<div class="s' + (cd ? ' cd' : '') + (armed ? ' armed' : '') + '">' + d.name + (cd ? ' · ' + Math.ceil(cd) + 's' : armed ? ' · READY' : '') + '<div class="seq">' + seq + '</div></div>';
+        return '<button class="s' + (cd ? ' cd' : '') + (armed ? ' armed' : '') + '" data-a="pick" data-id="' + d.id + '"' + (cd ? ' disabled' : '') + '>' +
+          '<span class="k">' + (i + 1) + '</span>' + d.name + '<small>' + (cd ? 'RELOADING · ' + Math.ceil(cd) + ' s' : armed ? 'SELECTED — MARK THE TARGET' : d.info) + '</small></button>';
       }).join('') +
-        '<div class="pad"><span></span><button data-a="U">↑</button><span></span><button data-a="L">←</button><button data-a="D">↓</button><button data-a="R">→</button></div>' +
         '<div class="act">' + (ORB.armed ? '<button data-a="call">CALL IN</button>' : '') + '<button data-a="close">CLOSE</button></div>' +
         (ORB.armed ? '<div style="margin-top:6px;opacity:.75;font-size:11px">Tap the open chart to mark the target — or CALL IN on your command marker / NAV point / the ground ahead.</div>' : '');
+    }
+    function orbPick(id) {
+      var d = ORB_DEFS.filter(function(x) { return x.id === id; })[0];
+      if (!d || ORB.cds[d.id] > 0) { samBeep(220, 0.12, 0.05); return; }
+      ORB.armed = ORB.armed === d ? null : d;
+      if (ORB.armed) { samBeep(1400, 0.06, 0.06); samBeep(1800, 0.08, 0.06); samToast(d.name + ' SELECTED — MARK THE TARGET', '#ffd23a', 2.2); }
+      orbRender();
     }
     function orbKey(k) {
       if (ORB.armed) return;
