@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Glidepath Trailer</title>
+<style>
+@font-face{font-family:Oswald;font-weight:300;src:url(node_modules/@fontsource/oswald/files/oswald-latin-300-normal.woff2)}
+@font-face{font-family:Oswald;font-weight:500;src:url(node_modules/@fontsource/oswald/files/oswald-latin-500-normal.woff2)}
+@font-face{font-family:Oswald;font-weight:600;src:url(node_modules/@fontsource/oswald/files/oswald-latin-600-normal.woff2)}
+@font-face{font-family:Oswald;font-weight:700;src:url(node_modules/@fontsource/oswald/files/oswald-latin-700-normal.woff2)}
+@font-face{font-family:"JetBrains Mono";font-weight:500;src:url(node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2)}
+@font-face{font-family:"JetBrains Mono";font-weight:700;src:url(node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2)}
+@font-face{font-family:"JetBrains Mono";font-weight:800;src:url(node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-800-normal.woff2)}
+html,body{margin:0;background:#000;overflow:hidden}
+#out{position:absolute;left:0;top:0}
+</style>
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<canvas id="out" width="1920" height="1080"></canvas>
+<script>
+window.FONTS_READY = Promise.all([
+  '300 20px Oswald','500 20px Oswald','600 20px Oswald','700 20px Oswald',
+  '500 20px "JetBrains Mono"','700 20px "JetBrains Mono"','800 20px "JetBrains Mono"'
+].map(f => document.fonts.load(f)));
+</script>
+<script type="module">
+await window.FONTS_READY;
+await import('./trailer.js');
+</script>
+</body></html>

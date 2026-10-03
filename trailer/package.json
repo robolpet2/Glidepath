@@ -1,0 +1,10 @@
+{
+  "name": "glidepath-trailer",
+  "private": true,
+  "description": "Procedural cinematic trailer for Glidepath (Four Worlds). Renders frame by frame in headless Chromium.",
+  "dependencies": {
+    "three": "0.160.0",
+    "@fontsource/oswald": "^5.0.0",
+    "@fontsource/jetbrains-mono": "^5.0.0"
+  }
+}
