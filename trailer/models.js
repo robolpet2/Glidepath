@@ -350,3 +350,142 @@ export function makeEscort() {
   g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return g;
 }
+
+// ---------- flight-deck crew: low-poly sailor in jersey, float vest and cranial ----------
+// makeDeckCrew(color, opts) -> Group, feet at y=0, facing -Z (figure's right hand on +X), ~1.8 m tall.
+//   group.userData.pose(name, k): 'stand' | 'kneel' | 'wave' blend stand->pose by k in [0,1];
+//   'shooter' blends upright-arm-raised (k=0) -> crouched, right arm swept forward/down toward -Z (k=1).
+//   opts: { skin, gloves, trousers, shooterTurn (extra body yaw reached at k=1 in 'shooter', radians: turn from the jet to the bow) }
+//   group.userData.arm: outer right-shoulder pivot (legacy hook; pose() resets it to 0).
+//   group.userData.joints: the pivot groups.
+const _crewGeo = {};
+const _crewMat = {};
+function crewGeos() {
+  if (_crewGeo.torso) return _crewGeo;
+  const G = _crewGeo;
+  const ell = (geo, sz) => { geo.scale(1, 1, sz); return geo; };
+  G.pelvis = ell(new THREE.CylinderGeometry(0.165, 0.17, 0.2, 8), 0.74);
+  G.torso = ell(new THREE.CylinderGeometry(0.205, 0.17, 0.54, 8), 0.7);
+  const gap = 0.42;   // the float vest is open at the front, the jersey shows through
+  G.vest = ell(new THREE.CylinderGeometry(0.226, 0.205, 0.27, 10, 1, true, Math.PI + gap, Math.PI * 2 - 2 * gap), 0.78);
+  G.band = ell(new THREE.CylinderGeometry(0.226, 0.222, 0.05, 10, 1, true, Math.PI + gap, Math.PI * 2 - 2 * gap), 0.79);
+  G.collar = new THREE.TorusGeometry(0.12, 0.045, 4, 8); G.collar.rotateX(Math.PI / 2); G.collar.scale(1, 1, 0.85);
+  G.delt = new THREE.SphereGeometry(0.08, 6, 4);
+  G.upper = new THREE.CylinderGeometry(0.066, 0.056, 0.29, 6); G.upper.translate(0, -0.145, 0);
+  G.fore = new THREE.CylinderGeometry(0.056, 0.045, 0.26, 6); G.fore.translate(0, -0.13, 0);
+  G.glove = new THREE.BoxGeometry(0.085, 0.13, 0.06); G.glove.translate(0, -0.06, 0);
+  G.thigh = new THREE.CylinderGeometry(0.095, 0.072, 0.44, 7); G.thigh.translate(0, -0.22, 0);
+  G.shin = new THREE.CylinderGeometry(0.07, 0.056, 0.42, 7); G.shin.translate(0, -0.21, 0);
+  G.boot = new THREE.BoxGeometry(0.125, 0.11, 0.29); G.boot.translate(0, -0.01, -0.055);
+  G.neck = new THREE.CylinderGeometry(0.055, 0.06, 0.1, 6); G.neck.translate(0, 0.05, 0);
+  G.head = new THREE.SphereGeometry(0.102, 7, 5); G.head.scale(0.95, 1.12, 1.05);
+  G.helmet = new THREE.SphereGeometry(0.125, 8, 4, 0, Math.PI * 2, 0, 1.75); G.helmet.scale(1, 1.02, 1.08);
+  G.ear = new THREE.CylinderGeometry(0.058, 0.058, 0.065, 6); G.ear.rotateZ(Math.PI / 2);
+  G.goggle = new THREE.BoxGeometry(0.19, 0.06, 0.06);
+  return G;
+}
+function crewMat(key, color, extra = {}) {
+  const k = key + ':' + color;
+  if (!_crewMat[k]) _crewMat[k] = new THREE.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0.0, ...extra });
+  return _crewMat[k];
+}
+export function makeDeckCrew(color = 0xe8c21a, opts = {}) {
+  const G = crewGeos();
+  const jersey = crewMat('jersey', color, { roughness: 0.86 });
+  const vestM = crewMat('vest', 0xd4d7d2, { roughness: 0.55, metalness: 0.15 });
+  const bandM = crewMat('band', 0xf6f6ee, { roughness: 0.3, metalness: 0.3, emissive: new THREE.Color(0x26261f) });
+  const pants = crewMat('pants', opts.trousers ?? 0x262a31);
+  const bootM = crewMat('boot', 0x15130f, { roughness: 0.6 });
+  const skin = crewMat('skin', opts.skin ?? 0xc08a62, { roughness: 0.7 });
+  const glove = crewMat('glove', opts.gloves ?? 0xd8ceb0);
+  const gog = crewMat('gog', 0x0b0d10, { roughness: 0.15, metalness: 0.7 });
+  const root = new THREE.Group();
+  const mesh = (geo, mat, parent, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m; };
+  const piv = (parent, x = 0, y = 0, z = 0) => { const p = new THREE.Group(); p.position.set(x, y, z); parent.add(p); return p; };
+  const body = piv(root);                     // whole-body yaw
+  const hips = piv(body, 0, 0.92, 0);         // hip-joint height
+  mesh(G.pelvis, pants, hips, 0, 0.04, 0);
+  const J = { body, hips };
+  for (const s of [-1, 1]) {
+    const side = s < 0 ? 'L' : 'R';
+    const hip = piv(hips, s * 0.1, 0, 0); mesh(G.thigh, pants, hip);
+    const knee = piv(hip, 0, -0.44, 0); mesh(G.shin, pants, knee);
+    const ankle = piv(knee, 0, -0.42, 0); mesh(G.boot, bootM, ankle);
+    J['hip' + side] = hip; J['knee' + side] = knee; J['ankle' + side] = ankle;
+  }
+  const spine = piv(hips, 0, 0.1, 0);         // waist
+  mesh(G.torso, jersey, spine, 0, 0.19, 0);
+  mesh(G.vest, vestM, spine, 0, 0.315, 0).material.side = THREE.DoubleSide;
+  mesh(G.band, bandM, spine, 0, 0.24, 0);
+  mesh(G.collar, vestM, spine, 0, 0.45, 0.01);
+  J.spine = spine;
+  for (const s of [-1, 1]) {
+    const side = s < 0 ? 'L' : 'R';
+    const outer = piv(spine, s * 0.245, 0.41, 0);   // legacy hook (right one = userData.arm)
+    const sh = piv(outer);
+    mesh(G.delt, jersey, sh, 0, -0.01, 0);
+    mesh(G.upper, jersey, sh);
+    const el = piv(sh, 0, -0.29, 0); mesh(G.fore, jersey, el);
+    mesh(G.glove, glove, el, 0, -0.26, 0);
+    J['outer' + side] = outer; J['sh' + side] = sh; J['el' + side] = el;
+  }
+  const neck = piv(spine, 0, 0.46, 0);
+  mesh(G.neck, skin, neck);
+  const head = piv(neck, 0, 0.17, 0);
+  mesh(G.head, skin, head);
+  mesh(G.helmet, jersey, head, 0, 0.015, 0.008);
+  for (const s of [-1, 1]) mesh(G.ear, jersey, head, s * 0.112, -0.01, 0.005);
+  mesh(G.goggle, gog, head, 0, 0.035, -0.085);
+  J.neck = neck; J.head = head;
+
+  // ---- poses (angles in radians; hip/shoulder/elbow +x swings the limb toward -Z; spine -x leans forward)
+  const T = 0.44, S = 0.42, A0 = 0.06;
+  const legH = (a, b) => T * Math.cos(a) + S * Math.cos(a + b) + A0;
+  const stand = {
+    hy: 0.92, hz: 0, yaw: 0, sp: [0, 0, 0], nk: [0, 0, 0],
+    hL: [0, 0, -0.03], kL: 0, aL: 0, hR: [0, 0, 0.03], kR: 0, aR: 0,
+    sL: [0.04, 0, -0.1], eL: 0.18, sR: [0.04, 0, 0.1], eR: 0.18,
+  };
+  const kneel = {
+    hy: legH(1.52, -1.52), hz: 0.15, yaw: 0, sp: [-0.12, 0, 0], nk: [0.1, 0, 0],
+    hL: [1.52, 0, -0.06], kL: -1.52, aL: 0, hR: [-0.29, 0, 0.05], kR: -1.16, aR: 0.35,
+    sL: [0.75, 0, -0.08], eL: 0.7, sR: [0.15, 0, 0.12], eR: 0.3,
+  };
+  const wave = {
+    ...stand, sp: [0, 0, 0.04], nk: [0.08, 0, 0],
+    sR: [0.25, 0, 2.75], eR: 0.35, sL: [0.05, 0, -0.18], eL: 0.2,
+  };
+  const shootA = {
+    ...stand, hL: [0, 0, -0.09], hR: [0, 0, 0.09], nk: [0.05, 0, 0],
+    sR: [2.85, 0, 0.12], eR: 0.25, sL: [0.0, 0, -0.14], eL: 0.15,
+  };
+  const shootB = {
+    hy: legH(1.0, -1.3), hz: -0.14, yaw: 0, sp: [-0.55, -0.12, 0], nk: [0.4, 0.05, 0],
+    hL: [1.0, 0, -0.1], kL: -1.3, aL: 0.3, hR: [-0.45, 0, 0.1], kR: -0.5, aR: 0.95,
+    sL: [-0.55, 0, -0.2], eL: 0.45, sR: [1.6, 0.1, 0.05], eR: 0.04,
+  };
+  const P = { stand, kneel, wave };
+  const L = (a, b, k) => a + (b - a) * k;
+  const set3 = (o, a, b, k) => o.rotation.set(L(a[0], b[0], k), L(a[1], b[1], k), L(a[2], b[2], k));
+  function apply(a, b, k, yawExtra) {
+    hips.position.set(0, L(a.hy, b.hy, k), L(a.hz, b.hz, k));
+    body.rotation.set(0, L(a.yaw, b.yaw, k) + yawExtra, 0);
+    set3(spine, a.sp, b.sp, k); set3(neck, a.nk, b.nk, k);
+    set3(J.hipL, a.hL, b.hL, k); set3(J.hipR, a.hR, b.hR, k);
+    J.kneeL.rotation.set(L(a.kL, b.kL, k), 0, 0); J.kneeR.rotation.set(L(a.kR, b.kR, k), 0, 0);
+    J.ankleL.rotation.set(L(a.aL, b.aL, k), 0, 0); J.ankleR.rotation.set(L(a.aR, b.aR, k), 0, 0);
+    set3(J.shL, a.sL, b.sL, k); set3(J.shR, a.sR, b.sR, k);
+    J.elL.rotation.set(L(a.eL, b.eL, k), 0, 0); J.elR.rotation.set(L(a.eR, b.eR, k), 0, 0);
+    J.outerL.rotation.set(0, 0, 0); J.outerR.rotation.set(0, 0, 0);
+  }
+  root.userData.pose = (name = 'stand', k = 1) => {
+    k = Math.min(1, Math.max(0, k));
+    if (name === 'shooter') apply(shootA, shootB, k, (opts.shooterTurn || 0) * k);
+    else apply(stand, P[name] || stand, k, 0);
+    return root;
+  };
+  root.userData.arm = J.outerR;
+  root.userData.joints = J;
+  root.userData.pose('stand', 0);
+  return root;
+}

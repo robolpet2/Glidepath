@@ -135,6 +135,9 @@ export function makeSky() {
         gl_FragColor = vec4(col, 1.);
       }`
   });
+  // the sky keeps its xyww trick (depth = 1.0, behind everything) even with logarithmicDepthBuffer:
+  // it is drawn first with depthWrite off, so it must NOT get the log-depth chunks (see logDepth()).
+  mat.userData.noLogDepth = true; mat.userData.logDepth = true;
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(18000, 48, 24), mat);
   mesh.frustumCulled = false; mesh.renderOrder = -10;
   return mesh;
@@ -144,6 +147,7 @@ export function makeSky() {
 export function makeWater(size = 160000) {
   const geo = new THREE.PlaneGeometry(size, size, 1, 1); geo.rotateX(-Math.PI / 2);
   const mat = new THREE.ShaderMaterial({
+    extensions: { derivatives: true }, // dFdx/fwidth for the footprint filtering (core in WebGL2)
     uniforms: {
       uTime: { value: 0 }, uOffset: { value: new THREE.Vector2() }, uBlur: { value: 0 },
       uDeep: { value: new THREE.Color(0x06233a) }, uShallow: { value: new THREE.Color(0x0f5a6a) },
@@ -159,30 +163,52 @@ export function makeWater(size = 160000) {
       uniform vec2 uOffset;
       uniform vec3 uDeep, uShallow, uZenith, uHorizon, uSunDir, uSunColor, uFogColor, uExtraLight, uExtraPos;
       varying vec3 vW;
-      vec2 waveGrad(vec2 p){
+      // Detail is band-limited by the pixel footprint (fp, metres) so nothing finer than ~2 px is ever
+      // evaluated -> no frame-to-frame shimmer at distance / grazing angles. The slope variance of the
+      // detail that was filtered away is kept in 'rough' and used to widen the sun glint instead.
+      float lodFade(float size, float fp){ return 1.0 - smoothstep(0.22*size, 0.5*size, fp); }
+      float rough;
+      vec2 waveGrad(vec2 p, float fp, float near){
         vec2 g = vec2(0.);
         float k = 1.0 - uBlur;
-        // directional swell
+        // directional swell (wavelengths ~300, 134, 57, 27 m)
         vec2 d1 = normalize(vec2(1.0, 0.35)), d2 = normalize(vec2(-0.4, 1.0)), d3 = normalize(vec2(0.8,-0.7)), d4 = normalize(vec2(-0.9,-0.2));
-        g += d1 * cos(dot(d1,p)*0.021 + uTime*0.9) * 0.021 * 1.2;
-        g += d2 * cos(dot(d2,p)*0.047 + uTime*1.4) * 0.047 * 0.55;
-        g += d3 * cos(dot(d3,p)*0.11 + uTime*2.1) * 0.11 * 0.22 * k;
-        g += d4 * cos(dot(d4,p)*0.23 + uTime*2.9) * 0.23 * 0.1 * k;
+        float f1 = lodFade(299., fp), f2 = lodFade(134., fp), f3 = lodFade(57., fp) * near, f4 = lodFade(27., fp) * near;
+        g += d1 * cos(dot(d1,p)*0.021 + uTime*0.9) * 0.021 * 1.2 * f1;
+        g += d2 * cos(dot(d2,p)*0.047 + uTime*1.4) * 0.047 * 0.55 * f2;
+        g += d3 * cos(dot(d3,p)*0.11 + uTime*2.1) * 0.11 * 0.22 * k * f3;
+        g += d4 * cos(dot(d4,p)*0.23 + uTime*2.9) * 0.23 * 0.1 * k * f4;
+        rough += (0.00016*(1.-f1) + 0.00017*(1.-f2) + 0.00015*k*k*(1.-f3) + 0.00013*k*k*(1.-f4)) * uChop*uChop; // per-axis slope var
         return g * uChop;
+      }
+      // fine ripple fbm with per-octave footprint fade (fpn: footprint in noise units)
+      float rfbm(vec2 p, float fpn, float near){
+        float s = 0., a = .5, c = 1.;
+        for (int i = 0; i < 5; i++){ s += a * vnoise(p) * lodFade(c, fpn) * near; p = p*2.03 + vec2(17.1,9.2); a *= .5; c /= 2.03; }
+        return s;
       }
       void main(){
         vec2 p = vW.xz + uOffset;
         vec2 ps = vec2(p.x, p.y * mix(1.0, 0.004, uBlur));
-        vec2 g = waveGrad(ps);
+        vec3 V = normalize(cameraPosition - vW);
+        float dist = length(cameraPosition - vW);
+        // pixel footprint in (stretched) world metres; the larger axis, so grazing views filter conservatively
+        float fp = max(length(dFdx(ps)), length(dFdy(ps)));
+        float near = 1.0 - smoothstep(150., 1500., dist);   // small waves + ripples fade out with distance too
+        rough = 0.;
+        vec2 g = waveGrad(ps, fp, near);
         // fine ripples
         float e = 0.6;
         vec2 q = ps*0.09 + vec2(uTime*0.05, uTime*0.03);
-        float n0 = vfbm(q);
-        float nx = vfbm(q+vec2(e*0.09,0.)), nz = vfbm(q+vec2(0.,e*0.09));
-        g += vec2(nx-n0, nz-n0) * 6.0 * (1.0-uBlur*0.8) * uChop;
+        float fpn = fp*0.09;
+        float n0 = rfbm(q, fpn, near);
+        float nx = rfbm(q+vec2(e*0.09,0.), fpn, near), nz = rfbm(q+vec2(0.,e*0.09), fpn, near);
+        float rip = 6.0 * (1.0-uBlur*0.8) * uChop;
+        g += vec2(nx-n0, nz-n0) * rip;
+        // ripple slope variance that was filtered away (measured: ~1.1e-4*rip^2 per axis per octave)
+        float lost = 4.0 - near * (lodFade(1., fpn) + lodFade(1./2.03, fpn) + lodFade(1./4.12, fpn) + lodFade(1./8.37, fpn)) + 0.6 * (1.0 - near * lodFade(1./17., fpn));
+        rough += lost * 0.00011 * rip * rip;
         vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
-        vec3 V = normalize(cameraPosition - vW);
-        float dist = length(cameraPosition - vW);
         // flatten normals with distance (anti-shimmer)
         N = normalize(mix(N, vec3(0.,1.,0.), smoothstep(800., 9000., dist)*0.75));
         vec3 R = reflect(-V, N); R.y = abs(R.y);
@@ -194,8 +220,17 @@ export function makeWater(size = 160000) {
         float sunUp = clamp(uSunDir.y*4.0+0.2, 0., 1.);
         vec3 body = mix(uDeep, uShallow, clamp(g.x*4.0+0.3,0.,1.)*0.5) * (0.25 + 0.75*sunUp);
         vec3 col = mix(body, sky, fres);
-        col += uSunColor * pow(sd, 1600.0) * 14.0 * uSpec;
-        col += uSunColor * pow(sd, 160.0) * 0.45 * uSpec;
+        // sun glint as a slope-space (Beckmann-like) lobe: the base widths match the old pow(sd,1600)/pow(sd,160)
+        // terms; the slope variance that was filtered away (+ what still varies inside a pixel) widens the lobe
+        // with its energy conserved, so distant glitter becomes a steady sun path instead of sparkling pixels.
+        vec3 dNx = dFdx(N), dNy = dFdy(N);
+        float rv = rough + 0.1 * (dot(dNx,dNx) + dot(dNy,dNy));
+        vec3 H = normalize(V + uSunDir);
+        vec2 ds = H.xz / max(H.y, 0.05) - N.xz / N.y;
+        float s2 = dot(ds, ds) * step(0.0, H.y);
+        float v0 = 1.0/6400.0 + rv, v1 = 1.0/640.0 + rv;
+        col += uSunColor * min(exp(-s2 / (2.0*v0)) * 14.0 * (1.0/6400.0) / v0, 6.0) * uSpec;
+        col += uSunColor * exp(-s2 / (2.0*v1)) * 0.45 * (1.0/640.0) / v1 * uSpec;
         // a moving light source (afterburner / lava) glinting on the water
         vec3 L = uExtraPos - vW; float ld = length(L);
         col += uExtraLight * pow(max(dot(R, L/ld),0.), 40.0) * 3.0 / (1.0 + ld*ld/(uExtraRange*uExtraRange));
@@ -373,4 +408,16 @@ export function orientOnPath(obj, pathFn, t, bankMul = 0.55, maxBank = 0.8) {
   obj.quaternion.setFromRotationMatrix(m);
   obj.rotateZ(-bank);
   return { fwd, bank, speed: _c.distanceTo(_a) / (2 * e) };
+}
+
+// Give a ShaderMaterial the logarithmic-depth chunks so it sorts correctly against the built-in
+// materials when the renderer runs with logarithmicDepthBuffer (needed for km-scale scenes).
+const _patched = new WeakSet();
+export function logDepth(mat) {
+  if (!mat || !mat.isShaderMaterial || _patched.has(mat) || mat.userData.noLogDepth) return mat;
+  const close = (src, chunk) => { const i = src.lastIndexOf('}'); return src.slice(0, i) + `\n${chunk}\n` + src.slice(i); };
+  mat.vertexShader = '#include <common>\n#include <logdepthbuf_pars_vertex>\n' + close(mat.vertexShader, '#include <logdepthbuf_vertex>');
+  mat.fragmentShader = '#include <logdepthbuf_pars_fragment>\n' + close(mat.fragmentShader, '#include <logdepthbuf_fragment>');
+  _patched.add(mat);
+  return mat;
 }

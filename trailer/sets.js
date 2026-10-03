@@ -1,7 +1,7 @@
 // The trailer's locations. Each set builds its own geometry once and exposes update(t) hooks.
 import * as THREE from 'three';
 import { clamp, lerp, sstep, rng, fbm, ridged, noise2, makeTerrain, SpritePool, softTex, smokeTex, GLSL_NOISE } from './core.js';
-import { makeTreeMeshes, makeStation, makeDerrick, makeCarrier, makeEscort, makeJet } from './models.js';
+import { makeTreeMeshes, makeStation, makeDerrick, makeCarrier, makeEscort, makeJet, makeDeckCrew } from './models.js';
 
 const C = (hex) => new THREE.Color(hex);
 
@@ -306,21 +306,30 @@ export function buildCarrier() {
   g.add(wake);
   const launchJet = makeJet({ color: 0x8a959f });
   g.add(launchJet);
-  // deck crew
+  // deck crew: color-coded flight-deck sailors (models.js makeDeckCrew); crew[0] is the shooter
   const crew = [];
-  const jerseys = [0xe8c21a, 0x2e9e3a, 0xd82a1a, 0xe8c21a, 0x6b3aa8, 0xffffff];
-  const crewSpots = [[2, -98], [-22, -78], [8, -120], [-26, -112], [16, -40], [-4, -50]];
-  crewSpots.forEach(([x, z], i) => {
-    const p = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.28, 1.2, 8), new THREE.MeshStandardMaterial({ color: jerseys[i], roughness: 0.8 }));
-    body.position.y = 1.15; p.add(body);
-    const legs = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.24, 0.9, 8), new THREE.MeshStandardMaterial({ color: 0x2b2b2b }));
-    legs.position.y = 0.45; p.add(legs);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), new THREE.MeshStandardMaterial({ color: jerseys[i], roughness: 0.6 }));
-    head.position.y = 1.95; p.add(head);
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.9, 6), body.material); arm.position.set(0.38, 1.4, 0); arm.rotation.z = 0.25; p.add(arm);
-    p.userData.arm = arm;
-    p.position.set(x, carrier.userData.DY + 0.8, z); p.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  const DYc = carrier.userData.DY + 0.005;   // the deck slab's top face is at DY
+  const JC = { yellow: 0xe8c21a, green: 0x2e9e3a, red: 0xd82a1a, purple: 0x6b3aa8, white: 0xf0f0ea, brown: 0x6b4a2b };
+  const skins = [0xc08a62, 0x8a5a3c, 0xe0b090, 0x6e4630, 0xd09a70];
+  const face = (x, z, tx, tz) => Math.atan2(-(tx - x), -(tz - z));
+  // [x, z, jersey, pose, k, look-at x, look-at z]
+  const crewSpots = [
+    [4, -98, 'yellow', 'shooter', 0, -10, -86],   // shooter: faces the jet; pose('shooter', k) turns him toward the bow
+    [-5.2, -94, 'green', 'kneel', 1, -10, -92],
+    [-15.5, -95, 'green', 'stand', 1, -10, -91],
+    [-1, -108, 'white', 'stand', 1, -10, -86],
+    [-22, -100, 'yellow', 'wave', 1, -10, -86],
+    [11, -105, 'red', 'kneel', 1, -10, -90],
+    [-24, -78, 'purple', 'stand', 1, -10, -82],
+    [-4.6, -87.5, 'brown', 'stand', 1, -10, -86],
+    [-4, -128, 'green', 'stand', 1, -10, -95],
+  ];
+  crewSpots.forEach(([x, z, jc, pose, k, tx, tz], i) => {
+    let turn = i === 0 ? face(x, z, -10, -104) - face(x, z, tx, tz) : 0;
+    turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+    const p = makeDeckCrew(JC[jc], { skin: skins[i % skins.length], shooterTurn: turn });
+    p.userData.pose(pose === 'shooter' ? 'stand' : pose, k);   // the shooter stands until trailer.js drives pose('shooter', k)
+    p.position.set(x, DYc, z); p.rotation.y = face(x, z, tx, tz);
     g.add(p); crew.push(p);
   });
   const steam = new SpritePool(220, { tex: smokeTex() }); g.add(steam.mesh);

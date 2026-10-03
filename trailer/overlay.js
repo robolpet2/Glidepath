@@ -238,11 +238,15 @@ function title(ctx, S, t) {
   const ca = seg(t, a + 3.4, a + 3.9) * fadeAll;
   ctx.globalAlpha = ca;
   ctx.strokeStyle = RED; ctx.lineWidth = 2;
-  const bw = 520, bh = 60, by = cy + 250;
-  ctx.strokeRect(cx - bw / 2, by, bw, bh);
+  // the box is sized to the text it holds, with even padding on every side
+  const cta = 'TAKE OFF  ·  PLAY IN YOUR BROWSER', ctaTrack = 4;
+  ctx.font = '700 24px "JetBrains Mono", "DejaVu Sans Mono", monospace';
+  let tw = -ctaTrack; for (const ch of cta) tw += ctx.measureText(ch).width + ctaTrack;
+  const bw = Math.ceil(tw + 2 * 40), bh = 60, by = cy + 250;
   ctx.fillStyle = 'rgba(225,6,0,0.16)'; ctx.fillRect(cx - bw / 2, by, bw, bh);
-  ctx.font = '700 24px "JetBrains Mono", "DejaVu Sans Mono", monospace'; ctx.fillStyle = OFF;
-  tracked(ctx, 'TAKE OFF  ·  PLAY IN YOUR BROWSER', cx, by + bh / 2 + 1, 4, 'center');
+  ctx.strokeRect(cx - bw / 2, by, bw, bh);
+  ctx.fillStyle = OFF; ctx.textBaseline = 'middle';
+  tracked(ctx, cta, cx, by + bh / 2 + 1, ctaTrack, 'center');
   ctx.restore();
 }
 
@@ -269,6 +273,6 @@ export function drawOverlay(ctx, t, S) {
     tracked(ctx, 'HYPER CRUISE COMPLETE  ·  25 KM', S.W / 2, S.BAR + 70, 6, 'center');
     ctx.restore();
   }
-  card(ctx, S, t, 44.7, 48.35, '05', 'CARRIER OPS', 'CATAPULT LAUNCH AT SEA', (u) => `CVN 73  ·  WIND ${Math.round(28 + Math.sin(u * 2) * 2)} KT DOWN THE DECK  ·  CAT 1`);
+  card(ctx, S, t, 44.7, 48.35, '05', 'CARRIER OPS', 'STRIKE SQUAD · CATAPULT LAUNCH AT SEA', (u) => `CVN 73  ·  WIND ${Math.round(28 + Math.sin(u * 2) * 2)} KT DOWN THE DECK  ·  CATS 1 + 2`);
   title(ctx, S, t);
 }

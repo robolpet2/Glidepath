@@ -5,7 +5,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { clamp, lerp, sstep, ease, seg, rng, noise2, makeSky, makeWater, GradeShader, orientOnPath } from './core.js';
+import { clamp, lerp, sstep, ease, seg, rng, noise2, makeSky, makeWater, GradeShader, orientOnPath, logDepth } from './core.js';
 import { makeJet, makeRocket } from './models.js';
 import { buildHeartland, buildDesert, buildArctic, buildVolcano, buildCarrier, buildHyper, riverX, heartHeight, duneHeight, desertHeight, arcticHeight, volcHeight, VOLC } from './sets.js';
 import { drawOverlay, DURATION } from './overlay.js';
@@ -13,12 +13,12 @@ import { drawOverlay, DURATION } from './overlay.js';
 const W = 1920, H = 1080, PH = 804, BAR = (H - PH) / 2;
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 
-const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true, powerPreference: 'high-performance', logarithmicDepthBuffer: false });
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
 renderer.setPixelRatio(1); renderer.setSize(W, PH);
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, W / PH, 0.5, 40000);
+const camera = new THREE.PerspectiveCamera(45, W / PH, 0.5, 60000);
 scene.fog = new THREE.FogExp2(0xffffff, 0.0001);
 
 const sky = makeSky(); scene.add(sky);
@@ -50,6 +50,16 @@ const SETS = {
 for (const k in SETS) scene.add(SETS[k].group);
 const jet = makeJet(); scene.add(jet);
 const rocket = makeRocket(); scene.add(rocket);
+// every custom shader in the scene gets the log-depth chunks (depth precision over km distances)
+function patchLogDepth() {
+  scene.traverse(o => {
+    if (!o.material) return;
+    for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+      if (m.isShaderMaterial && !m.userData.logDepth) { logDepth(m); m.userData.logDepth = true; m.needsUpdate = true; }
+    }
+  });
+}
+patchLogDepth();
 
 // ---------- environments ----------
 function sunDir(el, az) { el *= Math.PI / 180; return V3(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize(); }
@@ -60,7 +70,7 @@ const ENV = {
   arctic: { zen: 0x020611, hor: 0x0b2234, gnd: 0x04080e, el: -14, az: 0.4, sunC: [0.2, 0.3, 0.5], glow: 0.0, light: [0x8fafe0, 0.9], hemi: [0x2f5a7a, 0x0c1820, 0.45], fog: 0.00004, exp: 1.15, deep: 0x02080e, clouds: 0, stars: 1, aurora: 1, moon: 1, moonDir: sunDir(22, -0.5) },
   volc: { zen: 0x0a0818, hor: 0x7a2a1a, gnd: 0x080505, el: -2.5, az: 2.7, sunC: [1.0, 0.3, 0.1], glow: 0.5, light: [0xff7040, 0.35], hemi: [0x3a2c4a, 0x1a0805, 0.3], fog: 0.0001, exp: 1.0, deep: 0x05080a, clouds: 0.3, cc: [0xff8050, 0x2a1a30], stars: 0.35 },
   hyper: { zen: 0x04143a, hor: 0x9ab8d6, gnd: 0x2a3a48, el: 6, az: 0.62, sunC: [1.0, 0.9, 0.76], glow: 1.0, light: [0xfff2e0, 2.8], hemi: [0x90b0d8, 0x405060, 0.7], fog: 0.00004, exp: 1.0, deep: 0x041c34, clouds: 0.2, cc: [0xffffff, 0x8a9ab0] },
-  sunset: { zen: 0x1a2c58, hor: 0xe0845a, gnd: 0x1a1a22, el: 4.5, az: -1.05, sunC: [1.0, 0.56, 0.26], glow: 0.95, light: [0xffa060, 2.1], hemi: [0x7080a8, 0x403028, 0.55], fog: 0.00008, exp: 0.95, deep: 0x06182a, clouds: 0.55, cc: [0xffb070, 0x50405a] }
+  sunset: { zen: 0x1a2c58, hor: 0xd88a62, gnd: 0x1a1a22, el: 4.5, az: -1.05, sunC: [1.0, 0.58, 0.3], glow: 0.5, light: [0xffa868, 1.5], hemi: [0x7080a8, 0x403028, 0.6], fog: 0.00008, exp: 0.88, deep: 0x06182a, clouds: 0.55, cc: [0xffb070, 0x50405a] }
 };
 const pmrem = new THREE.PMREMGenerator(renderer);
 function applyEnv(name, overrides = {}) {
@@ -124,7 +134,7 @@ const flash = (t, t0, dur = 0.14, peak = 1) => (t >= t0 && t < t0 + dur) ? peak 
 const P = {
   dawn: (t, o) => { const pass = 3.25; const z = 10500 - 95 * pass - 190 * (t - pass); const k = Math.max(0, t - pass); return o.set(-10, 12 + k * k * 7, z); },
   heart: (t, o) => { const tau = t - 5; const z = 2700 - 235 * tau; return o.set(riverX(z), 50 + 6 * Math.sin(tau * 1.3), z); },
-  desert: (t, o) => { const tau = t - 11; const z = 100 - 215 * tau; const x = 34 * Math.sin(tau * 1.1); return o.set(x, duneHeight(x, z) + 17, z); },
+  desert: (t, o) => { const tau = t - 11; const z = 100 - 215 * tau; const x = 30 * Math.sin(tau * 0.9); return o.set(x, 40 + 5 * Math.sin(tau * 0.6), z); },
   arctic: (t, o) => { const z = -1300 + 320 * (t - 18); const k = Math.max(0, z); return o.set(-20 + 8 * Math.sin(t), 30 + k * 0.34 + k * k * 0.00012, z); },
   volcA: (t, o) => o.set(-900 + 420 * (t - 25), 230 + 12 * Math.sin(t), 3500),
   volcB: (t, o) => { const tau = t - 30.0; return o.set(-120 + 360 * tau, 760 - 10 * tau, 420 - 120 * tau); }
@@ -254,14 +264,13 @@ shot(0, 5, (t) => {
   show('heart');
   const sd = applyEnv('dawn', { el: lerp(-1.4, 2.4, t / 5) });
   const cz = 10500 - 95 * t;
-  const cp = V3(0, 4.5 + Math.sin(t * 1.1) * 0.4, cz).add(shake(t, 0.15, 3));
+  const cp = V3(0, 4.5 + Math.sin(t * 1.1) * 0.25, cz);
   aim(cp, V3(-60, 40, cz - 3000), 40);
   if (t > 2.6) {
     placeJet(P.dawn, t, 1);
     lightOnJet(1, 0xff8a3a, 3000, 300);
     water.material.uniforms.uExtraLight.value.setRGB(3, 1.2, 0.4); water.material.uniforms.uExtraPos.value.copy(jetLight.position); water.material.uniforms.uExtraRange.value = 120;
     const d = Math.abs(t - 3.25);
-    grade.uniforms.uShake.value.set(noise2(t * 40, 1) * 0.004 * sstep(0.6, 0, d), noise2(t * 40, 2) * 0.004 * sstep(0.6, 0, d));
   }
   shadowAt(cp, 300, false);
   grade.uniforms.uFade.value = 1 - ease.out(seg(t, 0.0, 1.6));
@@ -276,7 +285,7 @@ shot(5, 8.5, (t) => {
   const info = placeJet(P.heart, t, 0.55);
   const fwd = info.fwd, right = V3().crossVectors(fwd, V3(0, 1, 0)).normalize();
   const jp = jet.position.clone();
-  const cp = jp.clone().addScaledVector(fwd, -34).addScaledVector(right, 13).add(V3(0, 7, 0)).add(shake(t, 0.35, 5));
+  const cp = jp.clone().addScaledVector(fwd, -34).addScaledVector(right, 13).add(V3(0, 7, 0));
   cp.y = Math.max(cp.y, heartHeight(cp.x, cp.z) + 6);
   aim(cp, jp.clone().addScaledVector(fwd, 30).add(V3(0, -1, 0)), 52, -info.bank * 0.25);
   shadowAt(jp, 420);
@@ -293,7 +302,7 @@ shot(8.5, 11, (t) => {
   const jp = jet.position.clone();
   const tgt = jp.clone().add(V3(0, 2, -18));
   const pass = sstep(9.2, 10.0, t);
-  aim(cp.add(shake(t, 0.25 + 0.5 * sstep(0.5, 0, Math.abs(t - 9.62)), 14)), tgt, lerp(36, 46, pass));
+  aim(cp, tgt, lerp(36, 46, pass));
   shadowAt(jp, 380);
   state.sun = { dir: sd, k: 0.6 };
 });
@@ -320,7 +329,7 @@ shot(14.5, 18, (t) => {
   const info = placeJet(P.desert, t, 0.85);
   const jp = jet.position.clone();
   const sw = Math.sin((t - 14.5) * 0.6);
-  const cp = jp.clone().add(V3(-26 - 6 * sw, 1.5, -10 + 14 * sw)).add(shake(t, 0.35, 7));
+  const cp = jp.clone().add(V3(-26 - 6 * sw, 1.5, -10 + 14 * sw));
   cp.y = Math.max(cp.y, desertHeight(cp.x, cp.z) + 3);
   aim(cp, jp.clone().add(V3(0, 0.5, -6)), 42, 0.03);
   desertDust(t, P.desert, SETS.desert.dust, cp); flareFlames(t, SETS.desert);
@@ -353,7 +362,7 @@ shot(21.5, 25, (t) => {
   const cp = V3(58, 15, 38);
   const jp = jet.position.clone();
   const near = sstep(0.6, 0, Math.abs(t - 22.1));
-  aim(cp.clone().add(shake(t, 0.15 + 0.9 * near, 18)), jp.clone().add(V3(0, 4, 0)), 50);
+  aim(cp, jp.clone().add(V3(0, 4, 0)), 50);
   SETS.arctic.station.userData.set(t); runwayLights(t, SETS.arctic); snowfall(t, SETS.arctic.snow, cp);
   shadowAt(V3(0, 0, 0), 600, false);
   bloom.strength = 0.9; bloom.threshold = 0.85;
@@ -547,10 +556,11 @@ shot(36, 44, (t) => {
 });
 
 // S8 · 44–62 · CARRIER OPS
-const CAT = { a: 34, t0: 51.6 };
-function launchZ(t) {
+// two bow catapults side by side: cat 1 (x = catX, the set's launchJet) fires at t0, cat 2 (x = x2) ~0.85 s later
+const CAT = { a: 40, t0: 51.6, t0b: 52.45, x2: 4 };
+function launchZ(t, t0 = CAT.t0) {
   const C = SETS.carrier.carrier.userData;
-  const tl = Math.max(0, t - CAT.t0);
+  const tl = Math.max(0, t - t0);
   let z = C.catZ0 - 0.5 * CAT.a * tl * tl;
   const tb = Math.sqrt(2 * (C.catZ0 - C.catZ1) / CAT.a);
   let y = C.DY + 2.2;
@@ -561,109 +571,200 @@ function launchZ(t) {
   }
   return { z, y, tl, tb };
 }
+// the strike squad: a 4-ship (lead, left, right, slot) + the two catapult jets, which join as outer wingmen
+const SQUAD = (() => {
+  const S = SETS.carrier, g = S.group, C = S.carrier.userData;
+  const four = [0, 1, 2, 3].map(() => { const j = makeJet({ color: 0x7a858f }); j.visible = false; g.add(j); return j; });
+  const jet2 = makeJet({ color: 0x8a959f }); g.add(jet2);
+  // cat 2's jet blast deflector, raised behind the nozzles (same build as the set's cat 1 JBD)
+  const jbdMat = (C.jbd && C.jbd.material) || new THREE.MeshStandardMaterial({ color: 0x3b4249, roughness: 0.7, metalness: 0.2 });
+  const jbd2 = new THREE.Mesh(new THREE.BoxGeometry(13, 0.6, 7), jbdMat);
+  jbd2.position.set(CAT.x2 + 0.5, C.DY + 2.4, C.catZ0 + 16); jbd2.rotation.x = 1.0; jbd2.castShadow = true; jbd2.receiveShadow = true; g.add(jbd2);
+  // keep cat 2's lane clear of deck crew (the shooter kneels between the two cats)
+  S.crew.forEach((c, i) => {
+    const p = c.position;
+    if (p.z < -60 && p.x > CAT.x2 - 6.5 && p.x < CAT.x2 + 7) p.x = (i === 0 || p.z > -95) ? (C.catX + CAT.x2) / 2 : CAT.x2 + 11;
+  });
+  // slots in the formation frame (x right, y up, z aft); 0-3 the diamond, 4/5 the catapult jets
+  const slots = [V3(0, 0, 0), V3(-13, -1.5, 12), V3(13, -1.5, 12), V3(0, -3, 24), V3(-26, -3, 22), V3(26, -3, 22)];
+  return { four, jet2, jbd2, slots };
+})();
+// S8a: the 4-ship's low pass over the deck, from astern
+function squadPassA(t, o) { const u = t - 44; return o.set(125 - 38 * u, 72 - 3 * u + Math.max(0, u - 3.2) ** 2 * 6, 520 - 190 * u); }
+// S8d: the formation anchor (the lead) — overflies the bow camera, then a long climb into the sunset
+const SQK = [[53.0, -40, 70, 520], [54.4, 32, 82, 160], [55.6, 24, 104, -150], [56.8, 18, 132, -420], [58.0, 14, 168, -690], [60.0, 2, 262, -1020], [62.0, -22, 400, -1280], [63.0, -36, 480, -1400]];
+function squadAnchor(t, o) {
+  const K = SQK, n = K.length;
+  let i = 0; while (i < n - 2 && t > K[i + 1][0]) i++;
+  const k0 = K[Math.max(0, i - 1)], k1 = K[i], k2 = K[i + 1], k3 = K[Math.min(n - 1, i + 2)];
+  const u = clamp((t - k1[0]) / (k2[0] - k1[0]), 0, 1), u2 = u * u, u3 = u2 * u;
+  const cr = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * u + (2 * a - 5 * b + 4 * c - d) * u2 + (-a + 3 * b - 3 * c + d) * u3);
+  return o.set(cr(k0[1], k1[1], k2[1], k3[1]), cr(k0[2], k1[2], k2[2], k3[2]), cr(k0[3], k1[3], k2[3], k3[3]));
+}
+function launchPath(t, which, o) {
+  const C = SETS.carrier.carrier.userData;
+  const L = launchZ(t, which ? CAT.t0b : CAT.t0);
+  return o.set(which ? CAT.x2 : C.catX, L.y, L.z);
+}
+const _sa = new THREE.Vector3(), _sb = new THREE.Vector3();
+// a catapult jet easing off its climb-out into its outer slot of the formation
+function joinPath(which) {
+  const w0 = which ? 56.4 : 55.4, w1 = which ? 59.4 : 58.4;
+  return (t, o) => {
+    launchPath(t, which, _sa);
+    squadAnchor(t, _sb).add(SQUAD.slots[4 + which]);
+    return o.copy(_sa).lerp(_sb, sstep(w0, w1, t));
+  };
+}
+function placeFlyer(j, pathFn, t, power, bank = 0.5) {
+  j.visible = true;
+  orientOnPath(j, pathFn, t, bank);
+  j.userData.set(t, power);
+}
 function carrierCommon(t, opts = {}) {
   show('carrier');
   const sd = applyEnv('sunset');
   const S = SETS.carrier, C = S.carrier.userData;
   C.set(t);
-  S.wakeMat.uniforms.uTime.value = t; S.wakeMat.uniforms.uSun.value.setRGB(1, 0.75, 0.55);
+  S.wakeMat.uniforms.uTime.value = t; S.wakeMat.uniforms.uSun.value.setRGB(0.9, 0.7, 0.52);
   water.material.uniforms.uOffset.value.set(0, -t * 14);
-  // the launching jet
-  const L = launchZ(t);
-  const jp = V3(C.catX, L.y, L.z);
-  const J = S.launchJet;
-  J.position.copy(jp);
-  const pitch = L.tl > L.tb ? clamp((L.tl - L.tb - 0.3) * 0.25, 0, 0.32) : 0;
-  J.rotation.set(pitch, 0, 0);
-  const pw = t < 50.4 ? 0.25 : lerp(0.25, 1, sstep(50.4, 51.0, t));
-  J.userData.set(t, pw);
-  jetLight.color.set(0xff9a50); jetLight.intensity = 25000 * pw; jetLight.distance = 120; jetLight.position.copy(jp).add(V3(0, 0, 14));
-  // crew: the shooter's arm comes down to launch
-  S.crew.forEach((c, i) => { c.userData.arm.rotation.z = i === 0 ? lerp(2.6, 0.6, sstep(51.2, 51.5, t)) : 0.25 + 0.15 * Math.sin(t * 2 + i); });
-  // catapult steam + the JBD glow
+  water.material.uniforms.uChop.value = 0.7;
+  water.material.uniforms.uSpec.value = 0.3;
+  SQUAD.four.forEach(j => { j.visible = false; });
+  // the two catapult jets: run-up on deck (afterburner capped so the deck doesn't blow out), then the stroke
+  const jets = [S.launchJet, SQUAD.jet2], xs = [C.catX, CAT.x2], t0s = [CAT.t0, CAT.t0b], pws = [];
+  const Ls = [];
+  jets.forEach((J, k) => {
+    const L = launchZ(t, t0s[k]); Ls.push(L);
+    J.visible = true;
+    J.position.set(xs[k], L.y, L.z);
+    const pitch = L.tl > L.tb ? clamp((L.tl - L.tb - 0.3) * 0.25, 0, 0.32) : 0;
+    J.rotation.set(pitch, 0, 0);
+    const spool = k ? sstep(50.7, 51.3, t) : sstep(50.4, 51.0, t);
+    const pw = lerp(0.2, 0.6, spool) + 0.25 * sstep(L.tb, L.tb + 1.2, L.tl);
+    J.userData.set(t, pw); pws.push(pw);
+  });
+  const jp = jets[0].position.clone(), jp2 = jets[1].position.clone();
+  const L = Ls[0];
+  const onDeck = pws.map((p, k) => (Ls[k].tl === 0 ? p : 0));
+  const pwDeck = Math.max(onDeck[0], onDeck[1]);
+  jetLight.color.set(0xff9a50); jetLight.intensity = 4500 * pwDeck; jetLight.distance = 70;
+  jetLight.position.set((C.catX + CAT.x2) / 2, C.DY + 3, C.catZ0 + 12);
+  // crew: the shooter signals cat 1, then cat 2
+  S.crew.forEach((c, i) => {
+    if (c.userData.pose) {
+      if (i === 0) {
+        const k1 = sstep(51.2, 51.5, t) * (1 - sstep(51.75, 51.95, t)), k2 = sstep(52.05, 52.35, t);
+        c.userData.pose('shooter', Math.max(k1, k2));
+      } else if (i === 4) c.userData.pose('wave', 0.75 + 0.25 * Math.sin(t * 3.1));
+    } else {
+      c.userData.arm.rotation.z = i === 0 ? lerp(2.6, 0.6, sstep(51.2, 51.5, t)) : 0.25 + 0.15 * Math.sin(t * 2 + i);
+    }
+  });
+  // catapult steam + the burst left behind each shuttle
   const sp = S.steam; sp.begin();
   const list = [];
-  for (let i = 0; i < 60; i++) {
-    const z = C.catZ1 + 4 + hash(i) * (C.catZ0 - C.catZ1 - 8);
-    const age = ((t * 0.6 + hash(i + 1)) % 1);
-    list.push([C.catX + (hash(i + 2) - 0.5) * 1.6, C.DY + 1 + age * 5, z, 2 + age * 6, 0.9, 0.35 * Math.sin(age * Math.PI)]);
-  }
-  // the burst left behind the shuttle
-  if (L.tl > 0) for (let i = 0; i < 120; i++) {
-    const zz = C.catZ0 - (i / 120) * (C.catZ0 - C.catZ1);
-    if (zz < L.z + 6) continue;
-    const t_pass = CAT.t0 + Math.sqrt(2 * (C.catZ0 - zz) / CAT.a);
-    const age = t - t_pass; if (age < 0) continue;
-    list.push([C.catX + (hash(i + 7) - 0.5) * 3 * (1 + age), C.DY + 1 + age * 4 + hash(i) * 2, zz + age * 9, 3 + age * 9, 1.0, 0.75 * Math.exp(-age * 0.7)]);
-  }
+  xs.forEach((cx, k) => {
+    for (let i = 0; i < 36; i++) {
+      const h = i + k * 50;
+      const z = C.catZ1 + 4 + hash(h) * (C.catZ0 - C.catZ1 - 8);
+      const age = ((t * 0.6 + hash(h + 1)) % 1);
+      list.push([cx + (hash(h + 2) - 0.5) * 1.6, C.DY + 1 + age * 5, z, 2 + age * 6, 0.85, 0.3 * Math.sin(age * Math.PI)]);
+    }
+    const Lk = Ls[k];
+    if (Lk.tl > 0) for (let i = 0; i < 60; i++) {
+      const zz = C.catZ0 - (i / 60) * (C.catZ0 - C.catZ1);
+      if (zz < Lk.z + 6) continue;
+      const t_pass = t0s[k] + Math.sqrt(2 * (C.catZ0 - zz) / CAT.a);
+      const age = t - t_pass; if (age < 0) continue;
+      const h = i + k * 70 + 7;
+      list.push([cx + (hash(h) - 0.5) * 3 * (1 + age), C.DY + 1 + age * 4 + hash(h + 3) * 2, zz + age * 9, 3.5 + age * 10, 0.9, 0.7 * Math.exp(-age * 0.7)]);
+    }
+  });
   const cam = opts.cam || camera.position;
   list.sort((A, B) => (B[0] - cam.x) ** 2 + (B[1] - cam.y) ** 2 + (B[2] - cam.z) ** 2 - ((A[0] - cam.x) ** 2 + (A[1] - cam.y) ** 2 + (A[2] - cam.z) ** 2));
-  for (const s of list) sp.add(s[0], s[1], s[2], s[3], s[4], s[4] * 0.95, s[4] * 0.92, s[5], hash(s[2]) * 6);
+  for (const s of list) sp.add(s[0], s[1], s[2], s[3], s[4], s[4] * 0.93, s[4] * 0.88, s[5], hash(s[2]) * 6);
   sp.end();
+  // the afterburner glow washing the raised deflectors (kept low: no white-out)
   const dg = S.deckGlow; dg.begin();
-  if (L.tl === 0) dg.add(C.catX, C.DY + 3, C.catZ0 + 13, 7 * pw, 1.6, 0.6, 0.2, 0.5 * pw);
+  xs.forEach((cx, k) => { if (onDeck[k] > 0) dg.add(cx, C.DY + 2.6, C.catZ0 + 13, 5 * onDeck[k], 1.0, 0.45, 0.16, 0.22 * onDeck[k]); });
   dg.end();
-  bloom.strength = 0.55; bloom.threshold = 1.0;
-  water.material.uniforms.uSpec.value = 0.6;
-  grade.uniforms.uTint.value.setRGB(1.04, 1.0, 0.96);
-  return { sd, jp, C, L };
+  bloom.strength = 0.4; bloom.threshold = 1.15; bloom.radius = 0.5;
+  grade.uniforms.uTint.value.setRGB(1.03, 1.0, 0.97);
+  grade.uniforms.uContrast.value = 1.04;
+  return { sd, jp, jp2, C, L, Ls };
 }
-// S8a · 44–48.5 · golden hour; the carrier group from the air, the Rocket drops in over it
+// aim at `target`, then turn so it lands at NDC (nx, ny) instead of the centre
+function aimFramed(pos, target, fov, nx, ny) {
+  aim(pos, target, fov);
+  const tv = Math.tan(fov * Math.PI / 360), th = tv * camera.aspect;
+  camera.rotateY(Math.atan(nx * th)); camera.rotateX(-Math.atan(ny * tv));
+  return camera.quaternion.clone();
+}
+// S8a · 44–48.5 · golden hour; the carrier group from the air, the strike squad roars low over the deck
 shot(44, 48.5, (t) => {
   const tau = (t - 44) / 4.5;
   const cp = V3(lerp(250, 120, ease.inOut(tau)), lerp(120, 42, ease.inOut(tau)), lerp(380, 210, ease.inOut(tau)));
   const { sd } = carrierCommon(t, { cam: cp });
   aim(cp, V3(lerp(0, -10, tau), 18, lerp(-30, -70, tau)), 40);
-  // the Rocket, out of HYPER, streaking across the sunset
-  if (t < 46.4) {
-    rocket.visible = true;
-    const k = (t - 44);
-    const rpos = V3(-900 + 700 * k, 260 - 50 * k, -700 + 120 * k);
-    rocket.position.copy(rpos);
-    rocket.lookAt(rpos.clone().add(V3(700, -50, 120))); rocket.rotateY(Math.PI);
-    rocket.userData.set(t, 1.2, 1.5);
-  }
+  // the 4-ship in a tight diamond, burners lit
+  SQUAD.four.forEach((j, i) => {
+    const off = SQUAD.slots[i];
+    placeFlyer(j, (tt, o) => squadPassA(tt, o).add(off), t, 0.85, 0.35);
+  });
   shadowAt(V3(0, 0, 0), 240);
-  grade.uniforms.uFlash.value = Math.max(0, 1 - (t - 44) / 0.35);
+  grade.uniforms.uFlash.value = 0.6 * Math.max(0, 1 - (t - 44) / 0.35);
   grade.uniforms.uFlashColor.value.setRGB(0.92, 0.97, 1.0);
-  state.sun = { dir: sd, k: 1.0 };
+  state.sun = { dir: sd, k: 0.25 };
 });
-// S8b · 48.5–51.6 · on deck, behind the jet on the catapult; afterburner lights up
+// S8b · 48.5–51.6 · crane shot behind the raised deflectors: two jets on cats 1 and 2, burners light up
 shot(48.5, 51.6, (t) => {
   const tau = (t - 48.5) / 3.1;
   const S = SETS.carrier, C = S.carrier.userData;
-  const cp = V3(C.catX + 17 - 3 * tau, C.DY + 1.7, C.catZ0 + 14 - 5 * ease.inOut(tau));
+  const mx = (C.catX + CAT.x2) / 2;
+  const cp = V3(mx + 1.5 - 1.5 * tau, C.DY + 13.5 - 2.5 * ease.inOut(tau), C.catZ0 + 27 - 4 * ease.inOut(tau));
   const { sd } = carrierCommon(t, { cam: cp });
-  aim(cp.clone().add(shake(t, 0.03 + 0.12 * sstep(50.4, 51.0, t), 20)), V3(C.catX - 2, C.DY + 2.8, C.catZ0 - 18), 42);
-  shadowAt(V3(C.catX, C.DY, C.catZ0 - 30), 90);
-  state.sun = { dir: sd, k: 1.0 };
-  grade.uniforms.uFlash.value = flash(t, 48.5, 0.1, 0.4);
+  aim(cp, V3(mx, C.DY + 1.5, C.catZ0 - 30), 44);
+  shadowAt(V3(mx, C.DY, C.catZ0 - 20), 90);
+  state.sun = { dir: sd, k: 0.25 };
+  grade.uniforms.uFlash.value = flash(t, 48.5, 0.1, 0.25);
 });
-// S8c · 51.6–54.4 · LAUNCH — from the bow edge; it screams past and climbs into the sun
+// S8c · 51.6–54.4 · LAUNCH — low at the bow edge; cat 1 screams past, cat 2 right behind it, both climb away
+const _d1 = new THREE.Vector3(), _d2 = new THREE.Vector3();
 shot(51.6, 54.4, (t) => {
   const S = SETS.carrier, C = S.carrier.userData;
-  const cp0 = V3(C.catX - 13, C.DY + 1.3, -150);
-  const { sd, jp } = carrierCommon(t, { cam: cp0 });
-  const L = launchZ(t);
-  const near = sstep(0.4, 0, Math.abs(t - (CAT.t0 + Math.sqrt(2 * (C.catZ0 + 152) / CAT.a))));
-  const tgt = jp.clone().add(V3(0, 2, -4));
-  const cp = cp0.clone().add(shake(t, 0.05 + 0.5 * near, 22));
-  aim(cp, tgt, lerp(40, 54, sstep(53.2, 54.2, t)));
+  const cp = V3(C.catX - 13, C.DY + 1.3, -150);
+  const { sd, jp, jp2 } = carrierCommon(t, { cam: cp });
+  // look direction: a weighted blend of both jets; jet 1 alone through its fly-by, both again once cat 2 passes
+  _d1.copy(jp).add(V3(0, 2, -4)).sub(cp).normalize();
+  _d2.copy(jp2).add(V3(0, 2, -4)).sub(cp).normalize();
+  const w2 = 1 - sstep(53.0, 53.35, t) + sstep(53.95, 54.35, t);
+  const dir = _d1.multiplyScalar(1.0).addScaledVector(_d2, 1.2 * w2).normalize();
+  aim(cp, cp.clone().add(dir), lerp(46, 54, sstep(53.0, 54.2, t)));
   shadowAt(V3(C.catX, C.DY, -120), 90);
-  grade.uniforms.uCA.value = 0.0012 + 0.005 * near;
-  state.sun = { dir: sd, k: 1.0 };
+  state.sun = { dir: sd, k: 0.25 };
 });
-// S8d · 54.4–62 · the jet climbing away into the sunset; the title
+// S8d · 54.4–62 · the squad joins up and climbs into the sunset; the title
 shot(54.4, 62, (t) => {
   const S = SETS.carrier, C = S.carrier.userData;
-  const { sd, jp } = carrierCommon(t);
   const tau = t - 54.4;
-  const cp = V3(C.catX - 13 + tau * 2, C.DY + 1.3 + tau * 1.5, -150 - tau * 6);
-  aim(cp, jp.clone().lerp(V3(-60, 260, -2600), sstep(0, 5, tau)), lerp(54, 46, sstep(0, 6, tau)));
+  const cp = V3(C.catX - 13 + tau * 1.5, C.DY + 1.3 + tau * 1.2, -150 - tau * 4);
+  const { sd, jp, jp2 } = carrierCommon(t, { cam: cp });
+  // the 4-ship and the two catapult jets sliding into their slots
+  SQUAD.four.forEach((j, i) => { const off = SQUAD.slots[i]; placeFlyer(j, (tt, o) => squadAnchor(tt, o).add(off), t, 0.9, 0.4); });
+  placeFlyer(S.launchJet, joinPath(0), t, 0.9, 0.4);
+  placeFlyer(SQUAD.jet2, joinPath(1), t, 0.9, 0.4);
+  // camera: follows the two departing jets, then frames the formation in the upper right, above the title
+  const fov = lerp(54, 24, ease.inOut(seg(t, 55.2, 60.5)));
+  aim(cp, jp.clone().lerp(jp2, 0.5).add(V3(0, 4, 0)), fov);
+  const qa = camera.quaternion.clone();
+  const anc = squadAnchor(t, V3()).add(V3(0, -2, 14));
+  const qb = aimFramed(cp, anc, fov, 0.28, 0.6);
+  camera.quaternion.slerpQuaternions(qa, qb, ease.inOut(seg(t, 55.0, 57.6)));
   shadowAt(V3(C.catX, C.DY, -150), 120);
   grade.uniforms.uFade.value = 0.42 * sstep(0, 1.0, tau) + (1 - 0.42) * sstep(60.6, 61.9, t);
   grade.uniforms.uVignette.value = 0.8;
-  state.sun = { dir: sd, k: 1.0 };
+  state.sun = { dir: sd, k: 0.25 };
 });
 
 // ---------- overlay compositing ----------
@@ -675,6 +776,7 @@ function frame(t) {
   const s = shots.find(s => t >= s.t0 && t < s.t1) || shots[shots.length - 1];
   resetGrade(); state.sun = null; state.hyper = null;
   s.fn(t);
+  patchLogDepth();   // catches anything a shot created after start-up
   // per-frame globals
   sky.position.copy(camera.position); sky.material.uniforms.uTime.value = t;
   water.position.set(camera.position.x, 0, camera.position.z); water.material.uniforms.uTime.value = t;
@@ -699,6 +801,6 @@ function frame(t) {
   drawOverlay(ctx, t, { W, H, PH, BAR, sun: sunScr, hyper: state.hyper });
   return true;
 }
-window.setBloom = (v) => { bloom.enabled = v; };
+
 window.TRAILER = { frame, duration: DURATION, W, H, debug: () => ({ jet: jet.position.toArray(), jv: jet.visible, cam: camera.position.toArray(), q: jet.quaternion.toArray() }) };
 window.TRAILER_READY = true;
