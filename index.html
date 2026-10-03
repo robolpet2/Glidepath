@@ -73,36 +73,66 @@
   .hidden{ display:none !important; }
 
   /* ---------- loading ---------- */
+  /* ---------- loading screen: dawn over the island, a jet crossing the sky ----------
+     Everything moves with transform/opacity only, so it keeps animating smoothly on the
+     compositor while the main thread is busy generating the world. */
   #loadingScreen{
-    position:fixed; inset:0; z-index:40;
-    display:flex; align-items:center; justify-content:center; flex-direction:column; gap:18px;
-    background:
-      var(--grid) 0 0 / 28px 28px,
-      var(--hatch),
-      var(--ink);
-    color:var(--off);
-    font:700 11px/1 ui-monospace,"SF Mono",Consolas,monospace;
-    letter-spacing:.28em; text-transform:uppercase;
-    opacity:1;
+    position:fixed; inset:0; z-index:40; overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(180deg, #050816 0%, #0b1433 28%, #1d2a5c 52%, #4a3f78 68%, #b8655a 84%, #f0a25e 94%, #f6c27a 100%);
+    color:#f3efe6; font-family:-apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    transition:opacity .7s ease;
   }
-  #loadingScreen::before{
-    content:"GLIDEPATH";
-    font:800 clamp(28px,8vw,52px)/1 -apple-system,sans-serif;
-    letter-spacing:.12em;
-    color:var(--off);
-    text-shadow:0 0 40px rgba(225,6,0,.45), 0 2px 0 var(--red-deep);
-  }
-  #loadingScreen::after{
-    content:"";
-    width:120px; height:3px; border-radius:2px;
-    background:linear-gradient(90deg, transparent, var(--red), transparent);
-    animation:loadBar 1.6s ease-in-out infinite;
-  }
-  @keyframes loadBar{
-    0%{ background-position:-120px 0; opacity:.4; }
-    50%{ opacity:1; }
-    100%{ background-position:120px 0; opacity:.4; }
-  }
+  #loadingScreen.fade{ opacity:0; pointer-events:none; }
+  #loadingScreen .ls-stars{ position:absolute; inset:0 0 40% 0; opacity:.85;
+    background-image:
+      radial-gradient(1px 1px at 12% 18%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 27% 8%, #fff 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 44% 22%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 61% 12%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 78% 26%, #fff 50%, transparent 51%), radial-gradient(1.5px 1.5px at 88% 9%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 6% 34%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 35% 38%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 69% 40%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 93% 32%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 52% 5%, #fff 50%, transparent 51%), radial-gradient(1px 1px at 19% 46%, #fff 50%, transparent 51%);
+    -webkit-mask:linear-gradient(180deg,#000 30%,transparent); mask:linear-gradient(180deg,#000 30%,transparent);
+    animation:lsTwinkle 3.2s ease-in-out infinite alternate; }
+  @keyframes lsTwinkle{ from{ opacity:.45; } to{ opacity:.95; } }
+  #loadingScreen .ls-sun{ position:absolute; left:50%; bottom:16%; width:min(70vw,620px); aspect-ratio:1; transform:translate(-50%,50%);
+    background:radial-gradient(circle, rgba(255,236,190,.95) 0 7%, rgba(255,190,110,.55) 12%, rgba(255,140,80,.18) 30%, transparent 62%);
+    animation:lsSun 5s ease-in-out infinite alternate; }
+  @keyframes lsSun{ from{ opacity:.8; transform:translate(-50%,50%) scale(.97); } to{ opacity:1; transform:translate(-50%,50%) scale(1.03); } }
+  #loadingScreen .ls-cloud{ position:absolute; height:60px; border-radius:50%; filter:blur(14px); opacity:.55;
+    background:radial-gradient(ellipse at 50% 60%, rgba(255,214,190,.75), rgba(255,170,150,.0) 70%); will-change:transform; }
+  #loadingScreen .c1{ width:380px; top:58%; left:-420px; animation:lsDrift 34s linear infinite; }
+  #loadingScreen .c2{ width:260px; top:49%; left:-300px; height:44px; opacity:.4; animation:lsDrift 46s linear infinite -18s; }
+  #loadingScreen .c3{ width:520px; top:66%; left:-560px; height:80px; opacity:.5; animation:lsDrift 28s linear infinite -9s; }
+  #loadingScreen .c4{ width:300px; top:40%; left:-340px; height:40px; opacity:.28; animation:lsDrift 60s linear infinite -30s; }
+  @keyframes lsDrift{ to{ transform:translateX(calc(100vw + 700px)); } }
+  #loadingScreen .ls-ridge{ position:absolute; left:0; right:0; bottom:0; width:100%; height:clamp(150px,27vh,280px); display:block; }
+  #loadingScreen .ls-jet{ position:absolute; left:0; top:17%; width:0; height:0; will-change:transform; animation:lsFly 9s cubic-bezier(.35,.05,.6,.95) infinite; }
+  #loadingScreen .ls-jet svg{ position:absolute; left:-26px; top:-10px; width:52px; height:20px; transform:rotate(-6deg); filter:drop-shadow(0 0 6px rgba(255,200,150,.35)); }
+  #loadingScreen .ls-jet i{ position:absolute; right:22px; top:-1px; width:min(40vw,420px); height:2px; border-radius:2px;
+    background:linear-gradient(90deg, rgba(255,255,255,0), rgba(255,245,230,.75)); transform:rotate(-6deg); transform-origin:100% 50%; }
+  @keyframes lsFly{ 0%{ transform:translate(-30vw,14vh); opacity:0; } 8%{ opacity:1; } 88%{ opacity:1; } 100%{ transform:translate(130vw,-10vh); opacity:0; } }
+  #loadingScreen .ls-card{ position:relative; z-index:2; text-align:center; padding:0 24px; transform:translateY(-6vh); }
+  #loadingScreen .ls-title{ margin:0; font:800 clamp(38px,9vw,84px)/1 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; letter-spacing:.22em; padding-left:.22em;
+    background:linear-gradient(180deg, #ffffff 0%, #fff3dc 55%, #ffc98a 100%); -webkit-background-clip:text; background-clip:text; color:transparent;
+    text-shadow:0 8px 40px rgba(255,150,80,.25); animation:lsRise .9s ease-out both; }
+  #loadingScreen .ls-wing{ display:flex; align-items:center; justify-content:center; gap:12px; margin:16px auto 0; opacity:.9; animation:lsRise .9s .15s ease-out both; }
+  #loadingScreen .ls-wing span{ display:block; height:1px; width:clamp(40px,12vw,120px); background:linear-gradient(90deg, transparent, rgba(255,230,200,.8)); }
+  #loadingScreen .ls-wing span:last-child{ transform:scaleX(-1); }
+  #loadingScreen .ls-wing b{ font:700 11px/1 ui-monospace,"SF Mono",Consolas,monospace; letter-spacing:.38em; color:#ffe2c0; padding-left:.38em; }
+  #loadingScreen .ls-bar{ position:relative; width:min(320px,70vw); height:3px; margin:34px auto 0; border-radius:3px; overflow:hidden; background:rgba(255,255,255,.14); animation:lsRise .9s .3s ease-out both; }
+  #loadingScreen .ls-bar i{ position:absolute; inset:0; width:40%; border-radius:3px; background:linear-gradient(90deg, transparent, #ffd9a0, #fff4e2, #ffd9a0, transparent); animation:lsSweep 1.5s ease-in-out infinite; }
+  @keyframes lsSweep{ from{ transform:translateX(-110%); } to{ transform:translateX(260%); } }
+  #loadingScreen .ls-status{ position:relative; height:16px; margin-top:14px; font:600 11px/16px ui-monospace,"SF Mono",Consolas,monospace; letter-spacing:.22em; text-transform:uppercase; color:rgba(255,236,214,.85); }
+  #loadingScreen .ls-status span{ position:absolute; left:0; right:0; opacity:0; animation:lsLine 8s linear infinite; }
+  #loadingScreen .ls-status span:nth-child(2){ animation-delay:2s; } #loadingScreen .ls-status span:nth-child(3){ animation-delay:4s; } #loadingScreen .ls-status span:nth-child(4){ animation-delay:6s; }
+  @keyframes lsLine{ 0%{ opacity:0; transform:translateY(5px); } 4%,22%{ opacity:1; transform:none; } 27%,100%{ opacity:0; transform:translateY(-5px); } }
+  #loadingScreen .ls-tip{ position:absolute; z-index:2; left:0; right:0; bottom:calc(22px + env(safe-area-inset-bottom)); text-align:center; padding:0 20px;
+    font:500 12px/1.4 -apple-system, system-ui, sans-serif; color:rgba(255,240,226,.72); letter-spacing:.04em; }
+  #loadingScreen .ls-tip kbd{ font:700 10px ui-monospace,monospace; padding:1px 5px; border-radius:3px; background:rgba(255,255,255,.14); color:#fff; }
+  #loadingScreen .ls-tip b{ color:#ffd9a0; font-weight:700; letter-spacing:.14em; font-size:10.5px; margin-right:6px; }
+  @keyframes lsRise{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce){ #loadingScreen *{ animation-duration:0s !important; animation-iteration-count:1 !important; } #loadingScreen .ls-jet{ display:none; } }
 
   /* ---------- start screen: a title menu over the live world ---------- */
   #startScreen{
@@ -1308,7 +1338,24 @@
 </head>
 <body>
 
-  <div id="loadingScreen">Loading terrain…</div>
+  <div id="loadingScreen" role="status" aria-label="Loading Glidepath">
+    <div class="ls-stars"></div>
+    <div class="ls-sun"></div>
+    <div class="ls-cloud c4"></div><div class="ls-cloud c2"></div><div class="ls-cloud c1"></div><div class="ls-cloud c3"></div>
+    <div class="ls-jet"><i></i><svg viewBox="0 0 52 20" aria-hidden="true"><path fill="#1a1c2e" d="M51 10c0-1-2-1.6-5-2L31 6.6 21 0h-3l5 6.4-11-.4L8 2H5.5l2 4.6C4 7 1 8 1 10s3 3 6.5 3.4l-2 4.6H8l4-4 11-.4L18 20h3l10-6.6L46 12c3-.4 5-1 5-2z"/></svg></div>
+    <svg class="ls-ridge" viewBox="0 0 1440 260" preserveAspectRatio="none" aria-hidden="true">
+      <path fill="#2b2547" opacity=".85" d="M0 150 L120 110 L210 140 L330 80 L450 130 L560 95 L690 140 L800 70 L930 120 L1040 90 L1170 135 L1290 100 L1440 130 L1440 260 L0 260Z"/>
+      <path fill="#171a33" d="M0 200 L90 175 L200 195 L310 160 L420 190 L540 170 L650 200 L760 165 L880 195 L990 175 L1110 205 L1230 172 L1340 195 L1440 180 L1440 260 L0 260Z"/>
+      <path fill="#0c0f22" d="M0 232 C240 214 420 238 720 226 C1000 214 1220 240 1440 228 L1440 260 L0 260Z"/>
+    </svg>
+    <div class="ls-card">
+      <h1 class="ls-title">GLIDEPATH</h1>
+      <div class="ls-wing"><span></span><b>CLEARED FOR TAKEOFF</b><span></span></div>
+      <div class="ls-bar"><i></i></div>
+      <div class="ls-status"><span>Generating the island</span><span>Planting forests</span><span>Fuelling the aircraft</span><span>Briefing the pilots</span></div>
+    </div>
+    <div class="ls-tip"><b>TIP</b>Press <kbd>Enter</kbd> on the menu to take off straight away — or try Carrier ops for a catapult launch.</div>
+  </div>
 
   <div id="startScreen" class="hidden">
     <header class="ss-top">
@@ -31667,7 +31714,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       renderLiveryRow();
       loadLiveryProgress();
 
-      document.getElementById('loadingScreen').classList.add('hidden');
+      // fade the loading screen out over the menu, then take it away
+      var ls = document.getElementById('loadingScreen');
+      ls.classList.add('fade');
+      setTimeout(function() { ls.classList.add('hidden'); }, 750);
       document.getElementById('startScreen').classList.remove('hidden');
       planePreview.show();
 
