@@ -16951,9 +16951,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       aarUpdate(dt);
       qolUpdate(dt);
       eiUpdate(dt);
+      perfFrame(dt);
+      inUpdate(dt);
       dtUpdate(dt);
-      wx2Update(dt);
-      wlUpdate(dt);
+      perfRun('wx2', wx2Update, dt);
+      perfRun('wl', wlUpdate, dt);
       cv2Frame(dt);
       baseUpdate(dt);
       csgUpdate(dt);
@@ -26324,13 +26326,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if ((WL.spawnT -= dt) <= 0) {
         WL.spawnT = 1.2;
         var count = function(k) { return WL.herds.filter(function(H) { return H.kind === k; }).length; };
-        if (count('deer') < 3) wlSpawnHerd('deer');
-        if (count('camel') < 2) wlSpawnHerd('camel');
-        if (count('bear') < 2) wlSpawnHerd('bear');
-        if (count('seal') < 2) wlSpawnHerd('seal');
-        if (WL.whales.length < 3) wlSpawnWhale();
-        if (WL.pods.length < 2) wlSpawnPod();
-        if (WL.vees.length < 1 && Math.random() < 0.25) wlSpawnVee();
+        if (count('deer') < perfCap(3)) wlSpawnHerd('deer');
+        if (count('camel') < perfCap(2)) wlSpawnHerd('camel');
+        if (count('bear') < perfCap(2)) wlSpawnHerd('bear');
+        if (count('seal') < perfCap(2)) wlSpawnHerd('seal');
+        if (WL.whales.length < perfCap(3)) wlSpawnWhale();
+        if (WL.pods.length < perfCap(2)) wlSpawnPod();
+        if (WL.vees.length < 1 && PERF.lvl > 0 && Math.random() < 0.25) wlSpawnVee();
         if (WL.thermals.length < 3) wlSpawnThermal();
       }
       for (var k in WL.sp) WL.sp[k].n = 0;
@@ -27923,6 +27925,156 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var finished = (d.id === 'laser' ? S.done : (d.id === 'barrage' ? S.fired >= 14 : S.fired > 0)) && !S.shells.length;
         if (finished) { scene.remove(S.beam); ORB.strikes.splice(i, 1); }
       }
+    }
+
+    /* =====================================================================
+       FRAME BUDGET — keeps the heavy ambient systems inside the frame time
+       ===================================================================== */
+    var PERF = { ema: 16, lvl: 2, acc: {}, flip: 0 };
+    // 0 = low, 1 = medium, 2 = high. Fixed presets decide directly; AUTO follows the measured frame time.
+    function perfLevel() {
+      var q = gpSet.quality;
+      if (q === 'low') return 0;
+      if (q === 'medium') return 1;
+      if (q === 'high' || q === 'ultra') return PERF.ema > 40 ? 1 : 2;
+      if (PERF.lvl === 2 && PERF.ema > 26) return 1;
+      if (PERF.lvl === 1 && PERF.ema > 38) return 0;
+      if (PERF.lvl === 0 && PERF.ema < 22) return 1;
+      if (PERF.lvl === 1 && PERF.ema < 17) return 2;
+      return PERF.lvl;
+    }
+    function perfFrame(dt) {
+      if (dt > 0 && dt < 0.25) PERF.ema += (dt * 1000 - PERF.ema) * 0.03;
+      PERF.lvl = perfLevel();
+      PERF.flip ^= 1;
+    }
+    // over budget: ambient systems tick every other frame (with the time they missed)
+    function perfRun(key, fn, dt) {
+      if (PERF.lvl === 2) { PERF.acc[key] = 0; fn(dt); return; }
+      PERF.acc[key] = (PERF.acc[key] || 0) + dt;
+      if (PERF.flip !== (key.length & 1)) return;
+      var d = Math.min(PERF.acc[key], 0.1); PERF.acc[key] = 0; fn(d);
+    }
+    function perfCap(n) { return PERF.lvl === 2 ? n : PERF.lvl === 1 ? Math.max(1, Math.ceil(n * 0.6)) : Math.max(1, Math.floor(n * 0.34)); }
+
+    /* =====================================================================
+       FIRST FLIGHT — a guided five minutes, then "pick your next adventure"
+       ===================================================================== */
+    var IN_KEY = 'gp-intro-v1';
+    var IN = { step: -1, t: 0, ring: null, done: false, card: null, el: null };
+    try { IN.done = !!localStorage.getItem(IN_KEY); } catch (e) {}
+    (function inUi() {
+      var st = document.createElement('style');
+      st.textContent =
+        '#inBar{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:60;display:none;align-items:center;gap:12px;padding:9px 14px;border-radius:12px;background:rgba(8,16,28,.82);border:1px solid rgba(120,200,255,.35);color:#e8f4ff;font:600 14px/1.3 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.35);max-width:calc(100vw - 32px)}' +
+        '#inBar b{color:#7fd4ff;font-size:11px;letter-spacing:.12em;white-space:nowrap}#inBar small{display:block;opacity:.7;font-weight:500;font-size:12px}' +
+        '#inBar button{background:none;border:1px solid rgba(255,255,255,.25);color:#cfe3f5;border-radius:8px;padding:4px 9px;font:600 11px system-ui;cursor:pointer;white-space:nowrap}' +
+        '#inCard{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;background:rgba(3,8,16,.55);backdrop-filter:blur(3px)}' +
+        '#inCard .box{width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;background:linear-gradient(160deg,#122238,#0a1422);border:1px solid rgba(120,200,255,.3);border-radius:16px;padding:20px;color:#e8f4ff;font:14px system-ui,sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.5)}' +
+        '#inCard h2{margin:0 0 4px;font-size:20px;letter-spacing:.04em}#inCard p{margin:0 0 14px;opacity:.75}' +
+        '#inCard .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}' +
+        '#inCard .grid button{text-align:left;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px;color:#fff;cursor:pointer;font:600 14px system-ui}' +
+        '#inCard .grid button:hover{background:rgba(127,212,255,.14);border-color:#7fd4ff}#inCard .grid i{font-style:normal;font-size:22px;display:block;margin-bottom:4px}' +
+        '#inCard .grid small{display:block;font-weight:400;opacity:.65;font-size:12px;margin-top:3px}' +
+        '#inCard .foot{display:flex;justify-content:flex-end;margin-top:14px}#inCard .foot button{background:none;border:1px solid rgba(255,255,255,.25);color:#cfe3f5;border-radius:8px;padding:7px 14px;cursor:pointer}';
+      document.head.appendChild(st);
+      IN.el = document.createElement('div'); IN.el.id = 'inBar';
+      document.body.appendChild(IN.el);
+      IN.card = document.createElement('div'); IN.card.id = 'inCard';
+      IN.card.innerHTML = '<div class="box"><h2>WHERE TO NEXT, PILOT?</h2><p>Pick an adventure. A waypoint goes on your map and the autopilot NAV mode can fly you there.</p><div class="grid"></div><div class="foot"><button type="button" data-a="free">Just free-fly</button></div></div>';
+      document.body.appendChild(IN.card);
+      IN.card.addEventListener('click', function(e) {
+        var b = e.target.closest('button'); if (!b) { if (e.target === IN.card) inCardClose(); return; }
+        inPick(b.getAttribute('data-a'));
+      });
+    })();
+    var IN_STEPS = [
+      { t: 'TAKE OFF', s: 'Throttle up (W / ▲), roll down the runway and pull back past 60 knots' },
+      { t: 'FLY THROUGH THE RING', s: 'Follow the orange ring marker — line up and fly through it' },
+      { t: 'BRING IT HOME', s: 'Land on any runway and roll to a stop. Gear down, flaps help' }
+    ];
+    function inShow() {
+      if (IN.step < 0 || IN.step >= IN_STEPS.length) { IN.el.style.display = 'none'; return; }
+      var S = IN_STEPS[IN.step];
+      IN.el.innerHTML = '<b>FIRST FLIGHT ' + (IN.step + 1) + '/3</b><div>' + S.t + '<small>' + S.s + '</small></div><button type="button">SKIP</button>';
+      IN.el.querySelector('button').onclick = function() { inFinish(true); };
+      IN.el.style.display = 'flex';
+    }
+    function inStart() {
+      IN.step = 0; IN.t = 0; inShow();
+      qolSay('Welcome aboard. Let\'s get you airborne.');
+    }
+    function inRing() {
+      var g = new THREE.Mesh(new THREE.TorusGeometry(48, 3.2, 10, 48), new THREE.MeshBasicMaterial({ color: 0xff9a2e, transparent: true, opacity: 0.9, depthWrite: false }));
+      var fx = -Math.sin(heading), fz = -Math.cos(heading), d = 1400;
+      var x = position.x + fx * d, z = position.z + fz * d;
+      var y = Math.max(position.y + 60, getTerrainHeight(x, z) + 160, WATER_LEVEL + 160);
+      g.position.set(x, y, z); g.rotation.y = heading;
+      scene.add(g);
+      IN.ring = g;
+      if (typeof qolNavSet === 'function') qolNavSet(x, z, 'RING', '#ff9a2e');
+    }
+    function inAdvance() {
+      samBeep(1320, 0.08, 0.1); setTimeout(function() { samBeep(1760, 0.1, 0.1); }, 110);
+      IN.step++; IN.t = 0;
+      if (IN.step === 1) { inRing(); qolSay('Nice climb. Fly through the ring.'); }
+      if (IN.step === 2) { if (typeof qolNavClear === 'function' && QOL.nav && QOL.nav.name === 'RING') QOL.nav = null; qolSay('Through the ring. Now bring it home and land.'); }
+      if (IN.step >= IN_STEPS.length) { inFinish(false); return; }
+      inShow();
+    }
+    function inFinish(skipped) {
+      if (IN.ring) { scene.remove(IN.ring); IN.ring.geometry.dispose(); IN.ring = null; }
+      if (QOL.nav && QOL.nav.name === 'RING') QOL.nav = null;
+      IN.step = -1; IN.done = true; inShow();
+      try { localStorage.setItem(IN_KEY, skipped ? 'skip' : 'done'); } catch (e) {}
+      if (!skipped) { coins += 500; lastCoinSaveAt = -99; maybeSaveCoins(elapsedSeconds); samToast('FIRST FLIGHT COMPLETE · +500', '#7fffa0', 3); }
+      inCardOpen();
+    }
+    function inCardOpen() {
+      var A = [
+        { a: 'polar', i: '🧊', n: 'Day trip: Polar Station', d: 'Land on the ice runway far north' },
+        { a: 'canyon', i: '🏜', n: 'Day trip: Red Canyon', d: 'Ten gates, two and a half minutes' },
+        { a: 'carrier', i: '⚓', n: 'Carrier trap', d: 'Fly the pattern, catch the 3-wire' },
+        { a: 'wild', i: '🦌', n: 'Wildlife safari', d: 'Find a herd and log it' },
+        { a: 'base', i: '🛡', n: 'Defend the base', d: 'Start a cruise-missile drill' },
+        { a: 'crater', i: '🌋', n: 'Day trip: The Caldera', d: 'Land inside the volcano' }
+      ];
+      IN.card.querySelector('.grid').innerHTML = A.map(function(o) { return '<button type="button" data-a="' + o.a + '"><i>' + o.i + '</i>' + o.n + '<small>' + o.d + '</small></button>'; }).join('');
+      IN.card.style.display = 'flex';
+    }
+    function inCardClose() { IN.card.style.display = 'none'; }
+    function inPick(a) {
+      inCardClose();
+      var trip = { polar: 'arctic', canyon: 'canyon', crater: 'crater' }[a];
+      if (trip && typeof dtTrip === 'function') { var T = dtTrip(trip); if (T) { qolNavSet(T.x, T.z, T.name, T.color); samToast(T.name + ' · ' + T.goal.toUpperCase(), T.color, 4); } return; }
+      if (a === 'carrier') { qolNavSet(CARRIER.x, CARRIER.z, 'CARRIER', '#7fd4ff'); samToast('CARRIER · CALL THE BALL, CATCH THE 3-WIRE', '#7fd4ff', 4); return; }
+      if (a === 'wild') {
+        var best = null, bd = 1e9;
+        (WL.herds || []).concat(WL.pods || [], WL.whales || []).forEach(function(H) { var d = Math.hypot(H.x - position.x, H.z - position.z); if (d < bd) { bd = d; best = H; } });
+        if (best) { qolNavSet(best.x, best.z, 'WILDLIFE', '#9be37a'); samToast('WILDLIFE SPOTTED · FLY LOW AND SLOW', '#9be37a', 4); }
+        else samToast('NO ANIMALS NEARBY · TRY THE COAST OR THE HILLS', '#9be37a', 4);
+        return;
+      }
+      if (a === 'base' && typeof baseLaunchRaid === 'function') { samToast('DRILL: INBOUND CRUISE MISSILES · DEFEND THE BASE', '#ff6a5a', 4); baseLaunchRaid(); return; }
+    }
+    function inUpdate(dt) {
+      if (!started) return;
+      if (IN.step < 0) {
+        if (!IN.done && !navigator.webdriver && !window.__introForce) { IN.done = true; inStart(); }
+        else if (window.__introForce) { window.__introForce = false; inStart(); }
+        return;
+      }
+      IN.t += dt;
+      if (crashing) return;
+      var agl = kjAgl();
+      if (IN.step === 0 && !wasGrounded && agl > 40) inAdvance();
+      else if (IN.step === 1 && IN.ring) {
+        IN.ring.material.opacity = 0.65 + 0.3 * Math.sin(IN.t * 4);
+        var r = IN.ring.position;
+        if (position.distanceTo(r) < 52) { gfxShockwave(r.clone(), 0.6); inAdvance(); }
+        else if (Math.hypot(position.x - r.x, position.z - r.z) > 4500) { scene.remove(IN.ring); IN.ring = null; inRing(); samToast('RING MOVED IN FRONT OF YOU', '#ff9a2e', 2); }
+      }
+      else if (IN.step === 2 && wasGrounded && speed < 4 && IN.t > 4) inAdvance();
     }
 
     /* ============================================================
