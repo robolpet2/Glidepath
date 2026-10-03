@@ -26,6 +26,11 @@ sonic-boom hero pass and the title.
 | 14 | 28.0–30.0 | **Hero pass** | 5 m above the sea, head-on | The jet skims the water out of the low sun, throwing spray. It is in slow motion until the vapour cone forms, then it rips overhead at full speed. Card: **NEVER OUTFLOWN.** | Near silence, then sonic crack |
 | 15 | 30.0–35.0 | **Title** | Wide sunset | The pair climb away trailing vapour. **GLIDEPATH · ENDLESS FLIGHT** | Final BRAAM, ring-out |
 
+## Who's who
+
+- **Our side, Viper 1-1 (you) and Viper 1-2 (your wingman):** light grey jets with twin tails, cyan tail bands, cyan formation lights and orange afterburners. Each carries a cyan HUD box with its callsign.
+- **Bandits:** black single-tail jets with canards, red tails, red glowing strips and red afterburners. Each carries a red **BANDIT** box. Incoming threats are tagged red **MISSILE** or **SAM**.
+
 ## Look
 
 - **Light:** golden hour with the sun 6° high, physically based sky and ocean reflections, and haze for aerial perspective.

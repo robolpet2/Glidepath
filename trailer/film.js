@@ -412,12 +412,12 @@ function makeMissile(scale = 1, color = .82) {
 function makeJet(kind) {
   const enemy = kind === 'enemy';
   const g = new THREE.Group();
-  const baseCol = enemy ? '#3b3f46' : '#7c848e';
+  const baseCol = enemy ? '#24262b' : '#8d959f';
   const lathTex = panelTex(baseCol, enemy ? 30 : 10);
   const worldTex = panelTex(baseCol, enemy ? 40 : 20); worldTex.wrapS = worldTex.wrapT = THREE.RepeatWrapping; worldTex.repeat.set(.12, .12);
   const skinL = new THREE.MeshStandardMaterial({ map: lathTex, metalness: .4, roughness: .48 });
   const skinW = new THREE.MeshStandardMaterial({ map: worldTex, metalness: .4, roughness: .5 });
-  const tailTex = panelTex(baseCol, enemy ? 50 : 60, enemy ? '#5a1414' : '#c4140c');
+  const tailTex = panelTex(baseCol, enemy ? 50 : 60, enemy ? '#c0120c' : '#18a9cf');
   tailTex.wrapS = tailTex.wrapT = THREE.RepeatWrapping; tailTex.repeat.set(1 / 10, 1 / 4.6);
   const tailM = new THREE.MeshStandardMaterial({ map: tailTex, metalness: .35, roughness: .5 });
   const darkMetal = new THREE.MeshStandardMaterial({ color: 0x3a3631, metalness: .9, roughness: .35, side: THREE.DoubleSide });
@@ -446,20 +446,30 @@ function makeJet(kind) {
   if (enemy) { const t = new THREE.Mesh(tg(), tailM); t.position.set(0, .7, 0); g.add(t); }
   else for (const sx of [1, -1]) { const t = new THREE.Mesh(tg(), tailM); t.position.set(sx * 1.3, .5, 0); t.rotation.z = -sx * .42; g.add(t); }
   // canopy
-  const can = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 18), new THREE.MeshPhysicalMaterial({ color: enemy ? 0x203038 : 0x9a7e46, metalness: .96, roughness: .07, clearcoat: 1, envMapIntensity: 1.4 }));
+  const can = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 18), new THREE.MeshPhysicalMaterial({ color: enemy ? 0x7a1010 : 0x9a7e46, metalness: .96, roughness: .07, clearcoat: 1, envMapIntensity: 1.4 }));
   can.scale.set(.6, .6, 2.15); can.position.set(0, .66, 3.95); g.add(can);
   // engines
   const nozzles = enemy ? [[0, .8]] : [[.62, .56], [-.62, .56]];
   const plumes = [], glows = [];
   for (const [x, r] of nozzles) {
     const nz = new THREE.Mesh(new THREE.CylinderGeometry(r * .9, r, 1.4, 22, 1, true).rotateX(Math.PI / 2), darkMetal); nz.position.set(x, -.02, -8.75); g.add(nz);
-    const gl = new THREE.Mesh(new THREE.CircleGeometry(r * .82, 22).rotateY(Math.PI), new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 1.2, .3) })); gl.position.set(x, -.02, -8.2); g.add(gl); glows.push(gl);
+    const gl = new THREE.Mesh(new THREE.CircleGeometry(r * .82, 22).rotateY(Math.PI), new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 1.2, .3) })); gl.position.set(x, -.02, -8.2); gl.userData.enemy = enemy; g.add(gl); glows.push(gl);
     for (const [len, rad, hot] of [[1, 1, 1], [.45, .55, 0]]) {
       const pm = plumeMat(); if (!hot) { pm.uniforms.uHot.value.setRGB(.75, .85, 1.3); pm.uniforms.uCool.value.setRGB(.9, .6, 1.0); }
+      if (enemy) { if (hot) { pm.uniforms.uHot.value.setRGB(1, .55, .42); pm.uniforms.uCool.value.setRGB(1, .1, .05); } else { pm.uniforms.uHot.value.setRGB(1.2, .4, .4); pm.uniforms.uCool.value.setRGB(1, .15, .1); } }
       const pl = new THREE.Mesh(new THREE.CylinderGeometry(r * .78 * rad, r * .2, 1, 22, 1, true).translate(0, -.5, 0).rotateX(Math.PI / 2), pm);
       pl.position.set(x, -.02, -9.35); pl.userData.len = len; g.add(pl); plumes.push(pl);
     }
   }
+  // identification lights: glowing strips along the spine, intakes and wing roots (cyan = friendly, red = bandit)
+  const idCol = enemy ? new THREE.Color(5, .25, .15) : new THREE.Color(.25, 2.6, 3.6);
+  const idMat = new THREE.MeshBasicMaterial({ color: idCol });
+  for (const sx of [1, -1]) {
+    const a = new THREE.Mesh(new THREE.BoxGeometry(.07, .07, 4.2), idMat); a.position.set(sx * 2.0, .3, -2.2); g.add(a);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(.07, .07, 2.2), idMat); b.position.set(sx * 1.99, -.2, 1.2); g.add(b);
+    const w = new THREE.Mesh(new THREE.BoxGeometry(2.4, .05, .07), idMat); w.position.set(sx * (enemy ? 4.6 : 5.0), .07, enemy ? -2.4 : -2.9); w.rotation.y = sx * (enemy ? -.72 : -.79); g.add(w);
+  }
+  const sp = new THREE.Mesh(new THREE.BoxGeometry(.07, .07, 5), idMat); sp.position.set(0, .82, -1.8); g.add(sp);
   // nav lights
   for (const [x, c] of [[1, [6, .2, .1]], [-1, [.1, 4, .5]]]) {
     const l = new THREE.Mesh(new THREE.SphereGeometry(.09, 8, 6), new THREE.MeshBasicMaterial({ color: new THREE.Color(...c) })); l.position.set(x * (enemy ? 6.35 : 6.8), 0, enemy ? -4.6 : -4.5); g.add(l);
@@ -497,7 +507,7 @@ function makeJet(kind) {
     plumes, glows, stores, vc,
     ab(level, t) {
       for (const p of plumes) { p.material.uniforms.uT.value = t; p.material.uniforms.uAB.value = clamp(level * 1.3, .15, 1.3); p.scale.z = (1.2 + 7.5 * level) * p.userData.len; p.visible = level > .02; }
-      for (const gl of glows) gl.material.color.setRGB(2 + 5 * level, .9 + 1.6 * level, .25 + .5 * level);
+      for (const gl of glows) gl.userData.enemy ? gl.material.color.setRGB(3 + 6 * level, .4 + .5 * level, .2 + .2 * level) : gl.material.color.setRGB(2 + 5 * level, .9 + 1.6 * level, .25 + .5 * level);
     },
   };
   g.visible = false;
@@ -604,7 +614,8 @@ function placeMissile(m, P, s) {
 }
 
 /* ------------------------------------------------------------------ camera */
-let SHAKE = 0, FLARE = 1, HANDHELD = .25;
+let SHAKE = 0, FLARE = 1, HANDHELD = .25, TAGS = 1, SHOT_U = 0;
+const THREATS = [];
 function camLook(pos, look, fov, up = UP) {
   camera.position.copy(pos); camera.up.copy(up); camera.lookAt(look); camera.fov = fov; camera.updateProjectionMatrix();
 }
@@ -847,6 +858,7 @@ const MS6 = (() => {
   };
 })();
 function shot6(u, t) {
+  if (u < 2.0) THREATS.push([MISSILES[0], 'MISSILE']);
   const F = place(P1, P1f, u, ROLL6(u));
   P1.userData.ab(1, t);
   const Fc = frameAt(P1f, u, 0);
@@ -1022,6 +1034,7 @@ function shot10(u, t) {
   HANDHELD = 1.2; FLARE = .25; renderer.toneMappingExposure = .46;
 }
 function shot11(u, t) {
+  SAM_DET.forEach((d, i) => { if (t < d) THREATS.push([MISSILES[4 + i], 'SAM']); });
   const F = place(P1, ATK, t, Math.sin(t * 2) * .3); P1.userData.ab(1, t);
   samFX(t, .75);
   drawFlares(ATK, noRoll, FLARES11, t, t, 1100);
@@ -1128,6 +1141,7 @@ const DIR15 = SUNH.clone().applyAxisAngle(UP, -.62);
 const P1o = s => C15.clone().add(v3(0, -30, 0)).addScaledVector(DIR15, 140 + 240 * s).add(v3(0, 55 * s * s, 0));
 const P2o = s => P1o(s).addScaledVector(v3(-DIR15.z, 0, DIR15.x), 34).addScaledVector(DIR15, -45).add(v3(0, -10, 0));
 function shot15(u, t) {
+  TAGS = 1 - ss(.2, .6, u);
   place(P1, P1o, u, -.25); place(P2, P2o, u, -.25);
   P1.userData.ab(1, t); P2.userData.ab(1, t);
   vortices(P1o, u, -.25, .6, 1.2);
@@ -1206,6 +1220,42 @@ function lensFlare(k) {
   });
   out.restore();
 }
+const IDS = [[P1, 'VIPER 1-1', 'YOU', 0], [P2, 'VIPER 1-2', 'WINGMAN', 0], [E1, 'BANDIT', '', 1], [E2, 'BANDIT', '', 1], [E3, 'BANDIT', '', 1]];
+// HUD-style identification boxes that track each aircraft: cyan for our side, red for the enemy.
+function idTags() {
+  const a0 = TAGS * ss(.12, .35, SHOT_U);
+  if (a0 <= 0) return;
+  const right = v3(1, 0, 0).applyQuaternion(camera.quaternion);
+  const list = IDS.filter(([o]) => o.visible).map(([o, name, sub, en]) => [o, name, sub, en, 9]);
+  for (const [m, name] of THREATS) if (m.visible) list.push([m, name, '', 1, 2.5]);
+  for (const [o, name, sub, en, half] of list) {
+    const c = o.position.clone().project(camera);
+    if (c.z > 1 || Math.abs(c.x) > 1.02 || Math.abs(c.y) > 1.02) continue;
+    const e = o.position.clone().addScaledVector(right, half).project(camera);
+    const x = (c.x * .5 + .5) * RW, y = BAR + (1 - (c.y * .5 + .5)) * RH;
+    const r = Math.abs(e.x - c.x) * .5 * RW;
+    const col = en ? '255,52,40' : '70,220,255';
+    out.save(); out.globalAlpha = a0;
+    out.strokeStyle = `rgba(${col},.95)`; out.lineWidth = 2; out.shadowColor = `rgba(${col},.8)`; out.shadowBlur = 8;
+    let top;
+    if (r < 230) {
+      const h = clamp(r * 1.25, 20, 260), l = Math.max(7, h * .28);
+      out.beginPath();
+      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        const cx = x + sx * h, cy = y + sy * h * .7;
+        out.moveTo(cx - sx * l, cy); out.lineTo(cx, cy); out.lineTo(cx, cy - sy * l);
+      }
+      out.stroke();
+      if (en) { out.beginPath(); out.moveTo(x, y - h * .7 - 16); out.lineTo(x + 6, y - h * .7 - 10); out.lineTo(x, y - h * .7 - 4); out.lineTo(x - 6, y - h * .7 - 10); out.closePath(); out.fillStyle = `rgba(${col},1)`; out.fill(); }
+      top = y - h * .7 - (en ? 30 : 16);
+    } else top = clamp(y - Math.min(r * .55, 300), BAR + 70, BAR + RH - 120);
+    out.shadowBlur = 6; out.shadowColor = 'rgba(0,0,0,.9)';
+    const ly = clamp(top, BAR + 40, BAR + RH - 60), lx = clamp(x, 120, RW - 120);
+    text(name, lx, ly - (sub ? 18 : 0), `700 ${r < 230 ? 17 : 22}px ${MONO}`, `rgba(${col},1)`, 3);
+    if (sub) text(sub, lx, ly, `700 ${r < 230 ? 12 : 15}px ${MONO}`, 'rgba(242,241,237,.9)', 4);
+    out.restore();
+  }
+}
 function text(str, x, y, font, color, spacing = 0, align = 'center') {
   out.font = font; out.letterSpacing = spacing + 'px'; out.textAlign = align; out.textBaseline = 'middle'; out.fillStyle = color;
   out.fillText(str, x + (align === 'center' ? spacing / 2 : 0), y); out.letterSpacing = '0px';
@@ -1277,9 +1327,10 @@ export function render(t) {
   for (const j of JETS) { j.visible = false; j.userData.vc.visible = false; j.userData.stores.forEach(s => s.visible = true); }
   MISSILES.forEach(m => m.visible = false); DEBRIS.forEach(d => d.visible = false);
   clouds.reset(); smoke.reset(); fire.reset(); rings.reset(); streaks.reset(); FLASHES.length = 0;
-  SHAKE = 0; HANDHELD = .25; FLARE = 1; renderer.toneMappingExposure = .36;
+  SHAKE = 0; HANDHELD = .25; FLARE = 1; TAGS = 1; THREATS.length = 0; renderer.toneMappingExposure = .36;
   const [t0, , fn] = SHOTS.find(([a, b]) => t >= a && t < b) || SHOTS[SHOTS.length - 1];
   fn(t - t0, t);
+  SHOT_U = t - t0;
   for (const [ts, a] of SHAKES) if (t >= ts) SHAKE += a * Math.exp(-(t - ts) * 4.5);
   applyShake(t);
   // clouds (static, sorted per frame)
@@ -1295,6 +1346,7 @@ export function render(t) {
   out.drawImage(glCanvas, 0, BAR);
   out.save(); out.beginPath(); out.rect(0, BAR, RW, RH); out.clip();
   lensFlare(FLARE);
+  idTags();
   overlays(t);
   out.restore();
   const fade = Math.max(1 - seg(t, 0, .6), seg(t, DUR - .6, DUR));
