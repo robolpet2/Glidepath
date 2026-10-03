@@ -16955,6 +16955,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       inUpdate(dt);
       dyUpdate(dt);
       polUpdate();
+      sndUpdate(dt);
+      wfUpdate(dt);
+      actUpdate(dt);
       dtUpdate(dt);
       perfRun('wx2', wx2Update, dt);
       perfRun('wl', wlUpdate, dt);
@@ -28064,7 +28067,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         { a: 'carrier', i: '⚓', n: 'Carrier trap', d: 'Fly the pattern, catch the 3-wire' },
         { a: 'wild', i: '🦌', n: 'Wildlife safari', d: 'Find a herd and log it' },
         { a: 'base', i: '🛡', n: 'Defend the base', d: 'Start a cruise-missile drill' },
-        { a: 'crater', i: '🌋', n: 'Day trip: The Caldera', d: 'Land inside the volcano' }
+        { a: 'crater', i: '🌋', n: 'Day trip: The Caldera', d: 'Land inside the volcano' },
+        { a: 'fire', i: '🔥', n: 'Wildfire', d: 'Scoop water, drop it on the flames' }
       ];
       IN.card.querySelector('.grid').innerHTML = A.map(function(o) { return '<button type="button" data-a="' + o.a + '"><i>' + o.i + '</i>' + o.n + '<small>' + o.d + '</small></button>'; }).join('');
       IN.card.style.display = 'flex';
@@ -28082,6 +28086,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         else samToast('NO ANIMALS NEARBY · TRY THE COAST OR THE HILLS', '#9be37a', 4);
         return;
       }
+      if (a === 'fire') { wfStart(); return; }
       if (a === 'base' && typeof baseLaunchRaid === 'function') { samToast('DRILL: INBOUND CRUISE MISSILES · DEFEND THE BASE', '#ff6a5a', 4); baseLaunchRaid(); return; }
     }
     function inUpdate(dt) {
@@ -28314,6 +28319,294 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // only the real rewards, not the steady trickle from flying
       if (Math.abs(d) >= 50) polCoinPop(d);
       POL.coins = coins;
+    }
+
+    /* =====================================================================
+       SOUNDSCAPE — distant booms that arrive late, surf, carrier deck, birds
+       ===================================================================== */
+    var SND = { on: false, t: 0, catT: 12, birdT: 3, paT: 40 };
+    function sndInit() {
+      if (SND.on || !audioCtx) return;
+      SND.on = true; wEnsureNoise();
+      function loop(ftype, freq, q) {
+        var s = audioCtx.createBufferSource(); s.buffer = wNoiseBuf; s.loop = true;
+        var f = audioCtx.createBiquadFilter(); f.type = ftype; f.frequency.value = freq; f.Q.value = q;
+        var g = audioCtx.createGain(); g.gain.value = 0.0001;
+        s.connect(f).connect(g).connect(audioCtx.destination); s.start();
+        return { g: g, f: f };
+      }
+      SND.surf = loop('lowpass', 480, 0.4);
+      SND.deck = loop('bandpass', 320, 0.7);
+      // ship's machinery: a low two-tone drone through the hull
+      var o1 = audioCtx.createOscillator(), o2 = audioCtx.createOscillator(), lp = audioCtx.createBiquadFilter(), hg = audioCtx.createGain();
+      o1.type = 'sawtooth'; o1.frequency.value = 57; o2.type = 'sawtooth'; o2.frequency.value = 86.3;
+      lp.type = 'lowpass'; lp.frequency.value = 170; hg.gain.value = 0.0001;
+      o1.connect(lp); o2.connect(lp); lp.connect(hg).connect(audioCtx.destination); o1.start(); o2.start();
+      SND.hum = { g: hg };
+    }
+    function sndSet(n, v, tc) { if (n) n.g.gain.setTargetAtTime(Math.max(0.0001, v), audioCtx.currentTime, tc || 0.4); }
+    // the sound of a far explosion travels at 343 m/s, and the air strips its crack away
+    function sndFarBoom(pos, k) {
+      if (!audioCtx || !soundEnabled || !pos || !started) return;
+      var d = camera.position.distanceTo(pos);
+      if (d < 1500 || d > 16000) return;
+      var delay = Math.min(d / 343, 16), kk = Math.min(k || 1, 4);
+      var v = Math.min(0.45, 0.16 * kk) * Math.pow(1 - d / 16000, 1.4);
+      var cut = Math.max(180, 900 - d / 18);
+      wNoise(1.6 + kk * 0.4, v, 'lowpass', cut, 0.6, 0.05, delay);
+      wTone('sine', 64, 26, 1.3 + kk * 0.2, v * 0.9, delay);
+      if (d < 7000) wNoise(0.9, v * 0.5, 'lowpass', cut * 0.6, 0.5, 0.2, delay + 0.5 + Math.random() * 0.4);   // the echo off the hills
+    }
+    var _sndTmb = triggerMissileBlast;
+    triggerMissileBlast = function(pos, scale) { var r = _sndTmb(pos, scale); sndFarBoom(pos, scale); return r; };
+    function sndUpdate(dt) {
+      if (!audioCtx) return;
+      if (!soundEnabled || !started || crashing) { if (SND.on) { sndSet(SND.surf, 0); sndSet(SND.deck, 0); sndSet(SND.hum, 0); } return; }
+      sndInit();
+      SND.t += dt;
+      var px = position.x, pz = position.z, agl = kjAgl(), low = THREE.MathUtils.clamp(1 - agl / 140, 0, 1);
+      // surf: over the sea or along a coast, low down; a slow swell in the level and the tone
+      var wet = getTerrainHeight(px, pz) < WATER_LEVEL ? 1 : 0;
+      if (!wet) for (var i = 0; i < 4; i++) { var a = i * 1.571; if (getTerrainHeight(px + Math.sin(a) * 180, pz + Math.cos(a) * 180) < WATER_LEVEL) { wet = 0.8; break; } }
+      var swell = 0.6 + 0.4 * Math.sin(SND.t * 0.45) * Math.sin(SND.t * 0.23 + 1);
+      sndSet(SND.surf, wet * low * low * 0.11 * swell, 0.6);
+      SND.surf.f.frequency.setTargetAtTime(320 + 260 * swell, audioCtx.currentTime, 0.8);
+      // the carrier: deck wind and machinery when you're on or right by her
+      var dCv = Math.hypot(px - CARRIER.x, pz - CARRIER.z), dk = THREE.MathUtils.clamp(1 - dCv / 420, 0, 1) * THREE.MathUtils.clamp(1 - (position.y - CARRIER.deckY) / 90, 0, 1);
+      sndSet(SND.deck, dk * 0.07); sndSet(SND.hum, dk * 0.05);
+      if (dk > 0.4) {
+        if ((SND.catT -= dt) <= 0) {
+          SND.catT = 14 + Math.random() * 22;
+          // a catapult shot somewhere up the deck: the shuttle's thump and a long hiss of steam
+          wTone('sine', 95, 38, 0.6, 0.12 * dk); wNoise(0.4, 0.07 * dk, 'bandpass', 900, 0.6, 0.01); wNoise(2.6, 0.05 * dk, 'highpass', 2600, 0.6, 0.15, 0.25);
+        }
+        if ((SND.paT -= dt) <= 0) { SND.paT = 35 + Math.random() * 40; wTone('sine', 880, 880, 0.22, 0.03 * dk); wTone('sine', 660, 660, 0.3, 0.03 * dk, 0.25); }
+      }
+      // birdsong over the woods by day, when you're down low
+      var day = dayTimeOfDay > 0.22 && dayTimeOfDay < 0.78 && currentRainIntensity < 0.3;
+      if (day && agl < 40 && !wet && (SND.birdT -= dt) <= 0) {
+        var h = getTerrainHeight(px, pz), fd = forestDensityAt(px, pz, h);
+        SND.birdT = fd > 0.15 ? 1.5 + Math.random() * 4 : 6;
+        if (fd > 0.15) {
+          var v = (0.012 + 0.02 * fd) * (wasGrounded ? 1 : 0.6), f0 = 2200 + Math.random() * 1800, n = 2 + Math.floor(Math.random() * 4);
+          for (var b = 0; b < n; b++) wTone('sine', f0 * (1 + (Math.random() - 0.3) * 0.2), f0 * (0.8 + Math.random() * 0.5), 0.07 + Math.random() * 0.08, v, b * (0.09 + Math.random() * 0.06));
+        }
+      }
+    }
+
+    /* =====================================================================
+       WILDFIRE — a forest fire to put out by scooping water and dropping it
+       ===================================================================== */
+    var WF_MAX = 34;
+    var WF = { on: false, cells: [], tank: 0, t: 0, spreadT: 0, drops: [], out: 0, smokeN: 0, x: 0, z: 0 };
+    var wfFlameMat = new THREE.SpriteMaterial({ map: fireGlowTexture, color: 0xff7a2a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    var wfWaterMat = new THREE.SpriteMaterial({ map: fireGlowTexture, color: 0xd8ecff, transparent: true, opacity: 0.55, depthWrite: false });
+    var wfScorchGeo = new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2);
+    var wfScorchMat = new THREE.MeshBasicMaterial({ color: 0x1a1410, transparent: true, opacity: 0.7, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+    var WF_POOL = [], WF_WATER = [];
+    (function wfBuild() {
+      for (var i = 0; i < WF_MAX; i++) {
+        var a = new THREE.Sprite(wfFlameMat.clone()), b = new THREE.Sprite(wfFlameMat.clone()), sc = new THREE.Mesh(wfScorchGeo, wfScorchMat);
+        b.material.color.setHex(0xffc24a);
+        a.visible = b.visible = sc.visible = false;
+        scene.add(a); scene.add(b); scene.add(sc);
+        WF_POOL.push({ a: a, b: b, sc: sc, used: false });
+      }
+      for (var j = 0; j < 48; j++) { var w = new THREE.Sprite(wfWaterMat); w.visible = false; scene.add(w); WF_WATER.push(w); }
+      var css = document.createElement('style');
+      css.textContent = '#wfBar{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:60;display:none;align-items:center;gap:14px;padding:8px 14px;border-radius:12px;background:rgba(30,10,4,.82);border:1px solid rgba(255,120,60,.5);color:#ffe9dc;font:800 13px ui-monospace,monospace;letter-spacing:.06em}' +
+        '#wfBar small{display:block;font-size:10px;opacity:.7;letter-spacing:.14em}#wfBar .tank{width:90px;height:8px;border-radius:4px;background:rgba(255,255,255,.15);overflow:hidden}#wfBar .tank i{display:block;height:100%;background:linear-gradient(90deg,#4aa8ff,#9fe0ff)}' +
+        '#wfBar button{background:none;border:1px solid rgba(255,255,255,.3);color:#ffe9dc;border-radius:8px;padding:4px 9px;font:700 11px ui-monospace,monospace;cursor:pointer}' +
+        '#wfDrop{position:fixed;z-index:12;right:calc(20px + env(safe-area-inset-right));bottom:calc(214px + env(safe-area-inset-bottom));width:84px;height:44px;border-radius:12px;display:none;align-items:center;justify-content:center;font:800 12px ui-monospace,monospace;letter-spacing:.08em;color:#e6f4ff;background:rgba(20,60,110,.7);border:2px solid #6cc0ff;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}' +
+        '#wfDrop:active{transform:scale(.93)}';
+      document.head.appendChild(css);
+      var bar = document.createElement('div'); bar.id = 'wfBar';
+      bar.innerHTML = '<div><small>WILDFIRE</small><span id="wfFires"></span></div><div><small>TANK <span id="wfPct"></span></small><div class="tank"><i id="wfTank"></i></div></div><div><small id="wfHintL">HOW</small><span id="wfHint" style="font-size:11px"></span></div><button type="button" id="wfQuit">QUIT</button>';
+      document.body.appendChild(bar);
+      bar.querySelector('#wfQuit').onclick = function() { wfEnd(false, true); };
+      var drop = document.createElement('div'); drop.id = 'wfDrop'; drop.textContent = '💧 DROP';
+      drop.addEventListener('pointerdown', function(e) { e.preventDefault(); wfDrop(); });
+      document.body.appendChild(drop);
+      WF.bar = bar; WF.dropEl = drop;
+    })();
+    function wfIgnite(x, z, s) {
+      if (WF.cells.length >= WF_MAX) return null;
+      var P = null; for (var i = 0; i < WF_POOL.length; i++) if (!WF_POOL[i].used) { P = WF_POOL[i]; break; }
+      if (!P) return null;
+      var y = getTerrainHeight(x, z);
+      if (y < WATER_LEVEL + 1) return null;
+      P.used = true;
+      var C = { x: x, z: z, y: y, s: s || 0.3, P: P, ph: Math.random() * 6, burnt: false };
+      P.sc.position.set(x, y + 0.3, z); P.sc.scale.setScalar(4); P.sc.visible = true; P.a.visible = P.b.visible = true;
+      WF.cells.push(C);
+      return C;
+    }
+    function wfPickSite() {
+      // a wooded slope a few kilometres off, with water close enough to scoop from
+      for (var tr = 0; tr < 400; tr++) {
+        var a = Math.random() * 6.283, d = 2200 + Math.random() * 3000;
+        var x = position.x + Math.sin(a) * d, z = position.z + Math.cos(a) * d, h = getTerrainHeight(x, z);
+        if (h < WATER_LEVEL + 4 || forestDensityAt(x, z, h) < (tr < 300 ? 0.35 : 0.05)) continue;
+        for (var k = 0; k < 16; k++) {
+          var b = k * 0.393, r = 600 + (k % 4) * 700;
+          if (getTerrainHeight(x + Math.sin(b) * r, z + Math.cos(b) * r) < WATER_LEVEL - 2) return { x: x, z: z };
+        }
+      }
+      return null;
+    }
+    function wfStart() {
+      if (WF.on) return;
+      var S = wfPickSite();
+      if (!S) { samToast('NO FOREST NEAR WATER HERE · FLY SOMEWHERE GREENER', '#ff9a5a', 3); return; }
+      WF.on = true; WF.t = 0; WF.out = 0; WF.spreadT = 4; WF.tank = isHelicopterMode || isSeaplaneMode ? 0 : 1; WF.x = S.x; WF.z = S.z;
+      for (var i = 0; i < 7; i++) { var a = Math.random() * 6.283, r = Math.random() * 45; wfIgnite(S.x + Math.sin(a) * r, S.z + Math.cos(a) * r, 0.4 + Math.random() * 0.4); }
+      qolNavSet(S.x, S.z, 'WILDFIRE', '#ff6a3a');
+      samToast('🔥 WILDFIRE REPORTED · PUT IT OUT BEFORE IT SPREADS', '#ff7a4a', 4);
+      qolSay('Fire control: wildfire reported, waypoint on your map. Scoop water and hit it before it spreads.');
+      WF.bar.style.display = 'flex';
+    }
+    function wfEnd(won, quiet) {
+      WF.on = false;
+      WF.cells.forEach(function(C) { C.P.used = false; C.P.a.visible = C.P.b.visible = C.P.sc.visible = false; });
+      WF.cells = []; WF.drops = [];
+      WF_WATER.forEach(function(w) { w.visible = false; });
+      if (QOL.nav && QOL.nav.name === 'WILDFIRE') QOL.nav = null;
+      WF.bar.style.display = 'none'; WF.dropEl.style.display = 'none';
+      if (quiet) return;
+      if (won) {
+        var pay = 1500 + Math.max(0, Math.round((480 - WF.t) * 4));
+        coins += pay;
+        samBeep(1320, 0.1, 0.12); setTimeout(function() { samBeep(1760, 0.18, 0.12); }, 140);
+        samToast('FIRE OUT · ' + Math.floor(WF.t / 60) + ':' + String(Math.floor(WF.t % 60)).padStart(2, '0') + ' · +' + pay, '#7fffa0', 5);
+        qolSay('Fire control: that\'s the last of it. Fire is out. Outstanding work.');
+      } else samToast('THE FIRE BURNED OUT OF CONTROL', '#ff5a3a', 4);
+    }
+    // N (the cargo key) or the DROP button: release half a tank
+    function wfDrop() {
+      if (!WF.on || crashing) return false;
+      if (wasGrounded) { samToast('GET AIRBORNE TO DROP', '#9fd0ff', 1.4); return true; }
+      if (WF.tank < 0.05) { samToast('TANK EMPTY · ' + (isHelicopterMode ? 'HOVER LOW OVER WATER' : isSeaplaneMode ? 'SKIM THE WATER TO SCOOP' : 'LAND TO RELOAD'), '#9fd0ff', 2); return true; }
+      var amt = Math.min(WF.tank, 0.5); WF.tank -= amt;
+      var v = velocityVec ? velocityVec.clone() : new THREE.Vector3(-Math.sin(heading) * speed, 0, -Math.cos(heading) * speed);
+      WF.drops.push({ p: position.clone().add(new THREE.Vector3(0, -3, 0)), v: v.multiplyScalar(0.85), amt: amt, t: 0, parts: [] });
+      var D = WF.drops[WF.drops.length - 1];
+      for (var i = 0; i < WF_WATER.length && D.parts.length < 22; i++) if (!WF_WATER[i].visible) { WF_WATER[i].visible = true; D.parts.push({ s: WF_WATER[i], o: new THREE.Vector3((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 6), d: Math.random() }); }
+      wNoise(1.4, 0.08, 'lowpass', 900, 0.6, 0.05);
+      return true;
+    }
+    var _wfKj = kjDropCargo;
+    kjDropCargo = function() { if (wfDrop()) return; return _wfKj.apply(this, arguments); };
+    function wfSplash(p, amt) {
+      var R = 38 + amt * 50, hit = 0;
+      WF.cells.forEach(function(C) {
+        if (C.burnt) return;
+        var d = Math.hypot(C.x - p.x, C.z - p.z);
+        if (d < R) { C.s -= (1.6 * amt + 0.5) * (1 - d / (R * 1.15)); hit++; if (C.s <= 0) { C.burnt = true; C.P.a.visible = C.P.b.visible = false; WF.out++; } }
+      });
+      for (var i = 0; i < 6; i++) samEmitSmoke(new THREE.Vector3(p.x + (Math.random() - 0.5) * R, p.y + 2, p.z + (Math.random() - 0.5) * R), new THREE.Vector3(0, 3 + Math.random() * 3, 0), 22 + Math.random() * 14, 4, 0.5, 0.9, new THREE.Color(0.88, 0.9, 0.92));
+      wNoise(1.2, 0.12 * wVolAt(p.x, p.y, p.z, 1500), 'lowpass', 1400, 0.5, 0.03);
+      if (hit) samToast(hit > 3 ? 'DIRECT HIT · STEAM!' : 'ON TARGET', '#9fe0ff', 1.2);
+      else samToast('MISSED · DROP EARLIER, YOU\'RE CARRYING SPEED', '#ffb07a', 1.8);
+    }
+    function wfUpdate(dt) {
+      if (!WF.on) return;
+      if (!started) { wfEnd(false, true); return; }
+      WF.t += dt;
+      var agl = kjAgl(), overWater = getTerrainHeight(position.x, position.z) < WATER_LEVEL;
+      // filling the tank: helicopters dip a bucket, the Albatross skims, everything else reloads on the ground
+      var fill = 0, how = '';
+      if (isHelicopterMode) { how = 'HOVER LOW OVER WATER'; if (overWater && agl < 10 && speed < 18) fill = 0.4; }
+      else if (isSeaplaneMode) { how = 'SKIM THE WATER'; if (overWater && agl < 4 && speed > 15) fill = 0.55; }
+      else { how = 'LAND TO RELOAD'; if (wasGrounded && speed < 3) fill = 0.35; }
+      if (fill && WF.tank < 1) { WF.tank = Math.min(1, WF.tank + fill * dt); if (Math.random() < dt * 8 && !wasGrounded) samEmitSmoke(position.clone().add(new THREE.Vector3(0, -2, 0)), new THREE.Vector3(0, 2, 0), 8, 1.5, 0.4, 0.9, new THREE.Color(0.9, 0.93, 0.96)); }
+      // falling water
+      for (var di = WF.drops.length - 1; di >= 0; di--) {
+        var D = WF.drops[di];
+        D.t += dt; D.v.y -= 9.8 * dt; D.v.multiplyScalar(1 - 0.35 * dt); D.p.addScaledVector(D.v, dt);
+        var spread = 1 + D.t * 2.2;
+        D.parts.forEach(function(q) { q.s.position.copy(D.p).addScaledVector(q.o, spread).y += q.d * D.t * 6; var sz = 5 + D.t * 6; q.s.scale.set(sz, sz, 1); q.s.material.opacity = 0.55; });
+        if (D.p.y <= Math.max(getTerrainHeight(D.p.x, D.p.z), WATER_LEVEL) + 1 || D.t > 12) {
+          if (D.t <= 12) wfSplash(D.p, D.amt);
+          D.parts.forEach(function(q) { q.s.visible = false; });
+          WF.drops.splice(di, 1);
+        }
+      }
+      // the fire grows and creeps through the trees, faster downwind
+      var burning = 0, smokeBudget = PERF.lvl === 0 ? 1 : 3;
+      WF.cells.forEach(function(C) {
+        var P = C.P;
+        if (C.burnt) { P.sc.scale.setScalar(Math.min(P.sc.scale.x + dt * 0.4, 26)); return; }
+        burning++;
+        C.s = Math.min(1, C.s + dt * 0.03);
+        var f = 0.8 + 0.25 * Math.sin(WF.t * 9 + C.ph) + Math.random() * 0.15, sz = 10 + 22 * C.s;
+        P.a.position.set(C.x, C.y + sz * 0.42, C.z); P.a.scale.set(sz * f, sz * 1.35 * f, 1); P.a.material.opacity = 0.75;
+        P.b.position.set(C.x + Math.sin(C.ph) * 3, C.y + sz * 0.25, C.z); P.b.scale.set(sz * 0.6, sz * 0.8 * f, 1); P.b.material.opacity = 0.9;
+        P.sc.scale.setScalar(Math.min(P.sc.scale.x + dt * 0.8, 10 + 16 * C.s));
+        if (smokeBudget > 0 && Math.random() < dt * 1.6 * C.s) { smokeBudget--; samEmitSmoke(new THREE.Vector3(C.x, C.y + sz, C.z), new THREE.Vector3((Math.random() - 0.5) * 2 + 2, 6 + Math.random() * 3, (Math.random() - 0.5) * 2), 26 + C.s * 20, 9, 0.5, 0.25); }
+      });
+      if ((WF.spreadT -= dt) <= 0) {
+        WF.spreadT = 5;
+        WF.cells.slice().forEach(function(C) {
+          if (C.burnt || C.s < 0.55 || Math.random() > 0.3) return;
+          var a = Math.random() * 6.283, r = 28 + Math.random() * 18, nx = C.x + Math.sin(a) * r, nz = C.z + Math.cos(a) * r;
+          if (WF.cells.some(function(o) { return !o.burnt && Math.hypot(o.x - nx, o.z - nz) < 18; })) return;
+          var h = getTerrainHeight(nx, nz);
+          if (forestDensityAt(nx, nz, h) > 0.05 || Math.random() < 0.3) wfIgnite(nx, nz, 0.25);
+        });
+      }
+      if (!burning) { wfEnd(true); return; }
+      if (WF.t > 600) { wfEnd(false); return; }
+      // HUD
+      document.getElementById('wfFires').textContent = burning + ' BURNING · ' + WF.out + ' OUT';
+      document.getElementById('wfPct').textContent = Math.round(WF.tank * 100) + '%';
+      document.getElementById('wfTank').style.width = (WF.tank * 100).toFixed(0) + '%';
+      document.getElementById('wfHint').textContent = (fill && WF.tank < 1 ? 'FILLING…' : WF.tank < 0.05 ? how : 'N / DROP over the fire');
+      WF.dropEl.style.display = !wasGrounded && WF.tank >= 0.05 ? 'flex' : 'none';
+    }
+
+    /* =====================================================================
+       ACTIONS — one HUD button that holds the situational ones
+       ===================================================================== */
+    var ACT = { open: false, t: 0 };
+    (function actUi() {
+      var css = document.createElement('style');
+      css.textContent =
+        '#actBtn{position:fixed;z-index:12;left:calc(170px + env(safe-area-inset-left));bottom:calc(250px + env(safe-area-inset-bottom));width:64px;height:40px;box-sizing:border-box;border-radius:12px;display:none;align-items:center;justify-content:center;gap:5px;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.06em;color:#e6f0ff;background:rgba(20,30,50,.66);border:2px solid #9fb7d8;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;transition:transform .12s}' +
+        '#actBtn:active{transform:scale(.93)}#actBtn.open{background:#9fb7d8;color:#0c1626}#actBtn b{font-size:9px;min-width:14px;height:14px;line-height:14px;border-radius:7px;background:#ff8a3a;color:#fff;text-align:center}' +
+        '#actDrawer{position:fixed;z-index:14;left:calc(242px + env(safe-area-inset-left));bottom:calc(250px + env(safe-area-inset-bottom));display:none;flex-direction:column-reverse;gap:6px;padding:8px;border-radius:14px;background:rgba(8,14,24,.72);border:1px solid rgba(160,190,230,.25);backdrop-filter:blur(4px)}' +
+        '#actDrawer.open{display:flex}' +
+        '#actDrawer>*{position:static!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;transform:none!important;width:auto!important;min-width:150px;height:36px!important;justify-content:flex-start!important;padding:0 12px!important;box-sizing:border-box}' +
+        '@media (orientation: landscape) and (max-height: 500px){#actBtn{left:calc(254px + env(safe-area-inset-left));bottom:auto;top:calc(80px + env(safe-area-inset-top));width:58px;height:30px;border-radius:9px;font-size:9.5px}' +
+        '#actDrawer{left:calc(254px + env(safe-area-inset-left));bottom:auto;top:calc(116px + env(safe-area-inset-top));flex-direction:column;max-height:calc(100vh - 130px);overflow:auto}#actDrawer>*{height:30px!important}}';
+      document.head.appendChild(css);
+      var btn = document.createElement('div'); btn.id = 'actBtn'; btn.innerHTML = '☰ <span>MORE</span><b>0</b>';
+      var dr = document.createElement('div'); dr.id = 'actDrawer';
+      document.body.appendChild(btn); document.body.appendChild(dr);
+      var wfB = document.createElement('div'); wfB.id = 'wfBtn';
+      wfB.style.cssText = 'display:flex;align-items:center;border-radius:11px;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#ffe2d0;background:rgba(80,25,10,.6);border:2px solid #ff7a4a;cursor:pointer;user-select:none';
+      wfB.addEventListener('click', function() { if (WF.on) wfEnd(false, true); else wfStart(); });
+      [typeof DT !== 'undefined' && DT.btn, typeof BASE !== 'undefined' && BASE.btn, typeof ORB !== 'undefined' && ORB.btn, nukeYieldEl, nukeTimerEl, wfB].forEach(function(el) { if (el) dr.appendChild(el); });
+      ACT.btn = btn; ACT.dr = dr; ACT.wfB = wfB;
+      btn.addEventListener('click', function(e) { e.stopPropagation(); actToggle(!ACT.open); });
+      dr.addEventListener('click', function(e) {
+        // the nuke settings cycle with each tap, so those keep the drawer open
+        if (e.target === nukeYieldEl || e.target === nukeTimerEl) return;
+        setTimeout(function() { actToggle(false); }, 120);
+      });
+      document.addEventListener('pointerdown', function(e) { if (ACT.open && !dr.contains(e.target) && !btn.contains(e.target)) actToggle(false); });
+    })();
+    function actToggle(on) { ACT.open = on; ACT.dr.classList.toggle('open', on); ACT.btn.classList.toggle('open', on); }
+    function actUpdate(dt) {
+      if ((ACT.t -= dt) > 0) return;
+      ACT.t = 0.25;
+      ACT.wfB.textContent = WF.on ? '🔥 ABANDON FIRE' : '🔥 WILDFIRE';
+      ACT.wfB.style.display = started && !crashing ? 'flex' : 'none';
+      var n = 0;
+      for (var i = 0; i < ACT.dr.children.length; i++) { var c = ACT.dr.children[i]; if (!c.classList.contains('hidden') && c.style.display !== 'none' && getComputedStyle(c).display !== 'none') n++; }
+      ACT.btn.querySelector('b').textContent = n;
+      var show = started && n > 0;
+      ACT.btn.style.display = show ? 'flex' : 'none';
+      if (!show && ACT.open) actToggle(false);
     }
 
     /* ============================================================
