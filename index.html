@@ -783,7 +783,7 @@
     font:700 13px/1.2 monospace; letter-spacing:.1em; text-align:center; white-space:nowrap;
     text-shadow:0 0 8px rgba(0,0,0,.9), 0 1px 2px #000; opacity:0; transition:opacity .25s ease; pointer-events:none;
   }
-  #samToast.show{ opacity:1; }
+  #samToast.show{ opacity:1; } #samToast.show.pop{ animation:polToast .35s ease-out; }
   #pvpOverlay{ position:fixed; inset:0; width:100%; height:100%; z-index:6; pointer-events:none; }
   #gunBtn, #aamBtn{
     position:fixed; z-index:12; width:64px; height:64px; border-radius:50%;
@@ -16953,6 +16953,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       eiUpdate(dt);
       perfFrame(dt);
       inUpdate(dt);
+      dyUpdate(dt);
+      polUpdate();
       dtUpdate(dt);
       perfRun('wx2', wx2Update, dt);
       perfRun('wl', wlUpdate, dt);
@@ -19113,9 +19115,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var samToastEl = document.getElementById('samToast'), flareBtnEl = document.getElementById('flareBtn');
     var flareCountEl = document.getElementById('flareCount');
     var samToastTimer = 0;
+    // a short queue so back-to-back messages each get read instead of overwriting one another
+    var samToastQ = [], samToastAge = 9;
     function samToast(msg, color, secs) {
+      if (samToastTimer > 0 && samToastAge < 1.1 && msg !== samToastEl.textContent) {
+        if (!samToastQ.some(function(q) { return q[0] === msg; })) { samToastQ.push([msg, color, secs]); if (samToastQ.length > 2) samToastQ.shift(); }
+        return;
+      }
       samToastEl.textContent = msg; samToastEl.style.color = color || '#fff';
-      samToastEl.classList.add('show'); samToastTimer = secs || 2.5;
+      samToastEl.classList.remove('pop'); void samToastEl.offsetWidth; samToastEl.classList.add('show', 'pop');
+      samToastTimer = secs || 2.5; samToastAge = 0;
     }
     function samBearingTo(wx, wz) {
       // relative bearing (radians, 0 = dead ahead, +ve = right) from the aircraft's heading
@@ -19597,7 +19606,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
       }
 
-      if (samToastTimer > 0 && (samToastTimer -= dt) <= 0) samToastEl.classList.remove('show');
+      samToastAge += dt;
+      if (samToastQ.length && samToastAge >= 1.1) { var q = samToastQ.shift(); samToastTimer = 0; samToast(q[0], q[1], q[2]); }
+      else if (samToastTimer > 0 && (samToastTimer -= dt) <= 0) samToastEl.classList.remove('show');
 
       // ---- detection / lock / launch ----
       var dx = position.x - SAM_BASE.x, dz = position.z - SAM_BASE.z;
@@ -28075,6 +28086,218 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         else if (Math.hypot(position.x - r.x, position.z - r.z) > 4500) { scene.remove(IN.ring); IN.ring = null; inRing(); samToast('RING MOVED IN FRONT OF YOU', '#ff9a2e', 2); }
       }
       else if (IN.step === 2 && wasGrounded && speed < 4 && IN.t > 4) inAdvance();
+    }
+
+    /* =====================================================================
+       DAILY CHALLENGE — one seeded ring course a day, the same for everyone
+       ===================================================================== */
+    var DY_KEY = 'gp-daily-v1';
+    var DY = { on: false, rings: [], next: 0, t: 0, done: false, failed: false, prev: null, board: null, db: null, st: {} };
+    try { DY.st = JSON.parse(localStorage.getItem(DY_KEY) || '{}') || {}; } catch (e) { DY.st = {}; }
+    if (!DY.st.pilot) { DY.st.pilot = 'p' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36); }
+    function dySave() { try { localStorage.setItem(DY_KEY, JSON.stringify(DY.st)); } catch (e) {} }
+    function dyDay() { return new Date().toISOString().slice(0, 10); }
+    function dyRng(seed) {
+      var h = 2166136261; for (var i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
+      return function() { h += 0x6D2B79F5; var t = h; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    }
+    var DY_WX = ['clear', 'clear', 'spring', 'autumn', 'rain', 'fog'];
+    // today's course: where the rings are, the weather and the time of day all come from the date
+    function dyCourse(day) {
+      var r = dyRng('glidepath-' + day), pts = [], n = 10;
+      var x = RUNWAY_CENTER_X, z = RUNWAY_CENTER_Z - RUNWAY_HALF_LENGTH - 900, h = 0;
+      for (var i = 0; i < n; i++) {
+        if (i > 0) { h += (r() - 0.5) * 1.6; var d = 900 + r() * 700; x += -Math.sin(h) * d; z += -Math.cos(h) * d; }
+        var g = Math.max(getTerrainHeight(x, z), WATER_LEVEL);
+        pts.push({ x: x, z: z, y: g + 110 + r() * 170, h: h });
+      }
+      return { day: day, pts: pts, wx: DY_WX[Math.floor(r() * DY_WX.length)], tod: 0.3 + r() * 0.35 };
+    }
+    function dyFmt(ms) { var s = ms / 1000, m = Math.floor(s / 60); return m + ':' + (s - m * 60).toFixed(2).padStart(5, '0'); }
+    function dyClient() {
+      if (DY.db) return DY.db;
+      if (!window.supabase || !window.supabase.createClient) return null;
+      try { DY.db = window.supabase.createClient(NET_URL, NET_KEY, { auth: { persistSession: false, autoRefreshToken: false } }); } catch (e) { DY.db = null; }
+      return DY.db;
+    }
+    function dyFetchBoard(cb0) {
+      var c = dyClient(), fired = false;
+      var cb = function(r) { if (!fired) { fired = true; cb0(r); } };
+      if (!c) { cb(null); return; }
+      setTimeout(function() { cb(null); }, 7000);
+      c.from('daily_scores').select('name,ms,pilot').eq('day', dyDay()).order('ms', { ascending: true }).limit(200)
+        .then(function(res) {
+          if (res.error || !res.data) { cb(null); return; }
+          // best run per pilot
+          var seen = {}, rows = [];
+          res.data.forEach(function(row) { if (!seen[row.pilot]) { seen[row.pilot] = 1; rows.push(row); } });
+          DY.board = rows; cb(rows);
+        }, function() { cb(null); });
+    }
+    function dySubmit(ms) {
+      var c = dyClient(); if (!c) return;
+      var name = (typeof net !== 'undefined' && net.name) || 'PILOT';
+      c.from('daily_scores').insert({ day: dyDay(), name: netSafeName(name) || 'PILOT', ms: Math.round(ms), pilot: DY.st.pilot })
+        .then(function() { dyFetchBoard(dyRenderBoard); }, function() {});
+    }
+    (function dyUi() {
+      var css = document.createElement('style');
+      css.textContent =
+        '#dyBox{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;background:rgba(4,8,14,.62);backdrop-filter:blur(3px)}' +
+        '#dyBox .db{width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;padding:20px;border-radius:16px;background:linear-gradient(165deg,#1c1830,#0d1220);border:1px solid #ffb84a;color:#fff3e0;font:600 13px/1.4 system-ui,sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.5)}' +
+        '#dyBox h3{margin:0;font:900 16px ui-monospace,monospace;letter-spacing:.16em;color:#ffcf7a}#dyBox .sub{opacity:.7;font-size:12px;margin:2px 0 12px}' +
+        '#dyBox .facts{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}#dyBox .facts span{padding:4px 9px;border-radius:20px;background:rgba(255,184,74,.12);border:1px solid rgba(255,184,74,.3);font-size:11px;letter-spacing:.06em}' +
+        '#dyBox ol{margin:0;padding:0;list-style:none;font:700 13px ui-monospace,monospace}#dyBox li{display:flex;gap:10px;padding:6px 8px;border-radius:7px}#dyBox li:nth-child(odd){background:rgba(255,255,255,.04)}#dyBox li.me{background:rgba(255,184,74,.2)}' +
+        '#dyBox li i{width:26px;opacity:.6;font-style:normal}#dyBox li b{flex:1}#dyBox .empty{opacity:.6;padding:8px;font-size:12px}' +
+        '#dyBox .row{display:flex;gap:8px;margin-top:14px}#dyBox button{flex:1;padding:11px;border-radius:10px;border:1px solid #ffb84a;background:rgba(255,184,74,.18);color:#fff3e0;font:800 12px ui-monospace,monospace;letter-spacing:.1em;cursor:pointer}#dyBox button.go{background:#ffb84a;color:#24170a}' +
+        '#dyBar{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:60;display:none;align-items:center;gap:14px;padding:8px 14px;border-radius:12px;background:rgba(20,14,6,.82);border:1px solid rgba(255,184,74,.45);color:#fff3e0;font:800 15px ui-monospace,monospace;letter-spacing:.06em}' +
+        '#dyBar small{font-size:10px;opacity:.7;letter-spacing:.14em;display:block}#dyBar button{background:none;border:1px solid rgba(255,255,255,.3);color:#fff3e0;border-radius:8px;padding:4px 9px;font:700 11px ui-monospace,monospace;cursor:pointer}';
+      document.head.appendChild(css);
+      var menu = document.querySelector('.ss-menu');
+      if (menu) {
+        var b = document.createElement('button'); b.type = 'button'; b.className = 'ss-item'; b.id = 'dailyBtn';
+        b.innerHTML = '<b>☀</b><span>Daily challenge<small>Same course for everyone today</small></span>';
+        menu.insertBefore(b, menu.firstChild ? menu.firstChild.nextSibling : null);
+        b.addEventListener('click', function() { dyOpen(); });
+      }
+      var box = document.createElement('div'); box.id = 'dyBox';
+      box.innerHTML = '<div class="db"><h3>☀ DAILY CHALLENGE</h3><div class="sub" id="dySub"></div><div class="facts" id="dyFacts"></div>' +
+        '<ol id="dyList"></ol><div class="row"><button type="button" class="go" id="dyGo">FLY TODAY\'S COURSE</button><button type="button" id="dyX">CLOSE</button></div></div>';
+      document.body.appendChild(box);
+      box.querySelector('#dyX').onclick = function() { box.style.display = 'none'; };
+      box.querySelector('#dyGo').onclick = function() {
+        box.style.display = 'none';
+        if (started) dyBegin(); else { window.__dyGo = true; document.getElementById('startBtn').click(); }
+      };
+      var bar = document.createElement('div'); bar.id = 'dyBar'; document.body.appendChild(bar);
+    })();
+    function dyOpen() {
+      var C = dyCourse(dyDay()), best = DY.st.day === C.day ? DY.st.best : null;
+      document.getElementById('dySub').textContent = C.day + ' · resets at 00:00 UTC';
+      document.getElementById('dyFacts').innerHTML = '<span>' + C.pts.length + ' RINGS</span><span>' + C.wx.toUpperCase() + '</span><span>YOUR BEST ' + (best ? dyFmt(best) : '—') + '</span>';
+      document.getElementById('dyList').innerHTML = '<div class="empty">Loading leaderboard…</div>';
+      document.getElementById('dyBox').style.display = 'flex';
+      dyFetchBoard(dyRenderBoard);
+    }
+    function dyRenderBoard(rows) {
+      var el = document.getElementById('dyList'); if (!el) return;
+      if (!rows) { el.innerHTML = '<div class="empty">Leaderboard offline. Your time is still saved on this device.</div>'; return; }
+      if (!rows.length) { el.innerHTML = '<div class="empty">No times yet today. Be the first.</div>'; return; }
+      el.innerHTML = rows.slice(0, 10).map(function(r, i) { return '<li' + (r.pilot === DY.st.pilot ? ' class="me"' : '') + '><i>' + (i + 1) + '</i><b>' + String(r.name).replace(/[<>&]/g, '') + '</b>' + dyFmt(r.ms) + '</li>'; }).join('');
+      var mine = -1; rows.forEach(function(r, i) { if (mine < 0 && r.pilot === DY.st.pilot) mine = i; });
+      if (mine >= 10) el.innerHTML += '<li class="me"><i>' + (mine + 1) + '</i><b>YOU</b>' + dyFmt(rows[mine].ms) + '</li>';
+    }
+    function dyClear() {
+      DY.rings.forEach(function(m) { scene.remove(m); m.geometry.dispose(); });
+      DY.rings = [];
+    }
+    function dyBegin() {
+      dyClear();
+      var C = dyCourse(dyDay());
+      if (typeof IN !== 'undefined') { IN.done = true; if (IN.step >= 0) { IN.step = -1; IN.el.style.display = 'none'; if (IN.ring) { scene.remove(IN.ring); IN.ring = null; } } }
+      setWeather(C.wx);
+      if (typeof dayTimeOfDay !== 'undefined') dayTimeOfDay = C.tod;
+      spawnAt(RUNWAY_CENTER_X, RUNWAY_CENTER_Z + RUNWAY_HALF_LENGTH - 15);
+      C.pts.forEach(function(p, i) {
+        var last = i === C.pts.length - 1;
+        var m = new THREE.Mesh(new THREE.TorusGeometry(46, 3, 10, 48), new THREE.MeshBasicMaterial({ color: last ? 0x6aff8a : 0xffb84a, transparent: true, opacity: 0.85, depthWrite: false, fog: false }));
+        m.position.set(p.x, p.y, p.z); m.rotation.y = p.h;
+        scene.add(m); DY.rings.push(m);
+      });
+      DY.on = true; DY.next = 0; DY.t = 0; DY.done = false; DY.failed = false; DY.prev = position.clone(); DY.course = C;
+      dyNav();
+      samToast('DAILY CHALLENGE · ' + C.pts.length + ' RINGS · CLOCK IS RUNNING', '#ffb84a', 3);
+    }
+    function dyNav() { var m = DY.rings[DY.next]; if (m) QOL.nav = { x: m.position.x, z: m.position.z, name: 'RING ' + (DY.next + 1), color: '#ffb84a' }; }
+    function dyBar() {
+      var bar = document.getElementById('dyBar');
+      if (!DY.on) { bar.style.display = 'none'; return; }
+      if (!bar.firstChild) bar.innerHTML = '<div><small id="dyRing"></small><span id="dyTime"></span></div><div id="dyBest"></div><button type="button" data-a="r">RETRY</button><button type="button" data-a="q">QUIT</button>';
+      var best = DY.st.day === dyDay() ? DY.st.best : null;
+      document.getElementById('dyRing').textContent = 'DAILY · RING ' + Math.min(DY.next + 1, DY.rings.length) + '/' + DY.rings.length;
+      document.getElementById('dyTime').textContent = DY.failed ? 'CRASHED' : dyFmt(DY.t * 1000);
+      document.getElementById('dyBest').innerHTML = best ? '<small>BEST</small>' + dyFmt(best) : '';
+      bar.style.display = 'flex';
+    }
+    document.addEventListener('click', function(e) {
+      var b = e.target.closest && e.target.closest('#dyBar button'); if (!b) return;
+      if (b.getAttribute('data-a') === 'r') dyBegin(); else dyEnd();
+    });
+    function dyEnd() { DY.on = false; dyClear(); if (QOL.nav && /^RING /.test(QOL.nav.name)) QOL.nav = null; dyBar(); }
+    function dyFinish() {
+      var ms = DY.t * 1000, day = dyDay(), pb = !(DY.st.day === day && DY.st.best && DY.st.best <= ms);
+      if (pb) { DY.st.day = day; DY.st.best = ms; dySave(); }
+      DY.done = true;
+      samBeep(1320, 0.1, 0.12); setTimeout(function() { samBeep(1760, 0.16, 0.12); }, 140);
+      samToast('COURSE COMPLETE · ' + dyFmt(ms) + (pb ? ' · NEW BEST' : ''), '#6aff8a', 5);
+      if (DY.st.paid !== day) { DY.st.paid = day; dySave(); coins += 1000; samToast('FIRST DAILY CLEAR TODAY · +1000', '#ffd84a', 4); }
+      if (pb) dySubmit(ms);
+      dyEnd();
+      setTimeout(dyOpen, 1200);
+    }
+    function dyUpdate(dt) {
+      if (window.__dyGo && started) { window.__dyGo = false; dyBegin(); }
+      if (!DY.on) return;
+      if (crashing) { if (!DY.failed) { DY.failed = true; samToast('CRASHED · PRESS RETRY', '#ff6a5a', 3); } dyBar(); return; }
+      if (DY.failed) { dyBar(); return; }
+      DY.t += dt;
+      var m = DY.rings[DY.next];
+      for (var i = 0; i < DY.rings.length; i++) DY.rings[i].material.opacity = i < DY.next ? 0.12 : i === DY.next ? 0.7 + 0.25 * Math.sin(DY.t * 5) : 0.45;
+      if (m) {
+        // closest point of this frame's path to the ring centre, so fast jets can't skip through
+        var a = DY.prev, b = position, ab = new THREE.Vector3().subVectors(b, a), L = ab.lengthSq();
+        var k = L > 0 ? THREE.MathUtils.clamp(new THREE.Vector3().subVectors(m.position, a).dot(ab) / L, 0, 1) : 1;
+        if (a.clone().addScaledVector(ab, k).distanceTo(m.position) < 50) {
+          gfxShockwave(m.position.clone(), 0.5); samBeep(1180 + DY.next * 40, 0.06, 0.1);
+          DY.next++;
+          if (DY.next >= DY.rings.length) { DY.prev.copy(position); dyFinish(); return; }
+          dyNav();
+        }
+      }
+      DY.prev.copy(position);
+      dyBar();
+    }
+
+    /* =====================================================================
+       POLISH — coin pops, panel entrances, button feedback
+       ===================================================================== */
+    var POL = { coins: null, el: null };
+    (function polUi() {
+      var st = document.createElement('style');
+      st.textContent =
+        '@keyframes polIn{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1;transform:none}}' +
+        '@keyframes polBg{from{opacity:0}to{opacity:1}}' +
+        '#inCard,#dyBox,#codesBox{animation:polBg .22s ease-out}#inCard .box,#dyBox .db,#codesBox .cb{animation:polIn .32s cubic-bezier(.2,.9,.3,1.2)}' +
+        '#inBar,#dyBar{animation:polIn .3s ease-out}' +
+        '#inCard .grid button,#dyBox button,#codesBox button,#inBar button,#dyBar button{transition:transform .12s,background .15s,border-color .15s}' +
+        '#inCard .grid button:active,#dyBox button:active,#codesBox button:active,#inBar button:active,#dyBar button:active{transform:scale(.95)}' +
+        '#inCard .grid button:hover{transform:translateY(-2px)}' +
+        '@keyframes polToast{0%{transform:translateX(-50%) scale(.9);opacity:.2}60%{transform:translateX(-50%) scale(1.04)}100%{transform:translateX(-50%) scale(1)}}' +
+        '@keyframes polCoin{0%{opacity:0;transform:translateY(6px) scale(.8)}15%{opacity:1;transform:translateY(0) scale(1.15)}100%{opacity:0;transform:translateY(-34px) scale(1)}}' +
+        '.polCoin{position:fixed;z-index:70;pointer-events:none;font:900 15px ui-monospace,monospace;color:#ffd84a;text-shadow:0 0 8px rgba(255,200,60,.7),0 1px 2px #000;animation:polCoin 1.4s ease-out forwards}' +
+        '@keyframes polBump{50%{transform:scale(1.35);color:#ffd84a}}#coinVal.bump{display:inline-block;animation:polBump .35s ease-out}';
+      document.head.appendChild(st);
+    })();
+    function polCoinPop(n) {
+      var ref = document.getElementById('coinVal'); if (!ref) return;
+      var r = ref.getBoundingClientRect();
+      // the coin counter isn't on every HUD layout: pop it under the message line instead
+      if (!r.width) r = { left: window.innerWidth / 2 - 30, bottom: 136 };
+      var e = document.createElement('div'); e.className = 'polCoin';
+      e.textContent = (n > 0 ? '+' : '') + Math.round(n).toLocaleString();
+      e.style.left = Math.round(r.left) + 'px'; e.style.top = Math.round(r.bottom + 4) + 'px';
+      if (n < 0) e.style.color = '#ff8a7a';
+      document.body.appendChild(e);
+      setTimeout(function() { e.remove(); }, 1500);
+      if (r.width) { ref.classList.remove('bump'); void ref.offsetWidth; ref.classList.add('bump'); }
+    }
+    function polUpdate() {
+      if (!started) { POL.coins = coins; return; }
+      if (POL.coins === null) POL.coins = coins;
+      var d = coins - POL.coins;
+      // only the real rewards, not the steady trickle from flying
+      if (Math.abs(d) >= 50) polCoinPop(d);
+      POL.coins = coins;
     }
 
     /* ============================================================
