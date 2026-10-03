@@ -228,13 +228,13 @@ add(lp(hp(noise(T(3)), 3000), 9000) * 0.022, 48.5, 1.0)   # steam hiss
 add(riser(3.0, 100, 800, 0.4), 48.6)
 # launch
 add(sub_boom(1.5, 60, 30, 0.9), 51.6)
-l, r = jet_flyby(4.0, 2.0, 1.6); add_st(l, r, 53.44 - 2.0, 1.2)
-add(sub_boom(1.5, 60, 30, 0.8), 52.45)                       # cat 2 stroke
-l, r = jet_flyby(4.0, 2.0, 1.6); add_st(l, r, 54.29 - 2.0, 1.0)
+l, r = jet_flyby(4.0, 2.0, 1.6); add_st(l, r, 53.08 - 2.0, 1.2)
+add(sub_boom(1.5, 60, 30, 0.8), 52.3)                        # cat 2 stroke
+l, r = jet_flyby(4.0, 2.0, 1.6); add_st(l, r, 53.78 - 2.0, 1.0)
 # the strike squad's low pass over the carrier: four jets, slightly spread in time
 for k, dt in enumerate((0.0, 0.12, 0.2, 0.32)):
     l, r = jet_flyby(3.6, 1.8, 1.0); add_st(r, l, 45.25 + dt - 1.8, 0.55)
-add(whoosh(2.0, 0.6, 1000, 8000, 0.6), 53.0)
+add(whoosh(2.0, 0.6, 1000, 8000, 0.6), 52.55)
 # title: the big one
 add(braam([note('D1'), note('D2'), note('A2'), note('D3')], 6.5, 2600), 54.6, 1.0)
 add(impact(6.0, 1.0), 54.6, 1.1)

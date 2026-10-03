@@ -144,8 +144,26 @@ export function makeSky() {
 }
 
 // ---------- WATER ----------
-export function makeWater(size = 160000) {
-  const geo = new THREE.PlaneGeometry(size, size, 1, 1); geo.rotateX(-Math.PI / 2);
+// The sea surface: a dense radial mesh centred under the camera (rings spaced geometrically out to
+// 90 km). Two giant triangles gave imprecise depth, so shorelines and the wake flickered against it.
+function radialWaterGeo(rMax = 90000, rings = 140, segs = 192, r0 = 1.5) {
+  const pos = [0, 0, 0], idx = [];
+  const k = Math.pow(rMax / r0, 1 / (rings - 1));
+  for (let i = 0; i < rings; i++) {
+    const r = r0 * Math.pow(k, i);
+    for (let j = 0; j < segs; j++) { const a = j / segs * Math.PI * 2; pos.push(Math.cos(a) * r, 0, Math.sin(a) * r); }
+  }
+  for (let j = 0; j < segs; j++) idx.push(0, 1 + (j + 1) % segs, 1 + j);
+  for (let i = 0; i < rings - 1; i++) for (let j = 0; j < segs; j++) {
+    const a = 1 + i * segs + j, b = 1 + i * segs + (j + 1) % segs, c = a + segs, d = b + segs;
+    idx.push(a, b, c, b, d, c);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
+  return g;
+}
+export function makeWater() {
+  const geo = radialWaterGeo();
   const mat = new THREE.ShaderMaterial({
     extensions: { derivatives: true }, // dFdx/fwidth for the footprint filtering (core in WebGL2)
     uniforms: {
@@ -155,12 +173,12 @@ export function makeWater(size = 160000) {
       uSunDir: { value: new THREE.Vector3(0, 0.2, -1) }, uSunColor: { value: new THREE.Color(1, 0.9, 0.7) },
       uFogColor: { value: new THREE.Color() }, uFogDensity: { value: 0.0001 }, uSpec: { value: 1 },
       uChop: { value: 1 }, uExtraLight: { value: new THREE.Color(0, 0, 0) }, uExtraPos: { value: new THREE.Vector3() }, uExtraRange: { value: 1 },
-      uAurora: { value: 0 }
+      uAurora: { value: 0 }, uSwell: { value: 1 }, uFlow: { value: new THREE.Vector2() }
     },
     vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }`,
     fragmentShader: GLSL_NOISE + `
-      uniform float uTime, uBlur, uFogDensity, uSpec, uChop, uExtraRange, uAurora;
-      uniform vec2 uOffset;
+      uniform float uTime, uBlur, uFogDensity, uSpec, uChop, uExtraRange, uAurora, uSwell;
+      uniform vec2 uOffset, uFlow;
       uniform vec3 uDeep, uShallow, uZenith, uHorizon, uSunDir, uSunColor, uFogColor, uExtraLight, uExtraPos;
       varying vec3 vW;
       // Detail is band-limited by the pixel footprint (fp, metres) so nothing finer than ~2 px is ever
@@ -174,11 +192,11 @@ export function makeWater(size = 160000) {
         // directional swell (wavelengths ~300, 134, 57, 27 m)
         vec2 d1 = normalize(vec2(1.0, 0.35)), d2 = normalize(vec2(-0.4, 1.0)), d3 = normalize(vec2(0.8,-0.7)), d4 = normalize(vec2(-0.9,-0.2));
         float f1 = lodFade(299., fp), f2 = lodFade(134., fp), f3 = lodFade(57., fp) * near, f4 = lodFade(27., fp) * near;
-        g += d1 * cos(dot(d1,p)*0.021 + uTime*0.9) * 0.021 * 1.2 * f1;
-        g += d2 * cos(dot(d2,p)*0.047 + uTime*1.4) * 0.047 * 0.55 * f2;
-        g += d3 * cos(dot(d3,p)*0.11 + uTime*2.1) * 0.11 * 0.22 * k * f3;
-        g += d4 * cos(dot(d4,p)*0.23 + uTime*2.9) * 0.23 * 0.1 * k * f4;
-        rough += (0.00016*(1.-f1) + 0.00017*(1.-f2) + 0.00015*k*k*(1.-f3) + 0.00013*k*k*(1.-f4)) * uChop*uChop; // per-axis slope var
+        g += d1 * cos(dot(d1,p)*0.021 + uTime*0.454) * 0.021 * 1.2 * f1 * uSwell;
+        g += d2 * cos(dot(d2,p)*0.047 + uTime*0.679) * 0.047 * 0.55 * f2 * uSwell;
+        g += d3 * cos(dot(d3,p)*0.11 + uTime*1.039) * 0.11 * 0.22 * k * f3 * uSwell;
+        g += d4 * cos(dot(d4,p)*0.23 + uTime*1.502) * 0.23 * 0.1 * k * f4 * uSwell;
+        rough += (0.00016*(1.-f1) + 0.00017*(1.-f2) + 0.00015*k*k*(1.-f3) + 0.00013*k*k*(1.-f4)) * uChop*uChop * uSwell*uSwell; // per-axis slope var
         return g * uChop;
       }
       // fine ripple fbm with per-octave footprint fade (fpn: footprint in noise units)
@@ -199,7 +217,7 @@ export function makeWater(size = 160000) {
         vec2 g = waveGrad(ps, fp, near);
         // fine ripples
         float e = 0.6;
-        vec2 q = ps*0.09 + vec2(uTime*0.05, uTime*0.03);
+        vec2 q = (ps - uFlow*uTime)*0.09 + vec2(uTime*0.05, uTime*0.03);
         float fpn = fp*0.09;
         float n0 = rfbm(q, fpn, near);
         float nx = rfbm(q+vec2(e*0.09,0.), fpn, near), nz = rfbm(q+vec2(0.,e*0.09), fpn, near);
@@ -245,11 +263,12 @@ export function makeWater(size = 160000) {
 
 // ---------- TERRAIN ----------
 // heightFn(x,z) -> y ; colorFn(x,z,y,ny,out:THREE.Color)
-export function makeTerrain({ size, seg: n, cx = 0, cz = 0, height, color, roughness = 0.95, material }) {
+export function makeTerrain({ size, seg: n, cx = 0, cz = 0, height, color, roughness = 0.95, material, warp }) {
   const geo = new THREE.PlaneGeometry(size, size, n, n); geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i) + cx, z = pos.getZ(i) + cz;
+    let x = pos.getX(i) + cx, z = pos.getZ(i) + cz;
+    if (warp) [x, z] = warp(x, z);   // a non-uniform grid: fine where the camera flies, coarse far away
     pos.setXYZ(i, x, height(x, z), z);
   }
   geo.computeVertexNormals();

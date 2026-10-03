@@ -12,8 +12,9 @@ export function heartHeight(x, z) {
   const mtn = Math.pow(ridged(x * 0.00026 + 3.3, z * 0.00026 - 1.7, 5), 2.6) * 1300 * sstep(-1500, -6500, z);
   let h = hills + mtn;
   const d = Math.abs(x - riverX(z));
-  h = lerp(9, h, Math.pow(sstep(60, 1400, d), 0.8));
-  h = lerp(-6, h, sstep(28, 75, d));
+  // a broad valley floor just above the water, then a gentle muddy bank down into the channel
+  h = lerp(3.5, h, Math.pow(sstep(70, 1400, d), 0.8));
+  h = lerp(-3.5, h, sstep(30, 82, d));
   // coast to the south
   const coast = 3400 + fbm(x * 0.0006, 7.7, 3) * 900;
   h = lerp(h, -60, sstep(coast - 500, coast + 900, z));
@@ -36,7 +37,15 @@ function heartColor(x, z, h, ny, c) {
 }
 export function buildHeartland() {
   const g = new THREE.Group();
-  const ter = makeTerrain({ size: 18000, seg: 360, cx: 0, cz: -1500, height: heartHeight, color: heartColor });
+  // grid spacing ~10-18 m along the river corridor the camera flies, ~200 m at the far edges
+  const sh = (k, u) => Math.sinh(k * u) / Math.sinh(k);
+  const warp = (gx, gz) => {
+    const u = gx / 9000, v = (gz + 1500) / 9000;
+    const x = 9000 * sh(3.6, u);
+    const z = v < 0 ? 2000 - 12500 * sh(3.8, -v) : 2000 + 5500 * sh(2.6, v);
+    return [x, z];
+  };
+  const ter = makeTerrain({ size: 18000, seg: 360, cx: 0, cz: -1500, height: heartHeight, color: heartColor, warp });
   g.add(ter);
   const trees = makeTreeMeshes(26000, 11, (r) => {
     const x = -1800 + r() * 3600, z = -2600 + r() * 6200;
@@ -282,8 +291,8 @@ export function buildCarrier() {
         float across = abs(vUv.x*2.0-1.0);
         float n = vfbm(vec2(vW.x*0.05, vW.z*0.02 - uTime*0.6));
         float n2 = vfbm(vec2(vW.x*0.14, vW.z*0.08 - uTime*1.2));
-        float core = smoothstep(1.0, 0.15, across) * (1.0 - along*0.9);
-        float edges = smoothstep(0.65, 0.95, across) * smoothstep(1.02, 0.95, across) * (1.0 - along*0.7);
+        float core = smoothstep(0.95, 0.1, across) * (1.0 - along*0.9);
+        float edges = smoothstep(0.5, 0.82, across) * smoothstep(1.0, 0.84, across) * (1.0 - along*0.7);
         float foam = smoothstep(0.35, 0.75, n*0.6+n2*0.5) * (core*0.95 + edges*0.8);
         foam *= smoothstep(1.0, 0.5, along);
         vec3 col = mix(vec3(0.55,0.6,0.65), vec3(1.0), n2) * (0.35 + 0.65*uSun);
@@ -297,7 +306,7 @@ export function buildCarrier() {
     const P = [], U = [], I = [], N = 40;
     for (let i = 0; i <= N; i++) {
       const s = i / N, z = 150 + s * 2600, w = 22 + s * 170;
-      P.push(-w, 0.25, z, w, 0.25, z); U.push(0, s, 1, s);
+      P.push(-w, 0.6, z, w, 0.6, z); U.push(0, s, 1, s);
       if (i < N) { const b = i * 2; I.push(b, b + 2, b + 1, b + 1, b + 2, b + 3); }
     }
     geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2)); geo.setIndex(I);

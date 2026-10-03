@@ -229,34 +229,64 @@ export function makeDerrick() {
 
 // ---------- THE CARRIER ----------
 function deckTexture() {
-  const W = 512, H = 2048, c = document.createElement('canvas'); c.width = W; c.height = H;
+  // 12.8 px per metre. Deck spans x:[-40,32] m and z:[-175,165] m (bow at -z = top of the canvas).
+  const S = 12.8, W = 1024, H = 4352, c = document.createElement('canvas'); c.width = W; c.height = H;
   const x = c.getContext('2d');
-  // deck spans x:[-40,40] m (W) and length z:[-175,165] (H). helper: metres -> px
-  const px = (mx) => (mx + 40) / 80 * W, pz = (mz) => (mz + 175) / 340 * H;
-  x.fillStyle = '#2b2e31'; x.fillRect(0, 0, W, H);
+  const px = (mx) => (mx + 40) * S, pz = (mz) => (mz + 175) * S, m = (v) => v * S;
   const r = rng(7);
-  for (let i = 0; i < 9000; i++) { x.fillStyle = `rgba(${r() < 0.5 ? 0 : 255},${r() < 0.5 ? 0 : 255},${r() < 0.5 ? 0 : 255},${0.02 + r() * 0.03})`; x.fillRect(r() * W, r() * H, 2 + r() * 6, 2 + r() * 14); }
-  for (let i = 0; i < 60; i++) { x.fillStyle = `rgba(0,0,0,${0.08 + r() * 0.1})`; x.beginPath(); x.ellipse(px(-30 + r() * 60), pz(-170 + r() * 330), 6 + r() * 20, 20 + r() * 60, 0, 0, 7); x.fill(); }
-  x.lineWidth = 3; x.strokeStyle = 'rgba(240,240,235,0.9)';
-  // deck edge lines
-  x.setLineDash([]); x.beginPath(); x.moveTo(px(-36), pz(-160)); x.lineTo(px(-36), pz(160)); x.moveTo(px(32), pz(-160)); x.lineTo(px(32), pz(160)); x.stroke();
-  // angled landing deck: from stern (x 6, z 160) toward port bow (x -34, z -40)
-  const ax0 = 6, az0 = 160, ax1 = -36, az1 = -50;
-  x.save(); x.strokeStyle = '#e8c21a'; x.lineWidth = 4; x.setLineDash([26, 18]);
-  x.beginPath(); x.moveTo(px(ax0), pz(az0)); x.lineTo(px(ax1), pz(az1)); x.stroke(); x.restore();
-  x.strokeStyle = 'rgba(240,240,235,0.9)'; x.lineWidth = 3; x.setLineDash([]);
-  const off = 13;
-  x.beginPath(); x.moveTo(px(ax0 + off), pz(az0)); x.lineTo(px(ax1 + off), pz(az1 + 4)); x.moveTo(px(ax0 - off), pz(az0)); x.lineTo(px(ax1 - off), pz(az1 - 4)); x.stroke();
-  // catapult tracks at the bow
-  x.strokeStyle = 'rgba(200,205,210,0.85)'; x.lineWidth = 2;
-  for (const cx of [-10, 4]) { x.beginPath(); x.moveTo(px(cx), pz(-168)); x.lineTo(px(cx), pz(-60)); x.stroke(); x.fillStyle = '#e8c21a'; x.fillRect(px(cx) - 4, pz(-62), 8, 6); }
-  // hull number
-  x.fillStyle = 'rgba(240,240,235,0.92)'; x.font = 'bold 110px Oswald, sans-serif'; x.textAlign = 'center';
-  x.save(); x.translate(px(-12), pz(-150)); x.fillText('73', 0, 0); x.restore();
-  // safety walkways
-  x.fillStyle = 'rgba(232,194,26,0.85)';
-  for (let z = -150; z < 150; z += 14) x.fillRect(px(30.5), pz(z), 6, 18);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  // non-skid: dark grey with fine grit, worn lighter streaks along the cats and the landing area
+  x.fillStyle = '#3d4044'; x.fillRect(0, 0, W, H);
+  for (let i = 0; i < 60000; i++) { const g = r() < 0.5 ? 0 : 255; x.fillStyle = `rgba(${g},${g},${g},${0.025 + r() * 0.035})`; x.fillRect(r() * W, r() * H, 1 + r() * 2, 1 + r() * 2); }
+  const axis0 = [4, 165], axis1 = [-36, -80];                       // the angled landing area, stern -> port bow
+  const ang = Math.atan2(axis1[0] - axis0[0], -(axis1[1] - axis0[1])); // rotation of the landing area in canvas space
+  const along = Math.hypot(axis1[0] - axis0[0], axis1[1] - axis0[1]);
+  // tyre rubber + oil along the landing area and near the wires
+  x.save(); x.translate(px(axis0[0]), pz(axis0[1])); x.rotate(ang);
+  for (let i = 0; i < 260; i++) {
+    const t = r() * along * 0.75, w = (r() - 0.5) * m(10);
+    x.fillStyle = `rgba(10,10,10,${0.05 + r() * 0.08})`; x.fillRect(w, -m(t), m(0.4 + r() * 0.5), -m(6 + r() * 20));
+  }
+  x.restore();
+  for (let i = 0; i < 70; i++) { x.fillStyle = `rgba(0,0,0,${0.06 + r() * 0.08})`; x.beginPath(); x.ellipse(px(-30 + r() * 58), pz(-160 + r() * 320), m(1 + r() * 4), m(2 + r() * 8), r() * 3, 0, 7); x.fill(); }
+  // clip to the deck outline for the edge line
+  const deck = [[0, 176], [10, 160], [22, 130], [32, 100], [32, -150], [30, -162], [6, -165], [-14, -162], [-34, -100], [-40, -40], [-40, 30], [-26, 60], [-24, 120], [-12, 158]];
+  x.save(); x.beginPath(); deck.forEach(([dx, dy], i) => { const X = px(dx), Y = pz(-dy); i ? x.lineTo(X, Y) : x.moveTo(X, Y); }); x.closePath(); x.clip();
+  x.strokeStyle = 'rgba(236,236,230,0.95)'; x.lineWidth = m(0.7); x.stroke();          // 0.35 m edge line inside the deck
+  x.restore();
+  // landing area: solid white edges, dashed white centreline, red/white foul line, 4 arresting wires
+  x.save(); x.translate(px(axis0[0]), pz(axis0[1])); x.rotate(ang);
+  const L = m(along), hw = m(12.5);
+  x.fillStyle = 'rgba(236,236,230,0.95)';
+  x.fillRect(-hw - m(0.25), -L, m(0.5), L); x.fillRect(hw - m(0.25), -L, m(0.5), L);
+  for (let d = m(6); d < L - m(4); d += m(10)) x.fillRect(-m(0.3), -d - m(5), m(0.6), m(5));
+  for (let d = 0, k = 0; d < L * 0.62; d += m(3), k++) { x.fillStyle = k % 2 ? 'rgba(236,236,230,0.95)' : 'rgba(200,30,24,0.95)'; x.fillRect(hw + m(0.6), -d - m(3), m(0.9), m(3)); }
+  for (const w of [34, 46, 58, 70]) {
+    x.fillStyle = 'rgba(150,152,150,0.95)'; x.fillRect(-hw, -m(w) - m(0.12), 2 * hw, m(0.24));
+    x.fillStyle = 'rgba(232,194,26,0.95)'; x.fillRect(-hw - m(1.2), -m(w) - m(0.5), m(1.2), m(1)); x.fillRect(hw, -m(w) - m(0.5), m(1.2), m(1));
+  }
+  // round-down at the stern: black/white chevrons
+  for (let k = -6; k < 6; k++) { x.fillStyle = k % 2 ? '#e8e8e2' : '#151515'; x.beginPath(); x.moveTo(m(k * 2.2), 0); x.lineTo(m(k * 2.2 + 2.2), 0); x.lineTo(m(k * 2.2 + 1.2), -m(2.4)); x.lineTo(m(k * 2.2 - 1.0), -m(2.4)); x.closePath(); x.fill(); }
+  x.restore();
+  // bow catapults at x = -10 (cat 1) and x = +4 (cat 2): slot + steel strips, start and end marks, yellow lead-in lines
+  for (const cx of [-10, 4]) {
+    const z0 = -82, z1 = -172;
+    x.fillStyle = 'rgba(190,194,198,0.95)'; x.fillRect(px(cx) - m(0.55), pz(z1), m(0.3), pz(z0) - pz(z1)); x.fillRect(px(cx) + m(0.25), pz(z1), m(0.3), pz(z0) - pz(z1));
+    x.fillStyle = '#121314'; x.fillRect(px(cx) - m(0.15), pz(z1), m(0.3), pz(z0) - pz(z1));
+    x.fillStyle = 'rgba(236,236,230,0.95)'; x.fillRect(px(cx) - m(2.5), pz(z0) - m(0.2), m(5), m(0.4));
+    x.fillStyle = 'rgba(232,194,26,0.95)'; x.fillRect(px(cx) - m(0.2), pz(-30), m(0.4), pz(z0) - pz(-30) - m(1));
+    for (let z = -150; z < -84; z += 12) { x.fillStyle = 'rgba(236,236,230,0.9)'; x.fillRect(px(cx) - m(1.6), pz(z), m(0.9), m(0.25)); x.fillRect(px(cx) + m(0.7), pz(z), m(0.9), m(0.25)); }
+  }
+  // elevators on the starboard edge (thin outlines)
+  x.strokeStyle = 'rgba(236,236,230,0.85)'; x.lineWidth = m(0.3);
+  for (const [z0, z1] of [[-72, -52], [-44, -24], [60, 80]]) x.strokeRect(px(19), pz(z0), m(13), pz(z1) - pz(z0));
+  // safe-parking line along the starboard side
+  x.fillStyle = 'rgba(236,236,230,0.9)'; x.fillRect(px(17.5), pz(-150), m(0.35), pz(10) - pz(-150)); x.fillRect(px(17.5), pz(52), m(0.35), pz(150) - pz(52));
+  // hull number at the bow, read from astern, and a small one at the stern
+  x.fillStyle = 'rgba(236,236,230,0.95)'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = `700 ${Math.round(m(15))}px Oswald, sans-serif`; x.fillText('73', px(-3), pz(-138));
+  x.save(); x.translate(px(-6), pz(150)); x.rotate(Math.PI); x.font = `700 ${Math.round(m(7))}px Oswald, sans-serif`; x.fillText('73', 0, 0); x.restore();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 16; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true;
   return t;
 }
 export function makeCarrier(jetFactory) {
@@ -284,7 +314,7 @@ export function makeCarrier(jetFactory) {
     const tex = deckTexture();
     // extrude caps use raw shape coords (x, y=-z) as uv; map them onto the texture
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-    tex.repeat.set(1 / 80, -1 / 340); tex.offset.set(0.5, 1 - 175 / 340 + 0.0);
+    tex.repeat.set(1 / 80, 1 / 340); tex.offset.set(0.5, 165 / 340);   // shape (x, y=-z) -> canvas, bow at the top
     const deckMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0.05 });
     const m = new THREE.Mesh(geo, [deckMat, hullDark]); m.receiveShadow = true; m.castShadow = true; g.add(m);
   }

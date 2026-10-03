@@ -11,7 +11,7 @@ const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-un
 const p = await b.newPage({ viewport: { width: 1920, height: 1080 } });
 p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') console.log('LOG', m.text().slice(0, 300)); });
 p.on('pageerror', e => console.log('ERR', e.message));
-await p.goto(`http://localhost:${port}/trailer.html`);
+await p.goto(`http://localhost:${port}/trailer.html?samples=${process.env.SAMPLES || 1}`);
 await p.waitForFunction(() => window.TRAILER_READY, null, { timeout: 300000 });
 const grab = async (t) => p.evaluate((t) => { window.TRAILER.frame(t); return document.getElementById('out').toDataURL('image/jpeg', 0.95); }, t);
 const t0 = Date.now();
