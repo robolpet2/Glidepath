@@ -18,13 +18,21 @@ const t0 = Date.now();
 if (range) {
   const [s, e, fps] = args.map(Number);
   const n0 = Math.round(s * fps), n1 = Math.round(e * fps);
-  for (let n = n0; n < n1; n++) {
-    const f = path.join(outDir, `f${String(n).padStart(5, '0')}.jpg`);
-    if (fs.existsSync(f)) continue;
+  // each frame is claimed with an exclusive lock file, so several workers never render the same frame
+  const fname = (n) => path.join(outDir, `f${String(n).padStart(5, '0')}.jpg`);
+  const claim = (n) => { try { fs.closeSync(fs.openSync(path.join(outDir, `.claim_${n}`), 'wx')); return true; } catch (e) { return false; } };
+  const doFrame = async (n) => {
+    if (fs.existsSync(fname(n)) || !claim(n)) return;
     const u = await grab(n / fps);
-    fs.writeFileSync(f, Buffer.from(u.split(',')[1], 'base64'));
+    fs.writeFileSync(fname(n), Buffer.from(u.split(',')[1], 'base64'));
     if (n % 30 === 0) console.log('frame', n, ((Date.now() - t0) / 1000).toFixed(0) + 's');
-  }
+  };
+  for (let n = n0; n < n1; n++) await doFrame(n);
+  // done early? help with what's left of the current queue section, from its end backwards
+  try {
+    const m = [...fs.readFileSync('logs/queue3.log', 'utf8').matchAll(/START \S+ \(.*?frames (\d+)-(\d+)\)/g)].pop();
+    if (m) { const a = +m[1], b = +m[2]; if (n0 >= a && n1 <= b + 1) for (let n = b; n >= a; n--) await doFrame(n); }
+  } catch (e) {}
 } else {
   for (const a of args) { const u = await grab(Number(a)); fs.writeFileSync(path.join(outDir, `t${a}.jpg`), Buffer.from(u.split(',')[1], 'base64')); }
 }
