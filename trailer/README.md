@@ -27,8 +27,11 @@ pip install numpy scipy
 node shoot.mjs stills 12.5 40    # preview single frames  -> stills/
 node shoot.mjs --range frames 0 62 30   # all 1,860 frames -> frames/ (split the range across workers)
 python3 audio.py                 # synthesized score -> score.wav
-ffmpeg -framerate 30 -i frames/f%05d.jpg -i score.wav -c:v libx264 -preset slow -crf 17 \
-  -pix_fmt yuv420p -c:a aac -b:a 256k -shortest glidepath-trailer.mp4
+# compressed two-pass encode (light denoise keeps the film grain from bloating the file)
+VF="hqdn3d=4:3:6:5"
+ffmpeg -framerate 30 -i frames/f%05d.jpg -vf "$VF" -c:v libx264 -preset slower -tune film -b:v 3500k -pass 1 -an -f null /dev/null
+ffmpeg -framerate 30 -i frames/f%05d.jpg -i score.wav -vf "$VF" -c:v libx264 -preset slower -tune film -b:v 3500k \
+  -maxrate 7000k -bufsize 14000k -pass 2 -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart -shortest glidepath-trailer.mp4
 ```
 
 `shoot.mjs` needs Playwright, with Chromium using SwiftShader (no GPU is required).
