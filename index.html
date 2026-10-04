@@ -28932,31 +28932,34 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var THO = { on: false, glideOn: false, beat: 0, glide: 0, sweep: 0, fold: 1, legs: 1, wings: [], legsArr: [], jets: [], heliDef: null, snd: null, reg: false };
     var thBody = new THREE.Group(); thBody.visible = false; plane.add(thBody);
     (function thBuild() {
-      var hull = new THREE.MeshStandardMaterial({ color: 0x8b8272, roughness: 0.55, metalness: 0.55 });
-      var dark = new THREE.MeshStandardMaterial({ color: 0x3a3832, roughness: 0.6, metalness: 0.6 });
-      var glass = new THREE.MeshStandardMaterial({ color: 0x1b2328, roughness: 0.08, metalness: 0.9, transparent: true, opacity: 0.82 });
+      var hull = new THREE.MeshStandardMaterial({ color: 0x8b8272, roughness: 0.55, metalness: 0.55, flatShading: true });
+      var dark = new THREE.MeshStandardMaterial({ color: 0x3a3832, roughness: 0.6, metalness: 0.6, flatShading: true });
+      var glass = new THREE.MeshStandardMaterial({ color: 0x1b2328, roughness: 0.08, metalness: 0.9, transparent: true, opacity: 0.82, flatShading: true });
       var memb = new THREE.MeshStandardMaterial({ color: 0xb9b2a0, roughness: 0.4, metalness: 0.3, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false });
       THO.memb = memb;
       function M(g, m, p) { var o = new THREE.Mesh(g, m); o.castShadow = true; (p || thBody).add(o); return o; }
-      function tube(r0, r1, len, m, z, y) { var o = M(new THREE.CylinderGeometry(r0, r1, len, 18), m); o.rotation.x = Math.PI / 2; o.position.set(0, y || 0.2, z); return o; }
+      function tube(r0, r1, len, m, z, y) { var o = M(new THREE.CylinderGeometry(r0, r1, len, 6), m); o.rotation.x = Math.PI / 2; o.rotation.y = Math.PI / 6; o.scale.set(1, 1, 0.82); o.position.set(0, y || 0.2, z); return o; }
       // cockpit bubble with ribbed frame
-      var cab = M(new THREE.SphereGeometry(1, 24, 16), glass); cab.scale.set(1.05, 1.0, 1.55); cab.position.set(0, 0.35, -3.9);
-      for (var i = 0; i < 6; i++) { var rib = M(new THREE.TorusGeometry(1.0, 0.04, 6, 28, Math.PI), dark); rib.scale.set(1.06, 1.02, 1); rib.position.set(0, 0.35, -3.9 + (i - 2.5) * 0.45 * (1 - Math.abs(i - 2.5) * 0.08)); var sc = Math.sqrt(Math.max(0.05, 1 - Math.pow((i - 2.5) * 0.45 / 1.55, 2))); rib.scale.multiplyScalar(sc); }
+      var cab = M(new THREE.SphereGeometry(1, 8, 6), glass); cab.scale.set(1.0, 0.9, 1.75); cab.position.set(0, 0.35, -3.9);
+      for (var i = 0; i < 6; i++) { var rib = M(new THREE.TorusGeometry(1.0, 0.045, 4, 8, Math.PI), dark); rib.scale.set(1.06, 1.02, 1); rib.position.set(0, 0.35, -3.9 + (i - 2.5) * 0.45 * (1 - Math.abs(i - 2.5) * 0.08)); var sc = Math.sqrt(Math.max(0.05, 1 - Math.pow((i - 2.5) * 0.45 / 1.55, 2))); rib.scale.multiplyScalar(sc); }
+      var chin = M(new THREE.ConeGeometry(0.5, 1.4, 4), dark); chin.rotation.x = -Math.PI / 2; chin.rotation.y = Math.PI / 4; chin.scale.set(1, 1, 0.5); chin.position.set(0, -0.45, -5.2);
+      var ridge = M(new THREE.CylinderGeometry(0.05, 0.38, 6.8, 3), hull); ridge.rotation.x = Math.PI / 2; ridge.position.set(0, 1.42, 1.6);
+      [-1, 1].forEach(function(s) { var sk = M(new THREE.BoxGeometry(0.1, 0.35, 7.5), dark); sk.position.set(s * 1.0, -0.1, 0.6); sk.rotation.z = s * 0.35; });
       var keel = M(new THREE.BoxGeometry(0.12, 0.12, 3.1), dark); keel.position.set(0, 1.33, -3.9);
       // fuselage segments
       tube(0.98, 1.05, 2.0, hull, -1.9, 0.25);
       tube(1.05, 0.98, 2.6, hull, 0.4, 0.25);
-      M(new THREE.TorusGeometry(1.04, 0.07, 8, 26), dark).position.set(0, 0.25, -0.9);
-      M(new THREE.TorusGeometry(1.0, 0.07, 8, 26), dark).position.set(0, 0.25, 1.7);
+      M(new THREE.TorusGeometry(1.04, 0.07, 4, 6), dark).position.set(0, 0.25, -0.9);
+      M(new THREE.TorusGeometry(1.0, 0.07, 4, 6), dark).position.set(0, 0.25, 1.7);
       tube(0.92, 0.5, 3.4, hull, 3.4, 0.35);
       tube(0.5, 0.3, 1.6, dark, 5.9, 0.4);
-      var spine = M(new THREE.BoxGeometry(1.4, 0.5, 4.6), hull); spine.position.set(0, 1.25, -0.3);
+      var spine = M(new THREE.CylinderGeometry(0.55, 0.8, 4.6, 4), hull); spine.rotation.x = Math.PI / 2; spine.rotation.y = Math.PI / 4; spine.scale.set(1, 1, 0.55); spine.position.set(0, 1.25, -0.3);
       var belly = M(new THREE.BoxGeometry(1.5, 0.4, 3.8), dark); belly.position.set(0, -0.72, -0.4);
       // tail fins and jets
       var fin = M(new THREE.BoxGeometry(0.08, 1.2, 1.4), hull); fin.position.set(0, 1.0, 5.7); fin.rotation.x = -0.35;
       var jetMat = new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
       [-1, 1].forEach(function(s) {
-        var n = M(new THREE.CylinderGeometry(0.32, 0.38, 2.2, 14), dark); n.rotation.x = Math.PI / 2; n.position.set(s * 1.05, -0.05, 4.2);
+        var n = M(new THREE.CylinderGeometry(0.3, 0.4, 2.2, 6), dark); n.rotation.x = Math.PI / 2; n.position.set(s * 1.05, -0.05, 4.2);
         var f = M(new THREE.ConeGeometry(0.3, 2.6, 12, 1, true), jetMat); f.rotation.x = Math.PI / 2; f.position.set(s * 1.05, -0.05, 6.6); f.castShadow = false;
         THO.jets.push(f);
         var stab = M(new THREE.BoxGeometry(1.3, 0.06, 0.8), hull); stab.position.set(s * 0.8, 0.45, 5.9);
@@ -28964,14 +28967,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       THO.jetMat = jetMat;
       // wings: two roots per side (fore, aft), each carrying an upper and lower blade
       var wShape = new THREE.Shape();
-      wShape.moveTo(0, -0.35); wShape.bezierCurveTo(2.5, -0.62, 5.0, -0.5, 6.6, -0.05);
-      wShape.bezierCurveTo(6.8, 0.15, 6.4, 0.35, 5.6, 0.38); wShape.bezierCurveTo(3.5, 0.48, 1.5, 0.42, 0, 0.3);
+      wShape.moveTo(0, -0.3); wShape.lineTo(4.8, -0.52); wShape.lineTo(7.0, -0.1); wShape.lineTo(5.4, 0.36); wShape.lineTo(1.2, 0.42); wShape.lineTo(0, 0.25);
       var wGeo = new THREE.ShapeGeometry(wShape, 10); wGeo.rotateX(-Math.PI / 2);
       var sparGeo = new THREE.BoxGeometry(6.4, 0.07, 0.1); sparGeo.translate(3.2, 0, 0);
       [-1, 1].forEach(function(s) {
         [[-1.1, 0], [1.05, 1]].forEach(function(r) {
           var root = new THREE.Group(); root.position.set(s * 0.72, 1.35, r[0]); thBody.add(root);
-          M(new THREE.SphereGeometry(0.2, 10, 8), dark, root);
+          M(new THREE.OctahedronGeometry(0.22), dark, root);
           [0, 1].forEach(function(k) {
             var hinge = new THREE.Group(); hinge.position.y = k ? -0.14 : 0.14; root.add(hinge);
             var blade = new THREE.Group(); blade.scale.x = s; hinge.add(blade);
@@ -28984,10 +28986,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // insect legs
       [[-1, -2.2], [1, -2.2], [-1, 1.6], [1, 1.6]].forEach(function(p) {
         var hip = new THREE.Group(); hip.position.set(p[0] * 0.9, -0.6, p[1]); thBody.add(hip);
-        var up = M(new THREE.CylinderGeometry(0.09, 0.07, 1.3, 8), dark, hip); up.position.y = -0.55; up.rotation.z = 0;
+        var up = M(new THREE.CylinderGeometry(0.09, 0.07, 1.3, 4), dark, hip); up.position.y = -0.55; up.rotation.z = 0;
         var knee = new THREE.Group(); knee.position.y = -1.15; hip.add(knee);
-        var low = M(new THREE.CylinderGeometry(0.06, 0.05, 1.0, 8), hull, knee); low.position.y = -0.45;
-        var foot = M(new THREE.CylinderGeometry(0.22, 0.26, 0.08, 10), dark, knee); foot.position.y = -0.95;
+        var low = M(new THREE.CylinderGeometry(0.06, 0.05, 1.0, 4), hull, knee); low.position.y = -0.45;
+        var foot = M(new THREE.CylinderGeometry(0.22, 0.26, 0.08, 6), dark, knee); foot.position.y = -0.95;
         THO.legsArr.push({ hip: hip, knee: knee, s: p[0] });
       });
       thBody.scale.setScalar(0.82);
@@ -29102,8 +29104,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       THO.legs += (legsDown - THO.legs) * Math.min(1, dt * 1.8);
       for (var j = 0; j < THO.legsArr.length; j++) {
         var L = THO.legsArr[j];
-        L.hip.rotation.z = L.s * (0.35 * THO.legs + 1.35 * (1 - THO.legs));
-        L.knee.rotation.z = -L.s * (0.25 * THO.legs + 1.9 * (1 - THO.legs));
+        L.hip.rotation.z = L.s * 0.35 * THO.legs;
+        L.hip.rotation.x = (L.s * 0 + 1) * (1 - THO.legs) * 1.45;
+        L.knee.rotation.z = -L.s * 0.25 * THO.legs;
+        L.knee.rotation.x = -(1 - THO.legs) * 2.6;
       }
       // jets
       var jet = THO.glide * (0.75 + 0.25 * Math.random());
