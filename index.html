@@ -16633,7 +16633,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         // sonic boom: fires once the instant airspeed crosses the threshold while airborne;
         // resets when speed drops back below it, so a pilot who slows down and re-accelerates
         // can trigger it again (real breakaway shockwave, not a one-time achievement).
-        if (!wasGrounded && !crashing) {
+        if (!wasGrounded && !crashing && !isHelicopterMode) {
           if (!hasBrokenSonic && speed >= SONIC_SPEED) {
             hasBrokenSonic = true;
             triggerSonicBoom(position, horizForward);
@@ -16958,7 +16958,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       sndUpdate(dt);
       wfUpdate(dt);
       actUpdate(dt);
-      ostUpdate(dt);
+      ostUpdate(dt); thUpdate(dt);
       dtUpdate(dt);
       perfRun('wx2', wx2Update, dt);
       perfRun('wl', wlUpdate, dt);
@@ -27630,7 +27630,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
        ============================================================ */
     var CODES_KEY = 'gp-codes-v1';
     var CODES = { redeemed: [], orbital: false, tsar: false };
-    try { var _cs = JSON.parse(localStorage.getItem(CODES_KEY) || 'null'); if (_cs) { CODES.redeemed = _cs.redeemed || []; CODES.orbital = !!_cs.orbital; CODES.tsar = !!_cs.tsar; } } catch (e) {}
+    try { var _cs = JSON.parse(localStorage.getItem(CODES_KEY) || 'null'); if (_cs) { CODES.redeemed = _cs.redeemed || []; CODES.orbital = !!_cs.orbital; CODES.tsar = !!_cs.tsar; CODES.thopter = !!_cs.thopter; } } catch (e) {}
     function codesSave() { try { localStorage.setItem(CODES_KEY, JSON.stringify(CODES)); } catch (e) {} }
     function codeHash(s) { var h = 0x811c9dc5; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16); }
     // hash → reward. (Plain codes are deliberately not in the game's source.)
@@ -27639,7 +27639,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       'a6d15231': { kind: 'coins', n: 5000, label: '+◆5,000 COINS' },
       '4e8b7994': { kind: 'coins', n: 2500, label: '+◆2,500 COINS' },
       '97ff69f6': { kind: 'coins', n: 10000, label: '+◆10,000 COINS' },
-      'cc470e8e': { kind: 'tsar', label: 'NEW NUKE YIELD: 50 Mt "TSAR"' }
+      'cc470e8e': { kind: 'tsar', label: 'NEW NUKE YIELD: 50 Mt "TSAR"' },
+      '91f351b9': { kind: 'thopter', label: 'NEW AIRCRAFT: ORNITHOPTER — find it in the aircraft list' }
     };
     function codeRedeem(raw) {
       var code = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -27651,6 +27652,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (R.kind === 'coins') { coins += R.n; lastCoinSaveAt = -999; if (typeof maybeSaveCoins === 'function') maybeSaveCoins(elapsedSeconds); }
       if (R.kind === 'orbital') CODES.orbital = true;
       if (R.kind === 'tsar') { CODES.tsar = true; orbAddTsar(); }
+      if (R.kind === 'thopter') { CODES.thopter = true; codesSave(); if (typeof thRegister === 'function') thRegister(); }
       codesSave();
       return { ok: true, msg: R.label };
     }
@@ -27690,6 +27692,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var got = [];
       if (CODES.orbital) got.push('AWACS orbital strikes');
       if (CODES.tsar) got.push('50 Mt nuke yield');
+      if (CODES.thopter) got.push('Ornithopter');
       el.textContent = (CODES.redeemed.length ? CODES.redeemed.length + ' code' + (CODES.redeemed.length > 1 ? 's' : '') + ' redeemed' : '') + (got.length ? ' · unlocked: ' + got.join(', ') : '');
     }
     function codesOpen(open) {
@@ -28915,6 +28918,199 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       window.addEventListener(ev, function first() { try { initAudio(); if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) {} window.removeEventListener(ev, first); }, true);
     });
     setInterval(function() { if (!started && audioCtx) ostUpdate(0.25); }, 250);
+
+    /* ============================================================
+       ORNITHOPTER — code-locked (start menu → Codes). A long, segmented desert flier with a
+       bubble cockpit and four pairs of dragonfly wings. It rides the helicopter's rotor physics
+       (the wings are its rotor) with its own tuning and extra mechanics:
+         · wing beat follows engine power; the stacked wings scissor, front and aft out of phase
+         · JET GLIDE (R / the JET GLIDE button): the wings sweep back and lock, the tail jets light and the
+           wings carry it like a glider — up to ~430 km/h
+         · insect landing legs fold away above 6 m and reach for the ground on the way down
+         · on the ground with the engine off the wings fold back along the body
+       ============================================================ */
+    var THO = { on: false, glideOn: false, beat: 0, glide: 0, sweep: 0, fold: 1, legs: 1, wings: [], legsArr: [], jets: [], heliDef: null, snd: null, reg: false };
+    var thBody = new THREE.Group(); thBody.visible = false; plane.add(thBody);
+    (function thBuild() {
+      var hull = new THREE.MeshStandardMaterial({ color: 0x8b8272, roughness: 0.55, metalness: 0.55 });
+      var dark = new THREE.MeshStandardMaterial({ color: 0x3a3832, roughness: 0.6, metalness: 0.6 });
+      var glass = new THREE.MeshStandardMaterial({ color: 0x1b2328, roughness: 0.08, metalness: 0.9, transparent: true, opacity: 0.82 });
+      var memb = new THREE.MeshStandardMaterial({ color: 0xb9b2a0, roughness: 0.4, metalness: 0.3, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false });
+      THO.memb = memb;
+      function M(g, m, p) { var o = new THREE.Mesh(g, m); o.castShadow = true; (p || thBody).add(o); return o; }
+      function tube(r0, r1, len, m, z, y) { var o = M(new THREE.CylinderGeometry(r0, r1, len, 18), m); o.rotation.x = Math.PI / 2; o.position.set(0, y || 0.2, z); return o; }
+      // cockpit bubble with ribbed frame
+      var cab = M(new THREE.SphereGeometry(1, 24, 16), glass); cab.scale.set(1.05, 1.0, 1.55); cab.position.set(0, 0.35, -3.9);
+      for (var i = 0; i < 6; i++) { var rib = M(new THREE.TorusGeometry(1.0, 0.04, 6, 28, Math.PI), dark); rib.scale.set(1.06, 1.02, 1); rib.position.set(0, 0.35, -3.9 + (i - 2.5) * 0.45 * (1 - Math.abs(i - 2.5) * 0.08)); var sc = Math.sqrt(Math.max(0.05, 1 - Math.pow((i - 2.5) * 0.45 / 1.55, 2))); rib.scale.multiplyScalar(sc); }
+      var keel = M(new THREE.BoxGeometry(0.12, 0.12, 3.1), dark); keel.position.set(0, 1.33, -3.9);
+      // fuselage segments
+      tube(0.98, 1.05, 2.0, hull, -1.9, 0.25);
+      tube(1.05, 0.98, 2.6, hull, 0.4, 0.25);
+      M(new THREE.TorusGeometry(1.04, 0.07, 8, 26), dark).position.set(0, 0.25, -0.9);
+      M(new THREE.TorusGeometry(1.0, 0.07, 8, 26), dark).position.set(0, 0.25, 1.7);
+      tube(0.92, 0.5, 3.4, hull, 3.4, 0.35);
+      tube(0.5, 0.3, 1.6, dark, 5.9, 0.4);
+      var spine = M(new THREE.BoxGeometry(1.4, 0.5, 4.6), hull); spine.position.set(0, 1.25, -0.3);
+      var belly = M(new THREE.BoxGeometry(1.5, 0.4, 3.8), dark); belly.position.set(0, -0.72, -0.4);
+      // tail fins and jets
+      var fin = M(new THREE.BoxGeometry(0.08, 1.2, 1.4), hull); fin.position.set(0, 1.0, 5.7); fin.rotation.x = -0.35;
+      var jetMat = new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+      [-1, 1].forEach(function(s) {
+        var n = M(new THREE.CylinderGeometry(0.32, 0.38, 2.2, 14), dark); n.rotation.x = Math.PI / 2; n.position.set(s * 1.05, -0.05, 4.2);
+        var f = M(new THREE.ConeGeometry(0.3, 2.6, 12, 1, true), jetMat); f.rotation.x = Math.PI / 2; f.position.set(s * 1.05, -0.05, 6.6); f.castShadow = false;
+        THO.jets.push(f);
+        var stab = M(new THREE.BoxGeometry(1.3, 0.06, 0.8), hull); stab.position.set(s * 0.8, 0.45, 5.9);
+      });
+      THO.jetMat = jetMat;
+      // wings: two roots per side (fore, aft), each carrying an upper and lower blade
+      var wShape = new THREE.Shape();
+      wShape.moveTo(0, -0.35); wShape.bezierCurveTo(2.5, -0.62, 5.0, -0.5, 6.6, -0.05);
+      wShape.bezierCurveTo(6.8, 0.15, 6.4, 0.35, 5.6, 0.38); wShape.bezierCurveTo(3.5, 0.48, 1.5, 0.42, 0, 0.3);
+      var wGeo = new THREE.ShapeGeometry(wShape, 10); wGeo.rotateX(-Math.PI / 2);
+      var sparGeo = new THREE.BoxGeometry(6.4, 0.07, 0.1); sparGeo.translate(3.2, 0, 0);
+      [-1, 1].forEach(function(s) {
+        [[-1.1, 0], [1.05, 1]].forEach(function(r) {
+          var root = new THREE.Group(); root.position.set(s * 0.72, 1.35, r[0]); thBody.add(root);
+          M(new THREE.SphereGeometry(0.2, 10, 8), dark, root);
+          [0, 1].forEach(function(k) {
+            var hinge = new THREE.Group(); hinge.position.y = k ? -0.14 : 0.14; root.add(hinge);
+            var blade = new THREE.Group(); blade.scale.x = s; hinge.add(blade);
+            var w = M(wGeo, memb, blade); w.castShadow = false;
+            M(sparGeo, dark, blade).position.z = -0.25;
+            THO.wings.push({ root: root, hinge: hinge, s: s, aft: r[1], up: k });
+          });
+        });
+      });
+      // insect legs
+      [[-1, -2.2], [1, -2.2], [-1, 1.6], [1, 1.6]].forEach(function(p) {
+        var hip = new THREE.Group(); hip.position.set(p[0] * 0.9, -0.6, p[1]); thBody.add(hip);
+        var up = M(new THREE.CylinderGeometry(0.09, 0.07, 1.3, 8), dark, hip); up.position.y = -0.55; up.rotation.z = 0;
+        var knee = new THREE.Group(); knee.position.y = -1.15; hip.add(knee);
+        var low = M(new THREE.CylinderGeometry(0.06, 0.05, 1.0, 8), hull, knee); low.position.y = -0.45;
+        var foot = M(new THREE.CylinderGeometry(0.22, 0.26, 0.08, 10), dark, knee); foot.position.y = -0.95;
+        THO.legsArr.push({ hip: hip, knee: knee, s: p[0] });
+      });
+      thBody.scale.setScalar(0.82);
+    })();
+    PLANE_TYPES.thopter = {
+      name: 'Ornithopter', tagline: 'four pairs of beating wings — hovers like an insect, jet-glides like a bird',
+      maxSpeedKmh: 430, engineAccel: 16, boostAccel: 26, stallSpeedKmh: 0, takeoffSpeedKmh: 0,
+      colors: { body: 0x8b8272, trim: 0x3a3832, wing: 0xb9b2a0 },
+      isHelicopter: true, isThopter: true,
+      handling: { maxPitchDeg: 26, maxRollDeg: 30, pitchLerp: 3.6, rollLerp: 4.0, turnRate: 2.0,
+        bankLiftLoss: 0, inducedDragCoef: 0, climbSpeedCost: 0, diveSpeedGain: 0,
+        windRollKick: 1.1, maxClimbRate: 16, gTolerance: 99, gRampTime: 999 }
+    };
+    function thUnlocked() { return !!(CODES && CODES.thopter); }
+    function thRegister() {
+      var ok = thUnlocked();
+      document.querySelectorAll('[data-plane="thopter"]').forEach(function(b) { b.style.display = ok ? '' : 'none'; });
+      if (!ok || THO.reg) return;
+      THO.reg = true;
+      if (typeof PLANE_ORDER !== 'undefined' && PLANE_ORDER.indexOf('thopter') < 0) PLANE_ORDER.push('thopter');
+      if (typeof HG_ORDER !== 'undefined' && HG_ORDER.indexOf('thopter') < 0) HG_ORDER.splice(HG_ORDER.indexOf('helicopter') + 1, 0, 'thopter');
+      if (typeof HG_CLASS !== 'undefined') HG_CLASS.thopter = 'ORNITHOPTER';
+    }
+    (function thButtons() {
+      var a = document.querySelector('[data-plane="awacs"].planeOpt'), b = document.querySelector('[data-plane="awacs"].livePlaneOpt');
+      if (a) a.insertAdjacentHTML('afterend', '<button type="button" class="planeOpt" data-plane="thopter" style="display:none"><span class="pName">Ornithopter</span><span class="pStat">430 km/h · VTOL</span></button>');
+      if (b) b.insertAdjacentHTML('afterend', '<button class="livePlaneOpt" data-plane="thopter" style="display:none"><span class="pName">Ornithopter</span><span class="pStat">beating wings, jet glide</span></button>');
+      setTimeout(thRegister, 0);
+    })();
+    function thApply() {
+      var on = THO.on = selectedPlaneType === 'thopter' && isHelicopterMode;
+      if (!THO.heliDef) THO.heliDef = Object.assign({}, HELI);
+      Object.assign(HELI, THO.heliDef);
+      if (on) { HELI.THRUST = 23.5; HELI.YAW_RATE = 1.9; HELI.ATT_W = 5.4; HELI.MAX_PITCH = 0.5; HELI.MAX_ROLL = 0.7; HELI.CLIMB = 14; HELI.DESC = 10; HELI.ROTOR_I = 0.6; }
+      thBody.visible = on;
+      if (on) { heliBody.visible = false; camOffset.set(0, 5.0, 12.4); }
+    }
+    var _thApplyOrig = applySelectedPlaneType;
+    applySelectedPlaneType = function() { var r = _thApplyOrig.apply(this, arguments); thApply(); return r; };
+    var _thCkOrig = ckSetExterior;
+    ckSetExterior = function(show) { _thCkOrig(show); if (THO.on) { heliBody.visible = false; thBody.visible = show; } };
+    function thSound(glide) {
+      if (!audioCtx) return;
+      if (!THO.snd) {
+        var n = audioCtx.createBufferSource(), buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate), d = buf.getChannelData(0);
+        for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+        n.buffer = buf; n.loop = true;
+        var bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 0.7;
+        var g = audioCtx.createGain(); g.gain.value = 0;
+        n.connect(bp).connect(g).connect(gpBus ? gpBus.engine : audioCtx.destination); n.start();
+        THO.snd = { g: g, bp: bp };
+      }
+      THO.snd.g.gain.setTargetAtTime(glide * 0.22, audioCtx.currentTime, 0.15);
+      THO.snd.bp.frequency.setTargetAtTime(700 + glide * 900, audioCtx.currentTime, 0.2);
+    }
+    function cockpitPhotoHidden() { return document.body.classList.contains('photoMode'); }
+    function thToggleGlide() {
+      if (!THO.on || !started) return;
+      if (!THO.glideOn && heliAgl < 3) { samToast('JET GLIDE — GET AIRBORNE FIRST', '#ffcc33', 1.4); return; }
+      THO.glideOn = !THO.glideOn;
+      samToast(THO.glideOn ? 'JET GLIDE — WINGS SWEPT' : 'WINGS OUT — HOVER', '#ffd27a', 1.2);
+    }
+    (function thGlideUi() {
+      var st = document.createElement('style');
+      st.textContent = '#thGlide{position:fixed;z-index:12;right:calc(176px + env(safe-area-inset-right));bottom:calc(150px + env(safe-area-inset-bottom));display:none;padding:10px 14px;border-radius:12px;' +
+        'font:700 12px/1 system-ui,sans-serif;letter-spacing:.08em;color:#ffe2b0;background:rgba(40,30,15,.62);border:1.5px solid rgba(255,190,90,.6);cursor:pointer;user-select:none;-webkit-user-select:none}' +
+        '#thGlide.on{background:rgba(255,140,40,.55);color:#fff;box-shadow:0 0 14px rgba(255,150,60,.7)}';
+      document.head.appendChild(st);
+      THO.btn = document.createElement('div'); THO.btn.id = 'thGlide'; THO.btn.textContent = '✈ JET GLIDE';
+      THO.btn.addEventListener('pointerdown', function(e) { e.preventDefault(); e.stopPropagation(); thToggleGlide(); });
+      document.body.appendChild(THO.btn);
+      window.addEventListener('keydown', function(e) { if (e.code === 'KeyR' && !e.repeat && THO.on && !(e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) thToggleGlide(); });
+    })();
+    function thUpdate(dt) {
+      if (!THO.on) { if (THO.snd) thSound(0); if (THO.btn) THO.btn.style.display = 'none'; THO.glideOn = false; return; }
+      heliBody.visible = false;
+      var live = started && !crashing && !ejecting;
+      var air = heliAgl > 3;
+      if (THO.glideOn && (!live || heliAgl < 1)) THO.glideOn = false;
+      var wantGlide = live && air && THO.glideOn && heliSpool > 0.9 && !outOfFuel ? 1 : 0;
+      THO.btn.style.display = started && live && !cockpitPhotoHidden() ? 'block' : 'none';
+      THO.btn.classList.toggle('on', THO.glideOn);
+      THO.glide += (wantGlide - THO.glide) * Math.min(1, dt * 2.2);
+      var hs = Math.hypot(heliVel.x, heliVel.z);
+      if (live && THO.glide > 0.02) {
+        var fx = -Math.sin(heading), fz = -Math.cos(heading);
+        heliVel.x += fx * 17 * THO.glide * dt; heliVel.z += fz * 17 * THO.glide * dt;
+        heliVel.y += 9.8 * 0.62 * THO.glide * hSmooth(25, 60, hs) * dt;   // the swept wings carry it
+        heliVel.y *= 1 - THO.glide * 0.8 * dt;
+        if (hs > 120) { heliVel.x *= 120 / hs; heliVel.z *= 120 / hs; }
+        if (heliRpm > 1.02) heliRpm = 1.02;   // wings locked: no windmilling overspeed
+      }
+      HELI.DRAG_Q = (THO.heliDef ? THO.heliDef.DRAG_Q : 0.00062) * (1 - 0.7 * THO.glide);
+      // wing pose
+      var power = live ? Math.max(heliTorque, heliSpool * 0.35) : 0;
+      var hz = (5 + 14 * power) * (1 - THO.glide);
+      THO.beat += hz * dt * Math.PI * 2;
+      var folded = !live || (heliAgl < 1.5 && heliSpool < 0.15);
+      THO.fold += ((folded ? 1 : 0) - THO.fold) * Math.min(1, dt * 1.5);
+      THO.sweep += (THO.glide - THO.sweep) * Math.min(1, dt * 3);
+      var amp = 0.62 * Math.min(1, power * 1.6) * (1 - THO.fold) * (1 - THO.sweep);
+      for (var i = 0; i < THO.wings.length; i++) {
+        var w = THO.wings[i], ph = THO.beat + (w.aft ? Math.PI * 0.5 : 0) + (w.up ? 0 : Math.PI);
+        w.hinge.rotation.z = w.s * (Math.sin(ph) * amp + (w.up ? 0.08 : -0.06) * (1 - THO.fold));
+        var sw = THO.sweep * (w.aft ? 0.55 : 0.85) + THO.fold * (w.aft ? 1.35 : 1.25);
+        w.root.rotation.y = -w.s * sw;
+        w.hinge.rotation.x = w.up ? 0 : 0;
+      }
+      THO.memb.opacity = 0.78 - 0.45 * Math.min(1, hz / 14) * Math.min(1, power * 2);
+      // legs
+      var legsDown = !live || heliAgl < 6 || heliVel.y < -3 && heliAgl < 14 ? 1 : 0;
+      THO.legs += (legsDown - THO.legs) * Math.min(1, dt * 1.8);
+      for (var j = 0; j < THO.legsArr.length; j++) {
+        var L = THO.legsArr[j];
+        L.hip.rotation.z = L.s * (0.35 * THO.legs + 1.35 * (1 - THO.legs));
+        L.knee.rotation.z = -L.s * (0.25 * THO.legs + 1.9 * (1 - THO.legs));
+      }
+      // jets
+      var jet = THO.glide * (0.75 + 0.25 * Math.random());
+      THO.jetMat.opacity = jet * 0.9;
+      for (var k = 0; k < THO.jets.length; k++) THO.jets[k].scale.set(1, 0.6 + jet * 0.8, 1);
+      thSound(THO.glide);
+    }
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
