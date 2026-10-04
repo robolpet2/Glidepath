@@ -16958,6 +16958,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       sndUpdate(dt);
       wfUpdate(dt);
       actUpdate(dt);
+      ostUpdate(dt);
       dtUpdate(dt);
       perfRun('wx2', wx2Update, dt);
       perfRun('wl', wlUpdate, dt);
@@ -28057,7 +28058,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (QOL.nav && QOL.nav.name === 'RING') QOL.nav = null;
       IN.step = -1; IN.done = true; inShow();
       try { localStorage.setItem(IN_KEY, skipped ? 'skip' : 'done'); } catch (e) {}
-      if (!skipped) { coins += 500; lastCoinSaveAt = -99; maybeSaveCoins(elapsedSeconds); samToast('FIRST FLIGHT COMPLETE · +500', '#7fffa0', 3); }
+      if (!skipped) { ostStinger('win'); coins += 500; lastCoinSaveAt = -99; maybeSaveCoins(elapsedSeconds); samToast('FIRST FLIGHT COMPLETE · +500', '#7fffa0', 3); }
       inCardOpen();
     }
     function inCardOpen() {
@@ -28249,7 +28250,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var ms = DY.t * 1000, day = dyDay(), pb = !(DY.st.day === day && DY.st.best && DY.st.best <= ms);
       if (pb) { DY.st.day = day; DY.st.best = ms; dySave(); }
       DY.done = true;
-      samBeep(1320, 0.1, 0.12); setTimeout(function() { samBeep(1760, 0.16, 0.12); }, 140);
+      ostStinger('win');
       samToast('COURSE COMPLETE · ' + dyFmt(ms) + (pb ? ' · NEW BEST' : ''), '#6aff8a', 5);
       if (DY.st.paid !== day) { DY.st.paid = day; dySave(); coins += 1000; samToast('FIRST DAILY CLEAR TODAY · +1000', '#ffd84a', 4); }
       if (pb) dySubmit(ms);
@@ -28476,10 +28477,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (won) {
         var pay = 1500 + Math.max(0, Math.round((480 - WF.t) * 4));
         coins += pay;
-        samBeep(1320, 0.1, 0.12); setTimeout(function() { samBeep(1760, 0.18, 0.12); }, 140);
+        ostStinger('win');
         samToast('FIRE OUT · ' + Math.floor(WF.t / 60) + ':' + String(Math.floor(WF.t % 60)).padStart(2, '0') + ' · +' + pay, '#7fffa0', 5);
         qolSay('Fire control: that\'s the last of it. Fire is out. Outstanding work.');
-      } else samToast('THE FIRE BURNED OUT OF CONTROL', '#ff5a3a', 4);
+      } else { ostStinger('lose'); samToast('THE FIRE BURNED OUT OF CONTROL', '#ff5a3a', 4); }
     }
     // N (the cargo key) or the DROP button: release half a tank
     function wfDrop() {
@@ -28608,6 +28609,189 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       ACT.btn.style.display = show ? 'flex' : 'none';
       if (!show && ACT.open) actToggle(false);
     }
+
+    /* =====================================================================
+       SOUNDTRACK — an adaptive score, synthesized live (no audio files)
+         Each track is a mode, a chord progression and a set of patterns; the
+         sequencer plays pads, bass, an arpeggio, a seeded lead melody and drums.
+         What you're doing picks the track, and it crossfades at the bar line.
+       ===================================================================== */
+    var OST_MODES = {
+      ionian: [0, 2, 4, 5, 7, 9, 11], lydian: [0, 2, 4, 6, 7, 9, 11], mixo: [0, 2, 4, 5, 7, 9, 10],
+      dorian: [0, 2, 3, 5, 7, 9, 10], aeolian: [0, 2, 3, 5, 7, 8, 10], phrygian: [0, 1, 3, 5, 7, 8, 10]
+    };
+    // patterns are 16 sixteenth-notes per bar. bass: x root, o fifth, + octave. arp: chord-tone index (0-3).
+    var OST_TRACKS = {
+      title:   { name: 'Glidepath (Main Theme)', bpm: 92, root: 50, mode: 'lydian', prog: [0, 4, 5, 3, 0, 4, 1, 4], pad: 0.9, padCut: 1600,
+                 bass: 'x.......x...o...', arp: '0.1.2.1.3.1.2.1.', arpW: 'triangle', lead: 1, seed: 7,
+                 kick: 'x.......x.......', snare: '....x.......x...', hat: '..x...x...x...x.', lvl: 1 },
+      sky:     { name: 'Open Sky', bpm: 78, root: 52, mode: 'ionian', prog: [0, 3, 5, 4, 0, 3, 1, 4], pad: 0.8, padCut: 1400,
+                 bass: 'x...............', arp: '0...2...1...3...', arpW: 'triangle', lead: 0.6, seed: 21, lvl: 0.9 },
+      horizon: { name: 'Long Horizon', bpm: 70, root: 45, mode: 'dorian', prog: [0, 6, 3, 4, 0, 6, 2, 4], pad: 1, padCut: 1100,
+                 bass: 'x.......o.......', arp: '0.....2.....1...', arpW: 'sine', lead: 0.5, seed: 33, lvl: 0.9 },
+      night:   { name: 'Night Watch', bpm: 64, root: 46, mode: 'aeolian', prog: [0, 5, 3, 4, 0, 5, 6, 4], pad: 1, padCut: 700,
+                 bass: 'x...............', arp: '2.......0.......', arpW: 'sine', lead: 0.35, seed: 44, lvl: 0.85 },
+      carrier: { name: 'Ready Deck', bpm: 100, root: 43, mode: 'mixo', prog: [0, 6, 3, 0, 0, 6, 4, 4], pad: 0.7, padCut: 1500,
+                 bass: 'x...x.x.x...x.x.', arp: '0.2.1.2.0.2.3.2.', arpW: 'triangle', lead: 0.7, seed: 55,
+                 kick: 'x.......x.......', snare: '....x..x....x.xx', hat: 'x.x.x.x.x.x.x.x.', lvl: 0.95 },
+      combat:  { name: 'Hostile Contact', bpm: 138, root: 40, mode: 'phrygian', prog: [0, 0, 1, 6, 0, 0, 5, 1], pad: 0.6, padCut: 2200,
+                 bass: 'xx.xx.oxx.x+x.ox', arp: '0.0.2.0.1.0.3.0.', arpW: 'sawtooth', lead: 0.8, seed: 66,
+                 kick: 'x..x..x.x..x..x.', snare: '....x.......x...', hat: 'xxxxxxxxxxxxxxxx', lvl: 1 },
+      fire:    { name: 'Firebreak', bpm: 118, root: 45, mode: 'aeolian', prog: [0, 5, 6, 4, 0, 5, 3, 4], pad: 0.8, padCut: 1800,
+                 bass: 'x..x..x.x..x..o.', arp: '0.1.2.0.1.2.0.1.', arpW: 'triangle', lead: 0.7, seed: 77,
+                 kick: 'x...x...x...x...', snare: '....x.......x...', hat: '..x...x...x...x.', lvl: 0.95 },
+      daily:   { name: 'Against the Clock', bpm: 128, root: 48, mode: 'dorian', prog: [0, 3, 0, 4, 0, 3, 5, 4], pad: 0.6, padCut: 2000,
+                 bass: 'x.x.x.x.x.x.o.o.', arp: '0123012301230123', arpW: 'square', lead: 0.6, seed: 88,
+                 kick: 'x...x...x...x...', snare: '....x.......x..x', hat: '.x.x.x.x.x.x.x.x', lvl: 0.9 }
+    };
+    var OST = { on: false, cur: null, want: null, wantT: 0, step: 0, bar: 0, next: 0, timer: null, out: null, tg: null, dl: null, fading: 0, lead: {}, chkT: 0, holdT: 0, cruise: 'sky', cruiseT: 0 };
+    function ostRng(seed) { var s = seed * 9301 + 49297; return function() { s = (s * 9301 + 49297) % 233280; return s / 233280; }; }
+    function ostMidi(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+    function ostDeg(T, d, oct) { var sc = OST_MODES[T.mode], i = ((d % 7) + 7) % 7; return T.root + sc[i] + 12 * (Math.floor(d / 7) + (oct || 0)); }
+    function ostChord(T, deg) { return [ostDeg(T, deg), ostDeg(T, deg + 2), ostDeg(T, deg + 4), ostDeg(T, deg + 7)]; }
+    // a lead line for every track: eight bars, stepwise around the chord, with rests to breathe
+    function ostLead(T) {
+      if (OST.lead[T.name]) return OST.lead[T.name];
+      var r = ostRng(T.seed), bars = [], pos = 4;
+      for (var b = 0; b < 8; b++) {
+        var deg = T.prog[b], notes = [];
+        for (var st = 0; st < 16; st += 2) {
+          if (r() > T.lead * (st % 4 === 0 ? 1 : 0.7)) continue;
+          if (r() < 0.45) pos = [0, 2, 4][Math.floor(r() * 3)] + (pos > 5 ? 7 : 0); else pos += r() < 0.5 ? 1 : -1;
+          pos = Math.max(0, Math.min(11, pos));
+          var len = r() < 0.3 ? 4 : 2;
+          notes.push({ st: st, n: ostDeg(T, deg + pos, 1), len: len });
+          if (len === 4) st += 2;
+        }
+        bars.push(notes);
+      }
+      return (OST.lead[T.name] = bars);
+    }
+    function ostInit() {
+      if (OST.out || !audioCtx) return;
+      OST.out = audioCtx.createGain(); OST.out.gain.value = 0.0001;
+      OST.out.connect(gpBus ? gpBus.music : audioCtx.destination);
+      OST.tg = audioCtx.createGain(); OST.tg.gain.value = 1; OST.tg.connect(OST.out);
+      // a dotted-eighth echo, darkened, for the arp and the lead
+      OST.dl = audioCtx.createDelay(2); OST.fb = audioCtx.createGain(); OST.fb.gain.value = 0.32;
+      var dlp = audioCtx.createBiquadFilter(); dlp.type = 'lowpass'; dlp.frequency.value = 2400;
+      OST.dl.connect(dlp).connect(OST.fb).connect(OST.dl); dlp.connect(OST.tg);
+      OST.timer = setInterval(ostTick, 50);
+    }
+    function ostEnv(g, t, a, peak, d) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); }
+    function ostOsc(type, f, t, end, dest, detune) { var o = audioCtx.createOscillator(); o.type = type; o.frequency.value = f; if (detune) o.detune.value = detune; o.connect(dest); o.start(t); o.stop(end); return o; }
+    function ostPad(T, ch, t, dur) {
+      var f = audioCtx.createBiquadFilter(), g = audioCtx.createGain();
+      f.type = 'lowpass'; f.frequency.setValueAtTime(T.padCut * 0.6, t); f.frequency.linearRampToValueAtTime(T.padCut, t + dur * 0.5); f.Q.value = 0.3;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.022 * T.pad, t + Math.min(1.2, dur * 0.4)); g.gain.setValueAtTime(0.022 * T.pad, t + dur * 0.8); g.gain.exponentialRampToValueAtTime(0.0001, t + dur * 1.15);
+      f.connect(g).connect(OST.tg);
+      for (var i = 0; i < 3; i++) { var hz = ostMidi(ch[i]); ostOsc('sawtooth', hz, t, t + dur * 1.2, f, -7); ostOsc('sawtooth', hz, t, t + dur * 1.2, f, 7); }
+    }
+    function ostBass(n, t, dur, combat) {
+      var g = audioCtx.createGain(), f = audioCtx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = combat ? 700 : 420;
+      ostEnv(g, t, 0.01, combat ? 0.1 : 0.12, dur);
+      f.connect(g).connect(OST.tg);
+      ostOsc(combat ? 'sawtooth' : 'triangle', ostMidi(n), t, t + dur + 0.1, f);
+      ostOsc('sine', ostMidi(n - 12), t, t + dur + 0.1, f);
+    }
+    function ostPluck(type, n, t, vol, dec) {
+      var g = audioCtx.createGain(), f = audioCtx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = type === 'sawtooth' || type === 'square' ? 2200 : 5000;
+      ostEnv(g, t, 0.005, vol, dec);
+      f.connect(g); g.connect(OST.tg); g.connect(OST.dl);
+      ostOsc(type, ostMidi(n), t, t + dec + 0.05, f);
+    }
+    function ostLeadNote(n, t, dur) {
+      var g = audioCtx.createGain(), f = audioCtx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1900;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03, t + 0.04); g.gain.setValueAtTime(0.03, t + dur * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.15);
+      f.connect(g); g.connect(OST.tg); g.connect(OST.dl);
+      var o = ostOsc('square', ostMidi(n), t, t + dur + 0.2, f), v = audioCtx.createOscillator(), vg = audioCtx.createGain();
+      v.frequency.value = 5.2; vg.gain.value = 3; v.connect(vg).connect(o.detune); v.start(t + 0.15); v.stop(t + dur + 0.2);
+      ostOsc('sine', ostMidi(n), t, t + dur + 0.2, f);
+    }
+    function ostDrum(kind, t) {
+      var g = audioCtx.createGain();
+      if (kind === 'k') { var o = audioCtx.createOscillator(); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.22); ostEnv(g, t, 0.003, 0.22, 0.24); o.connect(g).connect(OST.tg); o.start(t); o.stop(t + 0.3); return; }
+      wEnsureNoise();
+      var s = audioCtx.createBufferSource(), f = audioCtx.createBiquadFilter(); s.buffer = wNoiseBuf;
+      if (kind === 's') { f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.8; ostEnv(g, t, 0.002, 0.07, 0.16); ostOsc('triangle', 190, t, t + 0.1, g); }
+      else { f.type = 'highpass'; f.frequency.value = 7500; ostEnv(g, t, 0.001, 0.022, 0.045); }
+      s.connect(f).connect(g).connect(OST.tg); s.start(t, Math.random() * 2); s.stop(t + 0.25);
+    }
+    function ostTick() {
+      if (!audioCtx || !OST.cur) return;
+      var T = OST_TRACKS[OST.cur], sp = 60 / T.bpm / 4, now = audioCtx.currentTime;
+      if (OST.next < now) OST.next = now + 0.05;
+      OST.dl.delayTime.setTargetAtTime(sp * 3, now, 0.5);
+      while (OST.next < now + 0.25) {
+        var t = OST.next, st = OST.step % 16, b = OST.bar % 8, deg = T.prog[b], ch = ostChord(T, deg), combat = OST.cur === 'combat';
+        // the second half of every 16 bars brings in the drums and the lead; the first half breathes
+        var full = Math.floor(OST.bar / 8) % 2 === 1 || OST.cur === 'combat' || OST.cur === 'daily';
+        if (st === 0) ostPad(T, ch, t, sp * 16);
+        var bc = T.bass[st];
+        if (bc && bc !== '.') ostBass(bc === 'o' ? ostDeg(T, deg + 4, -1) : bc === '+' ? ostDeg(T, deg) : ostDeg(T, deg, -1), t, sp * (T.bpm > 110 ? 1.6 : 3.5), combat);
+        var ac = T.arp[st];
+        if (ac && ac !== '.') ostPluck(T.arpW, ch[+ac] + 12, t, T.arpW === 'sawtooth' || T.arpW === 'square' ? 0.022 : 0.045, T.bpm > 110 ? 0.18 : 0.6);
+        if (full && T.lead) { var L = ostLead(T)[b]; for (var i = 0; i < L.length; i++) if (L[i].st === st) ostLeadNote(L[i].n, t, sp * L[i].len); }
+        if (full || OST.cur === 'title') {
+          if (T.kick && T.kick[st] === 'x') ostDrum('k', t);
+          if (T.snare && T.snare[st] === 'x') ostDrum('s', t);
+          if (T.hat && T.hat[st] === 'x') ostDrum('h', t);
+        }
+        OST.next += sp; OST.step++;
+        if (OST.step % 16 === 0) {
+          OST.bar++;
+          // switch tracks only on the bar line, after the fade-out has finished
+          if (OST.fading === 2) { OST.cur = OST.want; OST.step = 0; OST.bar = 0; OST.fading = 0; OST.tg.gain.setTargetAtTime(OST_TRACKS[OST.cur].lvl, t, 0.6); ostAnnounce(); return; }
+        }
+      }
+    }
+    function ostAnnounce() { if (started && OST.cur) samToast('♫ ' + OST_TRACKS[OST.cur].name.toUpperCase(), '#b9c8ff', 2.2); }
+    // what should be playing right now?
+    function ostPick() {
+      if (!started) return 'title';
+      var threat = (typeof samLock === 'number' && samLock > 0.25) || samMissiles.some(function(m) { return m.active; }) || (BASE && BASE.missiles.length) || (typeof NUKE !== 'undefined' && NUKE.state === 'falling');
+      if (threat) return 'combat';
+      if (WF.on) return 'fire';
+      if (DY.on) return 'daily';
+      if (Math.hypot(position.x - CARRIER.x, position.z - CARRIER.z) < 1800 && position.y < CARRIER.deckY + 500) return 'carrier';
+      if (dayTimeOfDay < 0.22 || dayTimeOfDay > 0.78) return 'night';
+      return OST.cruise;
+    }
+    function ostStinger(kind) {
+      if (!OST.out || !gpSet.ost) return;
+      var t = audioCtx.currentTime + 0.05, notes = kind === 'win' ? [60, 64, 67, 72, 76] : [57, 60, 64, 69];
+      notes.forEach(function(n, i) { ostPluck('triangle', n, t + i * 0.09, 0.07, 0.9); });
+      var ch = kind === 'win' ? [60, 64, 67, 71] : [57, 60, 64, 67];
+      var f = audioCtx.createBiquadFilter(), g = audioCtx.createGain(); f.type = 'lowpass'; f.frequency.value = 2400;
+      ostEnv(g, t + 0.45, 0.05, 0.05, 2.4); f.connect(g).connect(OST.out);
+      ch.forEach(function(n) { ostOsc('sawtooth', ostMidi(n), t + 0.45, t + 3, f, -6); ostOsc('sawtooth', ostMidi(n + 12), t + 0.45, t + 3, f, 6); });
+    }
+    function ostUpdate(dt) {
+      if (!audioCtx) return;
+      ostInit();
+      var walkman = typeof kjMus !== 'undefined' && kjMus.on;
+      var vol = soundEnabled && gpSet.ost && !walkman ? gpSet.ostVol / 100 : 0;
+      OST.out.gain.setTargetAtTime(Math.max(0.0001, vol), audioCtx.currentTime, 0.8);
+      if (!OST.cur) { OST.cur = ostPick(); OST.tg.gain.value = OST_TRACKS[OST.cur].lvl; OST.next = audioCtx.currentTime + 0.1; return; }
+      // cruising music alternates every few minutes so it never wears thin
+      if ((OST.cruiseT += dt) > 240) { OST.cruiseT = 0; OST.cruise = OST.cruise === 'sky' ? 'horizon' : 'sky'; }
+      if ((OST.chkT -= dt) > 0) return;
+      OST.chkT = 0.5;
+      var w = ostPick();
+      if (w === OST.cur || OST.fading) { OST.wantT = 0; OST.holdT += 0.5; return; }
+      OST.wantT = (OST.want === w ? OST.wantT : 0) + 0.5; OST.want = w;
+      // combat cuts in fast; everything else waits to be sure, and gets at least 20 s
+      var ok = w === 'combat' ? OST.wantT >= 1 : OST.wantT >= 4 && (OST.holdT > 20 || OST.cur === 'combat' || OST.cur === 'title');
+      if (!ok) return;
+      OST.fading = 1; OST.holdT = 0;
+      OST.tg.gain.setTargetAtTime(0.0001, audioCtx.currentTime, w === 'combat' ? 0.25 : 0.7);
+      setTimeout(function() { if (OST.fading === 1) OST.fading = 2; }, w === 'combat' ? 700 : 2000);
+    }
+    // the title theme starts on the first touch or key on the menu (browsers need a gesture for audio)
+    ['pointerdown', 'keydown'].forEach(function(ev) {
+      window.addEventListener(ev, function first() { try { initAudio(); if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) {} window.removeEventListener(ev, first); }, true);
+    });
+    setInterval(function() { if (!started && audioCtx) ostUpdate(0.25); }, 250);
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
@@ -32808,7 +32992,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var GP_SET_KEY = 'gp-settings-v1';
     var GP_SET_DEF = {
       quality: 'auto', res: 100, shadows: 'high', refl: 'high', forest: 'high', post: true, grain: true, fps: false,
-      vol: 100, volEngine: 100, volFx: 100, volMusic: 100, mute: false,
+      vol: 100, volEngine: 100, volFx: 100, volMusic: 100, ost: true, ostVol: 60, mute: false,
       invertY: false, touchSens: 100, autoPause: true,
       fov: 60, shake: 100, hud: true, map: true, debrief: true,
       sens: 100, deadzone: 8, invertRoll: false, padLayout: 'modern', cbMode: 'off', hudScale: 100, noFlash: false, subs: false, voice: true
@@ -32821,7 +33005,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     };
     var GP_TABS = {
       graphics: ['quality', 'res', 'shadows', 'refl', 'forest', 'post', 'grain', 'fps'],
-      audio: ['mute', 'vol', 'volEngine', 'volFx', 'volMusic'],
+      audio: ['mute', 'vol', 'volEngine', 'volFx', 'volMusic', 'ost', 'ostVol'],
       controls: ['invertY', 'invertRoll', 'sens', 'deadzone', 'touchSens', 'padLayout', 'autoPause'],
       camera: ['fov', 'shake', 'hud', 'map', 'debrief', 'cbMode', 'hudScale', 'noFlash', 'subs', 'voice']
     };
@@ -32938,7 +33122,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       vol: { t: 'range', label: 'Master volume', min: 0, max: 100, step: 1, fmt: function(v) { return v + '%'; } },
       volEngine: { t: 'range', label: 'Engine & rotor', min: 0, max: 100, step: 1, fmt: function(v) { return v + '%'; } },
       volFx: { t: 'range', label: 'Effects', help: 'Weapons, weather, radio, the world around you', min: 0, max: 100, step: 1, fmt: function(v) { return v + '%'; } },
-      volMusic: { t: 'range', label: 'Music', help: 'Tapes on the Walkman', min: 0, max: 100, step: 1, fmt: function(v) { return v + '%'; } },
+      volMusic: { t: 'range', label: 'Music', help: 'The soundtrack and the tapes on the Walkman', min: 0, max: 100, step: 1, fmt: function(v) { return v + '%'; } },
+      ost: { t: 'switch', label: 'Soundtrack', help: 'Adaptive score that follows what you are doing' },
+      ostVol: { t: 'range', label: 'Soundtrack level', help: 'Under the Walkman and effects', min: 0, max: 100, step: 1, fmt: function(v) { return v + '%'; } },
       invertY: { t: 'switch', label: 'Invert pitch', help: 'Up / W / pushing the stick up pulls the nose up (not used for the car)' },
       touchSens: { t: 'range', label: 'Touch stick sensitivity', help: 'How far you drag for full deflection', min: 50, max: 200, step: 10, fmt: function(v) { return v + '%'; } },
       autoPause: { t: 'switch', label: 'Pause when the game loses focus', help: 'Switching tabs or apps opens this menu' },
