@@ -2073,6 +2073,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var PLANE_GROUND_OFFSET = 1.0;   // plane's origin is at the fuselage center, but the wheels sit ~1 unit below it — this lifts the model so the wheels touch the ground/runway instead of sinking into it
 
     var FOG_DENSITY_CLEAR = 0.00085;
+    var FOG_FAR_K = 0.22;             // the far terrain lets the clear-air haze thin to ~10 km visibility
     var SKY_TOP = 0x1D63A8, SKY_BOTTOM = 0xE8F3F7;
 
     // --- day/night cycle ---
@@ -2840,7 +2841,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         ' float atmY0 = cameraPosition.y, atmY1 = cameraPosition.y + vFogRay.y;',
         ' #ifdef FOG_EXP2',
         '  float atmOD = fogDensity * atmDist; atmOD *= atmOD;',
-        '  atmOD *= max(atmHeightAvg(atmY0, atmY1, uAtmLayer.w), 0.55);',
+        '  atmOD *= max(atmHeightAvg(atmY0, atmY1, uAtmLayer.w), 0.18);',
         ' #else',
         '  float atmOD = -log(max(1.0 - smoothstep(fogNear, fogFar, fogDepth), 0.0001));',
         ' #endif',
@@ -3374,7 +3375,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       [41, 0.24, 1.05], [27, 0.14, -0.88], [17, 0.08, 0.27]
     ];
     var SEA_N = SEA_WAVE_DEFS.length;
-    var SEA_MESH_HALF = 3000, SEA_MESH_LIN = 0.1;
+    var SEA_MESH_HALF = 11000, SEA_MESH_LIN = 0.027;
     var SEA_MESH_SEG = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 128 : 160;
     var seaWaves = [];                  // per-wave live state (JS copy of what the shader sees)
     var seaWaveD = [], seaWaveP = [];   // shader uniform arrays: D = (dirX, dirZ, k, amp), P = (phase, Q, fadeStart, fadeEnd)
@@ -7458,7 +7459,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
        · they drift with the wind, cast soft moving shadows on the ground, and flying into one
          wraps you in white mist
        ============================================================ */
-    var CLOUD_COUNT = 30, CLOUD_FIELD_R = 2300, CLOUD_BASE = 420;     // field stays inside the camera's 2400 m far plane
+    var CLOUD_COUNT = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 44 : 64, CLOUD_FIELD_R = 6000, CLOUD_BASE = 520;     // the field reaches out toward the far-terrain horizon
     var clouds = [];
     var cloudShadowU = { tex: { value: null }, o: { value: new THREE.Vector3(0, 0, 6000) }, k: { value: 0 } };
     var cloudU = {
@@ -7468,16 +7469,23 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     };
     // four puff shapes in a 2x2 atlas: alpha = density, R = billow detail, G/B = baked lobe normal (y, x)
     function cloudMakeAtlas() {
-      var S = 192, cv = document.createElement('canvas'); cv.width = cv.height = S * 2;
+      var S = 256, cv = document.createElement('canvas'); cv.width = cv.height = S * 2;
       var ctx = cv.getContext('2d'), im = ctx.createImageData(S * 2, S * 2), rng = mulberry32(7741);
       for (var c = 0; c < 4; c++) {
         var ox = (c % 2) * S, oy = (1 - Math.floor(c / 2)) * S;
         // lobes: one broad body plus smaller billows piled on its upper half
-        var lobes = [[0, 0.12, 0.62]];
+        // ...and each billow sprouts smaller ones round its upper rim (cauliflower, not a cotton ball)
+        var lobes = [[0, 0.14, 0.58]];
         var nl = 5 + Math.floor(rng() * 4);
         for (var l = 0; l < nl; l++) {
-          var la = Math.PI * (0.1 + 0.8 * rng()), lr = 0.2 + rng() * 0.32;
-          lobes.push([Math.cos(la) * (0.62 - lr * 0.6), 0.12 - Math.sin(la) * (0.5 - lr * 0.4), lr]);
+          var la = Math.PI * (0.1 + 0.8 * rng()), lr = 0.17 + rng() * 0.26;
+          var bx = Math.cos(la) * (0.6 - lr * 0.6), by = 0.12 - Math.sin(la) * (0.5 - lr * 0.4);
+          lobes.push([bx, by, lr]);
+          var ns = 3 + Math.floor(rng() * 3);
+          for (var sb = 0; sb < ns; sb++) {
+            var sa = Math.PI * (0.05 + 0.9 * rng()), sr = lr * (0.3 + rng() * 0.25);
+            lobes.push([bx + Math.cos(sa) * (lr - sr * 0.45), by - Math.sin(sa) * (lr - sr * 0.45), sr]);
+          }
         }
         for (var y = 0; y < S; y++) {
           for (var x = 0; x < S; x++) {
@@ -7489,12 +7497,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
               var w = 1 - q; dens += w * w;
               if (w > best) { best = w; nx = dx; ny = -dy; }
             }
-            var n = fbm(x * 0.045 + c * 9.1, y * 0.045 + c * 4.7, 4), n2 = fbm(x * 0.14 + c * 3.3, y * 0.14, 3);
-            var d = dens * 1.6 - 0.12 - (n - 0.5) * 0.7 - (n2 - 0.5) * 0.18;
-            d *= 1 - gfxSmoothstepJS(0.42, 0.66, py);          // flat-ish underside
-            var a = gfxSmoothstepJS(0.0, 0.42, d);
+            var sc = 192 / S;
+            var n = fbm(x * 0.045 * sc + c * 9.1, y * 0.045 * sc + c * 4.7, 4), n2 = fbm(x * 0.14 * sc + c * 3.3, y * 0.14 * sc, 3), n3 = fbm(x * 0.36 * sc + 11.0, y * 0.36 * sc - c, 2);
+            var d = dens * 1.55 - 0.1 - (n - 0.5) * 0.8 - (n2 - 0.5) * 0.36 - (n3 - 0.5) * 0.12;
+            d *= 1 - gfxSmoothstepJS(0.4, 0.7, py + (n2 - 0.5) * 0.1);   // flat-ish, slightly ragged underside
+            var a = gfxSmoothstepJS(0.0, 0.62, d) * (0.82 + 0.18 * n3);
             var k4 = ((oy + y) * S * 2 + ox + x) * 4;
-            im.data[k4] = Math.round((0.55 + 0.45 * n2) * 255);
+            im.data[k4] = Math.round(THREE.MathUtils.clamp(0.4 + 0.4 * n2 + 0.35 * (n3 - 0.5) + 0.25 * gfxSmoothstepJS(0.0, 1.2, d), 0, 1) * 255);
             im.data[k4 + 1] = Math.round(THREE.MathUtils.clamp(0.5 + 0.5 * ny * 0.9 - py * 0.12, 0, 1) * 255);
             im.data[k4 + 2] = Math.round(THREE.MathUtils.clamp(0.5 + 0.5 * nx * 0.9, 0, 1) * 255);
             im.data[k4 + 3] = Math.round(a * 255);
@@ -7540,10 +7549,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         '  vec3 n = normalize(vR * nn.x + vU * nn.y + vC * 0.7);',
         // wrapped diffuse: light scatters deep into a cloud, so the shade side is never black
         '  float diff = clamp(dot(n, sunDir) * 0.55 + 0.45, 0.0, 1.0);',
-        '  float base = mix(0.42, 1.0, smoothstep(0.0, 0.7, vH));',
-        '  float detail = 0.82 + 0.36 * t.r;',
+        '  float base = mix(0.3, 1.0, smoothstep(0.0, 0.65, vH));',
+        '  float detail = 0.7 + 0.55 * t.r;',
         '  vec3 col = sunCol * diff * base * detail;',
-        '  col += mix(gndCol, skyCol, 0.3 + 0.7 * vH) * (0.75 + 0.25 * t.r);',
+        '  col += mix(gndCol, skyCol, 0.25 + 0.75 * vH) * (0.62 + 0.3 * t.r);',
         // silver lining: thin edges light up when the sun is behind the cloud
         '  float mu = max(dot(normalize(vW - cameraPosition), sunDir), 0.0);',
         '  float thin = 1.0 - smoothstep(0.05, 0.6, t.a);',
@@ -7562,11 +7571,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function cloudBuild(rng) {
       var r = rng(), puffs = [], W, H, i;
       var type = r < 0.16 ? 'tower' : r < 0.42 ? 'small' : 'cumulus';
-      if (type === 'small') { W = 130 + rng() * 120; H = W * (0.35 + rng() * 0.2); }
-      else if (type === 'tower') { W = 280 + rng() * 220; H = W * (1.05 + rng() * 0.6); }
-      else { W = 260 + rng() * 320; H = W * (0.38 + rng() * 0.28); }
+      if (type === 'small') { W = 160 + rng() * 160; H = W * (0.35 + rng() * 0.2); }
+      else if (type === 'tower') { W = 360 + rng() * 300; H = W * (1.05 + rng() * 0.6); }
+      else { W = 340 + rng() * 460; H = W * (0.34 + rng() * 0.26); }
       var nBase = type === 'small' ? 4 + Math.floor(rng() * 3) : 7 + Math.floor(rng() * 5);
-      var nBody = type === 'small' ? 6 + Math.floor(rng() * 5) : type === 'tower' ? 22 + Math.floor(rng() * 10) : 14 + Math.floor(rng() * 10);
+      var nBody = type === 'small' ? 9 + Math.floor(rng() * 6) : type === 'tower' ? 34 + Math.floor(rng() * 14) : 24 + Math.floor(rng() * 14);
       var ez = 0.55 + rng() * 0.35;
       for (i = 0; i < nBase; i++) {        // the flat, darker base row
         var ba = rng() * Math.PI * 2, br = Math.sqrt(rng()) * 0.42;
@@ -7578,7 +7587,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var hf = type === 'tower' ? Math.pow(rng(), 0.75) : Math.pow(rng(), 0.9) * Math.sqrt(Math.max(0, 1 - rr * rr));
         var spread = type === 'tower' ? 0.36 * (1 - hf * 0.55) : 0.44;
         var y = H * (0.18 + 0.82 * hf);
-        var s = W * (type === 'tower' ? 0.34 : 0.32) * (0.75 + rng() * 0.5) * (1 - hf * 0.3);
+        var s = W * (type === 'tower' ? 0.27 : 0.25) * (0.7 + rng() * 0.6) * (1 - hf * 0.3);
         puffs.push([Math.cos(a) * rr * spread * W, y, Math.sin(a) * rr * spread * W * ez, s, Math.min(1, y / H)]);
       }
       var n = puffs.length, pos = new Float32Array(n * 12), cor = new Float32Array(n * 8), par = new Float32Array(n * 16), idx = new Uint16Array(n * 6);
@@ -7746,66 +7755,134 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     /* ============================================================
-       DISTANT MOUNTAINS — a jagged low-poly ring far past the fog line,
-       purely a background silhouette (no collision) that gives the
-       horizon depth instead of dissolving straight into flat haze
+       DISTANT MOUNTAINS — a real range on the horizon, out past the far terrain (9–12 km):
+       a ring-shaped heightfield with ridged fractal peaks, lit by the sun (sunlit faces,
+       shadowed gullies), rock that turns to scree at the foot and snow on the high flat ground,
+       then pushed back into the sky by aerial perspective: the base sinks into the haze while the
+       peaks stand out. Peaks whose foot sits out over open ocean are sunk below the horizon.
        ============================================================ */
     (function addDistantMountains() {
-      var RING_RADIUS = 1700; // keep well inside the sky sphere (r=1900) so no gap shows
-      var SEGMENTS = 90;
-      var mtnGeo = new THREE.BufferGeometry();
-      var verts = [];
-      var colors = [];
-      // Darker blue-grey so the ring reads as a misty silhouette, not a white wall
-      var baseColor = new THREE.Color(0x4a5a6a);
-      var hazeColor = new THREE.Color(0x7a8f9e);
+      var R0 = 9200, R1 = 12600, SEG = 720, ROWS = 28;
       var rand = mulberry32(9001);
-      var peakHeights = [];
-      for (var s = 0; s <= SEGMENTS; s++) {
-        peakHeights.push(120 + rand() * 260 + Math.sin(s * 0.7) * 60);
+      function ridged(x, z) {
+        var sum = 0, amp = 0.55, f = 1, w = 1;
+        for (var o = 0; o < 5; o++) {
+          var n = 1 - Math.abs(smoothNoise(x * f, z * f) * 2 - 1);
+          n = n * n * w; w = Math.min(1, n * 1.6);
+          sum += n * amp; amp *= 0.5; f *= 2.03;
+        }
+        return sum;
       }
-      for (var i = 0; i < SEGMENTS; i++) {
-        var a0 = (i / SEGMENTS) * Math.PI * 2;
-        var a1 = ((i + 1) / SEGMENTS) * Math.PI * 2;
-        var x0 = Math.sin(a0) * RING_RADIUS, z0 = Math.cos(a0) * RING_RADIUS;
-        var x1 = Math.sin(a1) * RING_RADIUS, z1 = Math.cos(a1) * RING_RADIUS;
-        var h0 = peakHeights[i], h1 = peakHeights[i + 1];
-        var baseY = -120; // extend base further down so no gap appears below
-        // two triangles per ridge segment: base-left, base-right, peak-right / base-left, peak-right, peak-left
-        verts.push(x0, baseY, z0,  x1, baseY, z1,  x1, h1, z1);
-        verts.push(x0, baseY, z0,  x1, h1, z1,  x0, h0, z0);
-        for (var k = 0; k < 6; k++) {
-          // lerp less toward hazeColor so they stay dark and misty rather than pale/white
-          var c = baseColor.clone().lerp(hazeColor, 0.3);
-          colors.push(c.r, c.g, c.b);
+      var base = new Float32Array((SEG + 1) * (ROWS + 1));
+      var pos = new Float32Array(base.length * 3), col = new Float32Array(base.length * 3);
+      for (var s = 0; s <= SEG; s++) {
+        var a = (s % SEG) / SEG * Math.PI * 2, ca = Math.sin(a), sa = Math.cos(a);
+        var massif = 0.45 + 0.75 * smoothNoise(Math.cos(a) * 3.1 + 7, Math.sin(a) * 3.1 - 2);
+        for (var r = 0; r <= ROWS; r++) {
+          var t = r / ROWS, rr = R0 + (R1 - R0) * t;
+          var x = ca * rr, z = sa * rr;
+          var env = Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.15)), 0.7);
+          var h = r === 0 || r === ROWS ? -160 : -120 + env * massif * (260 + 1250 * ridged(x * 0.00052 + 3.7, z * 0.00052 - 1.3) + 380 * ridged(x * 0.0019 - 8.1, z * 0.0019 + 5.2) * ridged(x * 0.00052 + 3.7, z * 0.00052 - 1.3));
+          base[s * (ROWS + 1) + r] = h;
+          var k = s * (ROWS + 1) + r;
+          pos[k * 3] = x; pos[k * 3 + 1] = h; pos[k * 3 + 2] = z;
         }
       }
-      mtnGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
-      mtnGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+      var idx = [];
+      for (var s2 = 0; s2 < SEG; s2++) for (var r2 = 0; r2 < ROWS; r2++) {
+        var i0 = s2 * (ROWS + 1) + r2, i1 = i0 + 1, i2 = i0 + ROWS + 1, i3 = i2 + 1;
+        idx.push(i0, i2, i1, i1, i2, i3);
+      }
+      var mtnGeo = new THREE.BufferGeometry();
+      mtnGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      mtnGeo.setIndex(idx);
       mtnGeo.computeVertexNormals();
-      var mtnMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true, side: THREE.DoubleSide });
+      var mtnU = {
+        sunDir: { value: new THREE.Vector3(0.3, 0.8, 0.2) }, sunCol: { value: new THREE.Color(1, 0.95, 0.85) },
+        ambCol: { value: new THREE.Color(0.5, 0.6, 0.75) }, hazeCol: { value: new THREE.Color(0.8, 0.88, 0.94) },
+        haze: { value: 0.5 }, snowLine: { value: 900 }, dens: { value: 0.0002 }, hk: { value: 1 / 900 }
+      };
+      var mtnMat = new THREE.ShaderMaterial({
+        uniforms: mtnU, fog: false,
+        vertexShader: [
+          'varying vec3 vN; varying vec3 vW; varying vec3 vLoc;',
+          '#include <common>',
+          '#include <logdepthbuf_pars_vertex>',
+          'void main() {',
+          '  vN = normalize(mat3(modelMatrix) * normal);',
+          '  vLoc = position;',
+          '  vec4 wp = modelMatrix * vec4(position, 1.0); vW = wp.xyz;',
+          '  gl_Position = projectionMatrix * viewMatrix * wp;',
+          '  #include <logdepthbuf_vertex>',
+          '}'
+        ].join('\n'),
+        fragmentShader: [
+          'uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 ambCol; uniform vec3 hazeCol; uniform float haze; uniform float snowLine; uniform float dens; uniform float hk;',
+          'varying vec3 vN; varying vec3 vW; varying vec3 vLoc;',
+          '#include <common>',
+          '#include <logdepthbuf_pars_fragment>',
+          'float mh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
+          'float mn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+          '  return mix(mix(mh(i), mh(i + vec2(1, 0)), f.x), mix(mh(i + vec2(0, 1)), mh(i + vec2(1, 1)), f.x), f.y); }',
+          'void main() {',
+          '  #include <logdepthbuf_fragment>',
+          '  vec3 n = normalize(vN);',
+          '  float slope = 1.0 - n.y;',
+          '  float y = vLoc.y;',
+          '  float st = mn(vLoc.xz * 0.004) * 0.6 + mn(vLoc.xz * 0.016) * 0.4;',          // strata and gullies
+          '  vec3 rock = mix(vec3(0.20, 0.19, 0.18), vec3(0.34, 0.31, 0.27), st);',
+          '  vec3 scree = vec3(0.30, 0.29, 0.25);',
+          '  vec3 forest = vec3(0.07, 0.10, 0.06);',
+          '  vec3 alb = mix(forest, scree, smoothstep(120.0, 420.0, y + st * 120.0));',
+          '  alb = mix(alb, rock, smoothstep(0.18, 0.42, slope) * smoothstep(60.0, 260.0, y));',
+          '  float snow = smoothstep(snowLine - 160.0, snowLine + 60.0, y + st * 260.0) * (1.0 - smoothstep(0.45, 0.72, slope + st * 0.15));',
+          '  alb = mix(alb, vec3(0.86, 0.88, 0.92), snow);',
+          '  float ndl = max(dot(n, normalize(sunDir)), 0.0);',
+          '  vec3 lit = alb * (sunCol * ndl * 1.8 + ambCol * (0.45 + 0.55 * n.y) * 0.55);',
+          // aerial perspective: thick at the foot, thinner up on the peaks, never fully clear
+          // same optical depth as the world fog (so the range sits behind the far terrain, not in
+          // front of a white band), but never quite swallowing the silhouette
+          '  float dist = length(vW - cameraPosition);',
+          '  float y0 = max(cameraPosition.y, 0.0), y1 = max(vW.y, 0.0), ea = exp(-hk * y0), dd = (y1 - y0) * hk;',
+          '  float havg = abs(dd) < 0.001 ? ea : (ea - exp(-hk * y1)) / dd;',
+          '  float od = dens * dist; od *= od; od *= max(havg, 0.18);',
+          '  float a = min(1.0 - exp(-od), haze);',
+          '  gl_FragColor = vec4(mix(lit, hazeCol, a), 1.0);',
+          '  #include <tonemapping_fragment>',
+          '  #include <encodings_fragment>',
+          '}'
+        ].join('\n')
+      });
       var mountains = new THREE.Mesh(mtnGeo, mtnMat);
       mountains.frustumCulled = false;
-      mountains.renderOrder = -1;
       scene.add(mountains);
       window.__distantMountains = mountains;
-      // over the open sea the horizon should be flat water, not a mountain wall: peaks whose
-      // ground sits out over the ocean are sunk below the waterline (re-checked a few times a second)
-      var mtnPos = mtnGeo.attributes.position, lastMx = 1e9, lastMz = 1e9, mtnSunk = [];
+      var mtnPos = mtnGeo.attributes.position, lastMx = 1e9, lastMz = 1e9, _sd = new THREE.Vector3();
       window.__updateMountainsForOcean = function(px, pz) {
-        if (Math.abs(px - lastMx) + Math.abs(pz - lastMz) < 40) return;
+        // lighting follows the live sun, sky and haze every frame
+        _sd.copy(sunLight.position).sub(sunLight.target.position).normalize();
+        mtnU.sunDir.value.copy(_sd);
+        mtnU.sunCol.value.copy(sunLight.color).multiplyScalar(sunLight.intensity);
+        mtnU.ambCol.value.copy(hemiLight.color).multiplyScalar(hemiLight.intensity);
+        // distant air reads blue-grey against the pale horizon, not white
+        mtnU.hazeCol.value.copy(scene.fog.color).lerp(sky.material.uniforms.topColor.value, 0.5).multiplyScalar(0.72);
+        mtnU.haze.value = THREE.MathUtils.clamp(0.62 + scene.fog.density * 300, 0.62, 0.98);
+        mtnU.dens.value = scene.fog.density; mtnU.hk.value = ATM.layer.w;
+        mtnU.snowLine.value = typeof SEASON !== 'undefined' && SEASON.name === 'winter' ? 300 : 1250;
+        if (Math.abs(px - lastMx) + Math.abs(pz - lastMz) < 60) return;
         lastMx = px; lastMz = pz;
-        for (var s = 0; s <= SEGMENTS; s++) {
-          var a = (s / SEGMENTS) * Math.PI * 2;
-          var f = oceanFactor(px + Math.sin(a) * RING_RADIUS, pz + Math.cos(a) * RING_RADIUS);
+        for (var s = 0; s <= SEG; s++) {
+          var a = (s % SEG) / SEG * Math.PI * 2;
+          var f = oceanFactor(px + Math.sin(a) * R0, pz + Math.cos(a) * R0);
+          f = Math.max(f, oceanFactor(px + Math.sin(a) * (R0 - 2500), pz + Math.cos(a) * (R0 - 2500)) * 0.6);
           f = f * f * (3 - 2 * f);
-          mtnSunk[s] = peakHeights[s] + (-140 - peakHeights[s]) * f;
-        }
-        for (var i = 0; i < SEGMENTS; i++) {
-          var o = i * 6;
-          mtnPos.setY(o + 2, mtnSunk[i + 1]); mtnPos.setY(o + 3, -120); mtnPos.setY(o + 4, mtnSunk[i + 1]); mtnPos.setY(o + 5, mtnSunk[i]);
+          for (var r = 0; r <= ROWS; r++) {
+            var k = s * (ROWS + 1) + r, h = base[k];
+            mtnPos.setY(k, h + (-260 - h) * f);
+          }
         }
         mtnPos.needsUpdate = true;
+        mtnGeo.computeVertexNormals();
       };
     })();
 
@@ -8229,20 +8306,21 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     boltGeo.setAttribute('uv', new THREE.BufferAttribute(boltUv, 2));
     boltGeo.setDrawRange(0, 0);
     var boltMat = new THREE.ShaderMaterial({
-      uniforms: { uI: { value: 0 } },
+      uniforms: { uI: { value: 0 }, uRevY: { value: -1e9 } },
       vertexShader: [
-        'attribute float aA; varying float vA; varying vec2 vUv;',
+        'attribute float aA; varying float vA; varying vec2 vUv; varying float vY;',
         '#include <common>',
         '#include <logdepthbuf_pars_vertex>',
-        'void main() { vA = aA; vUv = uv; vec4 mvPosition = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mvPosition;',
+        'void main() { vA = aA; vUv = uv; vY = position.y; vec4 mvPosition = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mvPosition;',
         '  #include <logdepthbuf_vertex>',
         '}'
       ].join('\n'),
       fragmentShader: [
-        'uniform float uI; varying float vA; varying vec2 vUv;',
+        'uniform float uI; uniform float uRevY; varying float vA; varying vec2 vUv; varying float vY;',
         '#include <logdepthbuf_pars_fragment>',
         'void main() {',
         '  #include <logdepthbuf_fragment>',
+        '  if (vY < uRevY) discard;',
         '  float x = abs(vUv.y);',
         '  float core = 1.0 - smoothstep(0.0, 1.0, x);',
         '  vec3 c = mix(vec3(0.55, 0.62, 1.0), vec3(1.0), core * core) * (0.6 + core * 3.5);',
@@ -8268,7 +8346,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var lightningFlashOpacity = 0;
     var pendingThunder = [];
     var wxFlash = 0;                           // 0..1 global flash brightness this frame
-    var bolt = { t: 9, strokes: [], ground: new THREE.Vector3(), top: new THREE.Vector3(), dir: new THREE.Vector3(0, 1, 0), dist: 1000, cloud: false, hitYou: false, quads: 0 };
+    var bolt = { t: 9, leader: 0, struck: true, paths: null, strokes: [], ground: new THREE.Vector3(), top: new THREE.Vector3(), dir: new THREE.Vector3(0, 1, 0), dist: 1000, cloud: false, hitYou: false, quads: 0 };
     var _bS = new THREE.Vector3(), _bD = new THREE.Vector3();
 
     function boltSubdivide(a, b, rough, out, minLen) {
@@ -8318,6 +8396,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           layers.push([boltPath(s2, s2.clone().addScaledVector(d2, L * 0.45), 0.6, 8), 0.3, 0.0]);
         }
       }
+      bolt.paths = layers.map(function(l) { return [l[0], l[1]]; });
       var dk = THREE.MathUtils.clamp(bolt.dist / 900, 0.6, 3);        // stay visible (a few px) far away
       layers.forEach(function(l) { boltRibbon(l[0], 2.4 * l[1] * dk, l[1], l[2] + (l[1] - l[2]) * 0.25, cam); });   // core
       layers.forEach(function(l) { boltRibbon(l[0], 16 * l[1] * dk, l[1] * 0.22, l[2] * 0.22, cam); });           // glow
@@ -8353,15 +8432,19 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       bolt.dir.copy(bolt.ground).add(bolt.top).multiplyScalar(0.5).sub(cam).normalize();
       boltBuild(bolt.top, bolt.ground);
       // 1-4 return strokes down the same channel
-      bolt.strokes = [0];
+      // a stepped leader feels its way down first (a dim, flickering, branching crawl), then the
+      // return stroke lights the whole channel at once
+      bolt.leader = bolt.cloud ? 0 : 0.07 + Math.random() * 0.1;
+      bolt.struck = false;
+      bolt.strokes = [bolt.leader];
       var n = 1 + Math.floor(Math.random() * 3.5);
       for (var k = 1; k < n; k++) bolt.strokes.push(bolt.strokes[k - 1] + 0.05 + Math.random() * 0.12);
       boltLight.position.copy(bolt.ground).lerp(bolt.top, bolt.cloud ? 0.5 : 0.25);
       boltFlashSprite.position.copy(bolt.ground);
       // thunder arrives at the speed of sound
-      var delay = bolt.dist / 343;
-      var loud = THREE.MathUtils.clamp(1.35 - bolt.dist / 2600, 0.12, 1.25) * (bolt.cloud ? 0.6 : 1);
-      pendingThunder.push({ t: Math.max(0.02, delay), loud: loud, near: !bolt.cloud && bolt.dist < 550 });
+      var syn = tndPrepare();
+      var loud = THREE.MathUtils.clamp(1.35 - syn.dmin / 2600, 0.12, 1.25) * (bolt.cloud ? 0.6 : 1);
+      pendingThunder.push({ t: Math.max(0.02, syn.tmin + bolt.leader), loud: loud, near: !bolt.cloud && syn.dmin < 550, syn: syn });
       if (bolt.hitYou) kjOnLightning(true);
     }
     function lightningEnvelope(t) {
@@ -8380,8 +8463,30 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       bolt.t += dt;
       var env = bolt.t < 1.2 ? lightningEnvelope(bolt.t) : 0;
       var near = THREE.MathUtils.clamp(1.25 - bolt.dist / 2400, 0.12, 1);
-      boltMesh.visible = env > 0.01 && !bolt.cloud;
-      boltMat.uniforms.uI.value = env * 1.6;
+      // what you see: the leader creeping down, the strokes, then the channel's fading afterglow
+      var vis = env, lastS = bolt.strokes.length ? bolt.strokes[bolt.strokes.length - 1] : 0;
+      if (bolt.t > lastS && bolt.t < 1.4) vis = Math.max(vis, 0.2 * Math.exp(-(bolt.t - lastS) * 5));
+      var lead = bolt.leader || 0, revY = -1e9;
+      if (bolt.t < lead) {
+        var lf = bolt.t / lead;
+        revY = bolt.top.y - (bolt.top.y - bolt.ground.y) * Math.pow(lf, 0.85);
+        vis = 0.16 + 0.18 * (Math.floor(bolt.t * 55) % 2);             // each step flickers
+      }
+      boltMat.uniforms.uRevY.value = revY;
+      boltMesh.visible = vis > 0.01;
+      boltMat.uniforms.uI.value = vis * (bolt.cloud ? 0.55 : 1.6);
+      // the strike itself: a burst of dust (or steam off the sea) where it hit
+      if (!bolt.struck && bolt.t >= lead && bolt.t < 1) {
+        bolt.struck = true;
+        if (!bolt.cloud && !bolt.hitYou && bolt.dist < 2600 && typeof samEmitSmoke === 'function') {
+          for (var bs = 0; bs < 7; bs++) {
+            _bS.set((Math.random() - 0.5) * 8, 2 + Math.random() * 6, (Math.random() - 0.5) * 8);
+            _bD.copy(bolt.ground).add(_bS);
+            _bS.set((Math.random() - 0.5) * 9, 4 + Math.random() * 10, (Math.random() - 0.5) * 9);
+            samEmitSmoke(_bD, _bS, 18 + Math.random() * 26, 4 + Math.random() * 4, 0.5, bolt.ground.y <= WATER_LEVEL + 0.5 ? 0.85 : 0.42);
+          }
+        }
+      }
       boltLight.intensity = env * (bolt.cloud ? 1.5e5 : 5e5);
       boltFlashSprite.material.opacity = bolt.cloud ? 0 : env * 0.9;
       wxFlash = env * near * (bolt.cloud ? 0.55 : 1);
@@ -8393,12 +8498,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       for (var i = pendingThunder.length - 1; i >= 0; i--) {
         pendingThunder[i].t -= dt;
         if (pendingThunder[i].t <= 0) {
-          playThunder(pendingThunder[i].loud, pendingThunder[i].near);
+          playThunder(pendingThunder[i].loud, pendingThunder[i].near, pendingThunder[i].syn);
           pendingThunder.splice(i, 1);
         }
       }
     }
-    function playThunder(loud, near) {
+    function playThunder(loud, near, syn) {
+      if (syn && syn.segs.length) { tndPlay(syn, loud); return; }
       if (!audioCtx || !soundEnabled) return;
       var now = audioCtx.currentTime;
       var dur = 2.2 + Math.random() * 2.2 + loud;
@@ -8430,6 +8536,192 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         cs.connect(hp).connect(cg).connect(audioCtx.destination);
         cs.start(now);
       }
+    }
+
+    /* ---- THUNDER — synthesised from the bolt you just saw. Every segment of the channel (main
+       stroke and forks) sends out its own pressure pulse, an N-wave a few milliseconds long, which
+       arrives after its own travel time at 343 m/s, from its own direction, at 1/r loudness. A close
+       strike therefore opens with the ripping crack of the nearest few hundred metres of channel,
+       then the boom of the bulk of it, then the long roll of the far end and the forks; a distant
+       one is only the low roll, because the air has eaten the highs. On top: a sub-bass pressure
+       wave you feel more than hear, the echo off the hills, other sound pushed down for a moment,
+       the camera shaken by the rumble's own envelope, a screen pressure ripple, and phone
+       vibration and controller rumble where the device has them. ---- */
+    var TND = { ir: null, shakeEnv: null, shakeT: 0, shakeRate: 50, shakeAmp: 0, last: 0 };
+    function tndPrepare() {
+      var cam = camera.position, e = camera.matrixWorld.elements;
+      var rx = e[0], ry = e[1], rz = e[2];
+      var segs = [], tmin = 1e9, dmin = 1e9;
+      (bolt.paths || []).forEach(function(L) {
+        var pts = L[0], w = L[1];
+        for (var i = 0; i < pts.length - 1; i++) {
+          var a = pts[i], b = pts[i + 1];
+          var mx = (a.x + b.x) / 2 - cam.x, my = (a.y + b.y) / 2 - cam.y, mz = (a.z + b.z) / 2 - cam.z;
+          var d = Math.sqrt(mx * mx + my * my + mz * mz), len = a.distanceTo(b);
+          var pan = (mx * rx + my * ry + mz * rz) / Math.max(d, 1);
+          segs.push(d / 343, w * len / Math.max(d, 35), pan, d);
+          tmin = Math.min(tmin, d / 343); dmin = Math.min(dmin, d);
+        }
+      });
+      return { segs: segs, tmin: tmin, dmin: dmin, cloud: bolt.cloud, hitYou: bolt.hitYou, ground: bolt.ground.clone() };
+    }
+    function tndImpulse() {
+      // the hills and the cloud deck: a few discrete slap-backs, then a long, darkening tail
+      if (TND.ir) return TND.ir;
+      var sr = audioCtx.sampleRate, n = Math.round(sr * 5.5), ir = audioCtx.createBuffer(2, n, sr);
+      for (var c = 0; c < 2; c++) {
+        var d = ir.getChannelData(c), lp = 0;
+        for (var i = 0; i < n; i++) {
+          var t = i / sr, k = 0.35 + 0.6 * Math.exp(-t * 0.8);         // highs die first
+          lp += ((Math.random() * 2 - 1) - lp) * k * 0.5;
+          d[i] = lp * Math.exp(-t * 1.05) * 0.5;
+        }
+        [0.38, 0.71, 1.15, 1.6, 2.3].forEach(function(t, j) {
+          var p = Math.round((t + (c ? 0.031 : 0) + Math.random() * 0.05) * sr);
+          for (var q = 0; q < sr * 0.08 && p + q < n; q++) d[p + q] += (Math.random() * 2 - 1) * 0.5 * Math.exp(-q / (sr * 0.02)) / (1 + j * 0.7);
+        });
+      }
+      return (TND.ir = ir);
+    }
+    function tndPlay(syn, loud) {
+      var segs = syn.segs, nS = segs.length / 4;
+      var near = syn.dmin < 700, mid = syn.dmin < 1800;
+      // haptics and shake happen even with the sound off
+      // a close strike needs the full band for its crack; a distant roll is all lows anyway
+      var sr = near && audioCtx ? audioCtx.sampleRate : 22050;
+      var tmax = 0;
+      for (var i = 0; i < nS; i++) tmax = Math.max(tmax, segs[i * 4] - syn.tmin);
+      var dur = Math.min(13, tmax + 1.2);
+      // ---- the pulse train, in stereo ----
+      var N = Math.round(sr * dur), L = new Float32Array(N), R = new Float32Array(N);
+      for (var s = 0; s < nS; s++) {
+        var t0 = segs[s * 4] - syn.tmin, amp = segs[s * 4 + 1], pan = segs[s * 4 + 2], d = segs[s * 4 + 3];
+        var gl = Math.cos((pan + 1) * Math.PI / 4), gr = Math.sin((pan + 1) * Math.PI / 4);
+        // a few sub-pulses per segment: the channel is tortuous on every scale, which is the crackle
+        var subs = 2 + Math.floor(Math.random() * 3);
+        for (var k = 0; k < subs; k++) {
+          var w = 0.0012 + d * 0.0000045 + Math.random() * 0.0015;            // N-waves broaden with distance
+          var st = Math.round((t0 + (k ? (Math.random() - 0.3) * 0.022 : 0)) * sr), wl = Math.max(3, Math.round(w * sr));
+          var a = amp * (k ? 0.25 + Math.random() * 0.45 : 1) * (Math.random() < 0.5 ? 1 : -1);
+          for (var q = 0; q < wl && st + q < N; q++) {
+            if (st + q < 0) continue;
+            var v = a * (1 - 2 * q / wl);
+            L[st + q] += v * gl; R[st + q] += v * gr;
+          }
+        }
+      }
+      // ---- the rolling bed: brown noise riding the pulse train's own envelope ----
+      var env = new Float32Array(N), e1 = 0, br = 0, brR = 0, peakEnv = 1e-9;
+      var att = 1 - Math.exp(-1 / (sr * 0.012)), rel = 1 - Math.exp(-1 / (sr * 0.32));
+      for (var j = 0; j < N; j++) {
+        var x = Math.abs(L[j]) + Math.abs(R[j]);
+        e1 += (x - e1) * (x > e1 ? att : rel);
+        env[j] = e1; if (e1 > peakEnv) peakEnv = e1;
+      }
+      var bedK = near ? 1.6 : 2.6;
+      for (var j2 = 0; j2 < N; j2++) {
+        br = br * 0.985 + (Math.random() * 2 - 1) * 0.12; brR = brR * 0.985 + (Math.random() * 2 - 1) * 0.12;
+        var ev = env[j2] / peakEnv * Math.pow(1 - j2 / N, 0.6);
+        L[j2] += br * ev * bedK * peakEnv; R[j2] += brR * ev * bedK * peakEnv;
+      }
+      var pk = 1e-9;
+      for (var j3 = 0; j3 < N; j3++) pk = Math.max(pk, Math.abs(L[j3]), Math.abs(R[j3]));
+      // shake follows the same envelope, sampled at 50 Hz
+      var step = Math.round(sr / TND.shakeRate), se = new Float32Array(Math.ceil(N / step));
+      for (var j4 = 0; j4 < se.length; j4++) se[j4] = env[Math.min(N - 1, j4 * step)] / peakEnv;
+      TND.shakeEnv = se; TND.shakeT = 0;
+      TND.shakeAmp = THREE.MathUtils.clamp(loud * (near ? 1.0 : mid ? 0.55 : 0.22), 0, 1.25) * (syn.cloud ? 0.5 : 1);
+      tndFeel(syn, loud, near, mid, se);
+      if (!audioCtx || !soundEnabled) return;
+      var now = audioCtx.currentTime + 0.02;
+      var buf = audioCtx.createBuffer(2, N, sr);
+      var gainK = 0.92 / pk;
+      var bl = buf.getChannelData(0), brc = buf.getChannelData(1);
+      for (var j5 = 0; j5 < N; j5++) { bl[j5] = L[j5] * gainK; brc[j5] = R[j5] * gainK; }
+      var src = audioCtx.createBufferSource(); src.buffer = buf;
+      // the air eats the highs: ~12 kHz at 200 m, a few hundred Hz at 5 km
+      var lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass';
+      lp.frequency.value = THREE.MathUtils.clamp(14000 * Math.pow(220 / Math.max(syn.dmin, 220), 1.05), 170, 14000);
+      lp.Q.value = 0.5;
+      var lp2 = audioCtx.createBiquadFilter(); lp2.type = 'lowpass'; lp2.frequency.value = lp.frequency.value * 1.4; lp2.Q.value = 0.5;
+      var low = audioCtx.createBiquadFilter(); low.type = 'lowshelf'; low.frequency.value = 120; low.gain.value = near ? 7 : 10;
+      var comp = audioCtx.createDynamicsCompressor();
+      comp.threshold.value = -16; comp.knee.value = 8; comp.ratio.value = 10; comp.attack.value = 0.002; comp.release.value = 0.5;
+      var out = audioCtx.createGain(); out.gain.value = THREE.MathUtils.clamp(loud, 0.08, 1.3) * 1.15;
+      var dry = audioCtx.createGain(); dry.gain.value = near ? 1 : 0.75;
+      var wet = audioCtx.createGain(); wet.gain.value = near ? 0.32 : 0.55;
+      var conv = audioCtx.createConvolver(); conv.buffer = tndImpulse();
+      src.connect(lp).connect(lp2).connect(low);
+      low.connect(dry).connect(comp);
+      low.connect(conv).connect(wet).connect(comp);
+      // the sub-bass pressure wave: felt in the chest, arriving with the bulk of the channel
+      var firstBulk = 0, bestE = 0;
+      for (var j6 = 0; j6 < se.length; j6++) if (se[j6] > bestE) { bestE = se[j6]; firstBulk = j6 / TND.shakeRate; if (bestE > 0.85) break; }
+      var sub = audioCtx.createOscillator(); sub.type = 'sine';
+      var sg = audioCtx.createGain(), subAmt = (near ? 0.95 : mid ? 0.6 : 0.28) * (syn.cloud ? 0.55 : 1);
+      var sb = now + Math.max(0, firstBulk - 0.02);
+      sub.frequency.setValueAtTime(58, sb); sub.frequency.exponentialRampToValueAtTime(31, sb + 1.6);
+      sg.gain.setValueAtTime(0.0001, now); sg.gain.setValueAtTime(0.0001, sb);
+      sg.gain.exponentialRampToValueAtTime(subAmt, sb + 0.05);
+      sg.gain.exponentialRampToValueAtTime(subAmt * 0.35, sb + 0.7);
+      sg.gain.exponentialRampToValueAtTime(0.0001, sb + 3.2);
+      sub.connect(sg).connect(comp);
+      comp.connect(out).connect(audioCtx.destination);
+      src.start(now); sub.start(now); sub.stop(sb + 3.4);
+      src.stop(now + dur + 0.1);
+      // everything else ducks under a close one for a moment
+      if (gpBus && (near || mid)) {
+        var dk = near ? 0.25 : 0.55;
+        [[gpBus.music, gpSet.volMusic], [gpBus.engine, gpSet.volEngine]].forEach(function(p) {
+          var v = gpVol(p[1]); p[0].gain.cancelScheduledValues(sb);
+          p[0].gain.setTargetAtTime(v * dk, sb, 0.02);
+          p[0].gain.setTargetAtTime(v, sb + 0.5, 0.9);
+        });
+      }
+    }
+    // the physical side: shake, a pressure ripple on screen, phone and controller rumble
+    function tndFeel(syn, loud, near, mid, se) {
+      if (!started) return;
+      var k = gpSet ? gpShake() : 1;
+      if (near) {
+        fxShake = Math.max(fxShake, (syn.hitYou ? 1.6 : 1.15) * Math.min(1, loud) * Math.max(0.3, k));
+        if (typeof gfxShockwave === 'function') gfxShockwave(syn.ground, syn.dmin < 300 ? 0.9 : 0.5);
+      }
+      if (k <= 0) return;
+      // a vibration pattern cut from the rumble's own envelope (on, off, on, … in ms)
+      if ((near || mid) && navigator.vibrate) {
+        var pat = [], on = false, run = 0, ms = 1000 / TND.shakeRate;
+        for (var i = 0; i < se.length && pat.length < 40; i++) {
+          var want = se[i] > (near ? 0.22 : 0.35);
+          if (want !== on) { pat.push(Math.round(run)); run = 0; on = want; }
+          run += ms;
+        }
+        if (on) pat.push(Math.round(run));
+        if (pat.length && pat[0] === 0) pat.shift(); else pat.unshift(0);
+        try { navigator.vibrate(pat.length > 1 ? pat : [near ? 300 : 160]); } catch (e) {}
+      }
+      try {
+        var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+        for (var g = 0; g < pads.length; g++) {
+          var pad = pads[g], va = pad && pad.vibrationActuator;
+          if (!va || !va.playEffect) continue;
+          var str = Math.min(1, loud * (near ? 1 : mid ? 0.6 : 0.3));
+          va.playEffect('dual-rumble', { startDelay: 0, duration: near ? 140 : 60, weakMagnitude: Math.min(1, str * 1.2), strongMagnitude: str * 0.6 });
+          va.playEffect('dual-rumble', { startDelay: near ? 130 : 50, duration: Math.min(5000, se.length * 1000 / TND.shakeRate * 0.7), weakMagnitude: str * 0.25, strongMagnitude: str });
+        }
+      } catch (e) {}
+    }
+    // a low, rolling camera shake that follows the thunder's own envelope
+    var _tndOff = new THREE.Vector3();
+    function tndUpdate(dt) {
+      if (!TND.shakeEnv || !started) return;
+      TND.shakeT += dt;
+      var i = Math.floor(TND.shakeT * TND.shakeRate);
+      if (i >= TND.shakeEnv.length) { TND.shakeEnv = null; return; }
+      var e = TND.shakeEnv[i] * TND.shakeAmp * gpShake() * (ckActive ? 0.5 : 1), t = TND.shakeT;
+      if (e < 0.003) return;
+      _tndOff.set(Math.sin(t * 19.3) + 0.6 * Math.sin(t * 41.7 + 1.3), Math.sin(t * 23.1 + 0.7) + 0.5 * Math.sin(t * 53.9), Math.sin(t * 17.2 + 2.1)).multiplyScalar(e * 0.09);
+      camera.position.add(_tndOff);
     }
 
     /* ---- rain + wind ambience ---- */
@@ -8467,7 +8759,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       currentLayerH += (layerHT - currentLayerH) * f;
       currentBanks += (weatherTarget.banks - currentBanks) * f;
 
-      scene.fog.density = currentFogDensity;
+      scene.fog.density = currentFogDensity * FOG_FAR_K;
       ATM.layer.x = currentLayer;
       ATM.layer.y = 0;
       ATM.layer.z = 1 / currentLayerH;
@@ -16958,7 +17250,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       sndUpdate(dt);
       wfUpdate(dt);
       actUpdate(dt);
-      ostUpdate(dt); thUpdate(dt);
+      ostUpdate(dt); thUpdate(dt); ftUpdate(); tndUpdate(dt);
       dtUpdate(dt);
       perfRun('wx2', wx2Update, dt);
       perfRun('wl', wlUpdate, dt);
@@ -17617,6 +17909,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             'float gFar  = texture2D(map, gUv / 283.0 + 0.71).r;',
             'float gNearW = 1.0 - smoothstep(120.0, 520.0, length(vViewPosition));',
             'float gDetail = mix(1.0, gNear * 2.0, 0.5 * gNearW) * mix(1.0, gMid * 2.0, 0.45) * mix(1.0, gFar * 2.0, 0.5);',
+            // close up, a fine grass/soil grain so the ground under the wheels isn't a smooth smear
+            'float gFine = texture2D(map, gUv / 2.7 + 0.13).r, gFine2 = texture2D(map, gUv / 0.9 + 0.61).r;',
+            'float gFineW = 1.0 - smoothstep(18.0, 110.0, length(vViewPosition));',
+            'gDetail *= mix(1.0, (gFine * 0.6 + gFine2 * 0.4) * 2.0, 0.42 * gFineW);',
             'vec3 gBase = vColor;',
             // bare rock shows through wherever the ground gets steep
             'float gRock = smoothstep(0.26, 0.48, gSlope + (gMid - 0.5) * 0.25);',
@@ -17894,7 +18190,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           frTube(B, 0.45, 9.8 + b * 0.6, 0.2, 0.45 + ex, 11.6 + b * 0.5, 0.2 + ez, 0.12, 0.06, 4, 1, function() { return [barkHi, 0.8]; });
         }
         var lobes = [[0.5, 12.9, 0.2, 2.5], [1.9, 12.2, 0.9, 1.8], [-1.2, 12.4, 1.2, 1.9], [0.3, 11.9, -1.8, 1.8], [-1.4, 11.6, -0.9, 1.5], [0.6, 13.9, 0.1, 1.5]];
-        lobes.forEach(function(l, i) { frBlob(B, l[0], l[1], l[2], l[3] * 1.15, l[3] * 0.62, l[3] * 1.15, 0, i % 2 ? leaf : leafD, rng, 0.3); });
+        lobes.forEach(function(l, i) { frBlob(B, l[0], l[1], l[2], l[3] * 1.15, l[3] * 0.62, l[3] * 1.15, 1, i % 2 ? leaf : leafD, rng, 0.45); });
       } else if (lod === 1) {
         frTube(B, 0, -0.4, 0, 0.55, 11.8, 0.25, 0.34, 0.16, 4, 2, function(t) { return [t < 0.45 ? barkLo : barkHi, 1]; });
         frBlob(B, 0.6, 12.8, 0.3, 2.9, 1.5, 2.9, 0, leaf, rng, 0.25);
@@ -17912,12 +18208,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         frTube(B, 0, -0.4, 0, 0.2, 4.4, 0.1, 0.62, 0.4, 7, 2, function(t) { return [bark, 0.8 + t * 0.2]; });
         var limbs = [[2.6, 7.2, 0.8], [-2.2, 7.0, 1.4], [0.4, 7.4, -2.5], [-1.2, 8.0, -1.0]];
         limbs.forEach(function(l) { frTube(B, 0.2, 3.8, 0.1, l[0], l[1], l[2], 0.3, 0.12, 5, 1, function() { return [bark, 0.9]; }); });
-        frBlob(B, 0, 8.2, 0, 3.7, 2.8, 3.7, 1, leaf, rng, 0.28);
-        frBlob(B, 2.6, 7.4, 0.9, 2.6, 2.1, 2.6, 0, leafL, rng, 0.3);
-        frBlob(B, -2.3, 7.3, 1.3, 2.5, 2.0, 2.5, 0, leaf, rng, 0.3);
-        frBlob(B, 0.5, 7.6, -2.5, 2.4, 2.0, 2.4, 0, leafL, rng, 0.3);
-        frBlob(B, -1.4, 9.4, -1.0, 2.2, 1.8, 2.2, 0, leaf, rng, 0.3);
-        frBlob(B, 1.2, 9.8, 1.0, 2.0, 1.6, 2.0, 0, leafL, rng, 0.3);
+        frBlob(B, 0, 8.2, 0, 3.7, 2.8, 3.7, 2, leaf, rng, 0.42);
+        frBlob(B, 2.6, 7.4, 0.9, 2.6, 2.1, 2.6, 1, leafL, rng, 0.45);
+        frBlob(B, -2.3, 7.3, 1.3, 2.5, 2.0, 2.5, 1, leaf, rng, 0.45);
+        frBlob(B, 0.5, 7.6, -2.5, 2.4, 2.0, 2.4, 1, leafL, rng, 0.45);
+        frBlob(B, -1.4, 9.4, -1.0, 2.2, 1.8, 2.2, 1, leaf, rng, 0.45);
+        frBlob(B, 1.2, 9.8, 1.0, 2.0, 1.6, 2.0, 1, leafL, rng, 0.45);
       } else if (lod === 1) {
         frTube(B, 0, -0.4, 0, 0.2, 4.6, 0.1, 0.62, 0.4, 5, 1, function() { return [bark, 0.85]; });
         frBlob(B, 0, 8.0, 0, 3.9, 2.9, 3.9, 0, leaf, rng, 0.25);
@@ -17938,7 +18234,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           return [t < 0.08 || marks[(j * 6 + k) % 64] ? black : white, t < 0.08 ? 0.7 : 1];
         });
         var lobes = [[0.3, 9.4, 0.1, 1.9], [1.2, 7.8, 0.6, 1.6], [-0.9, 8.3, -0.6, 1.7], [0.2, 6.6, -1.0, 1.4], [-0.5, 10.6, 0.5, 1.3]];
-        lobes.forEach(function(l, i) { frBlob(B, l[0], l[1], l[2], l[3], l[3] * 1.45, l[3], 0, i % 2 ? leafL : leaf, rng, 0.35); });
+        lobes.forEach(function(l, i) { frBlob(B, l[0], l[1], l[2], l[3], l[3] * 1.45, l[3], 1, i % 2 ? leafL : leaf, rng, 0.45); });
       } else if (lod === 1) {
         frTube(B, 0, -0.4, 0, 0.35, 10.4, 0.1, 0.24, 0.1, 4, 2, function(t, a, k, j) { return [t < 0.1 || (j + k) % 3 === 0 ? black : white, 1]; });
         frBlob(B, 0.3, 9.2, 0.1, 2.0, 2.8, 2.0, 0, leaf, rng, 0.3);
@@ -17982,8 +18278,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       'float sH = fract(sin(dot(instanceMatrix[3].xz, vec2(12.9898, 78.233))) * 43758.5453);',
       'float sLum = clamp(dot(vColor.rgb, vec3(0.3, 0.59, 0.11)) / 0.075, 0.35, 1.6);',
       // autumn: oaks and birches go gold, orange and red; a few hang on to their green
-      'vec3 sAut = sH < 0.34 ? vec3(0.42, 0.13, 0.015) : (sH < 0.7 ? vec3(0.5, 0.3, 0.02) : (sH < 0.9 ? vec3(0.34, 0.05, 0.02) : vColor.rgb / max(sLum, 0.01)));',
-      'vColor.rgb = mix(vColor.rgb, sAut * sLum * 0.55, uSeason.y * sDecid);',
+      // real autumn woods are mostly olive, ochre and rust with plenty still green — not candy colours
+      'vec3 sAut = sH < 0.22 ? vec3(0.30, 0.13, 0.035) : (sH < 0.48 ? vec3(0.34, 0.25, 0.07) : (sH < 0.62 ? vec3(0.24, 0.21, 0.07) : vColor.rgb / max(sLum, 0.01)));',
+      'vColor.rgb = mix(vColor.rgb, sAut * sLum * 0.5, uSeason.y * sDecid * 0.85);',
       // spring: fresh bright leaves, some trees in white-pink blossom
       'vec3 sSpr = sH < 0.14 ? vec3(0.75, 0.55, 0.6) : vec3(0.1, 0.24, 0.04);',
       'vColor.rgb = mix(vColor.rgb, sSpr * sLum * 0.5, uSeason.z * sDecid * 0.8);',
@@ -17996,9 +18293,40 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       shader.uniforms.uTime = gfxTimeU;
       shader.uniforms.uWind = gfxWindU;
       shader.uniforms.uSeason = SEASON_U;
-      shader.vertexShader = 'uniform float uTime;\nuniform float uWind;\nuniform vec4 uSeason;\nattribute float aLeaf;\n' + shader.vertexShader
+      shader.vertexShader = 'uniform float uTime;\nuniform float uWind;\nuniform vec4 uSeason;\nattribute float aLeaf;\nvarying vec3 vFLoc;\nvarying float vFLeaf;\n' + shader.vertexShader
         .replace('#include <color_vertex>', THREE.ShaderChunk.color_vertex.replace('vColor.xyz *= instanceColor.xyz;', 'vColor.xyz *= mix(vec3(1.0), instanceColor.xyz, min(aLeaf, 1.0));') + '\n' + FOREST_SEASON_COLOR)
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + FOREST_VERT_MOTION);
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFLeaf = min(aLeaf, 1.0);\nvFLoc = position;\n#ifdef USE_INSTANCING\nvFLoc += instanceMatrix[3].xyz * 0.37;\n#endif\n' + FOREST_VERT_MOTION);
+      // foliage isn't a smooth clay ball: it breaks into leaf clumps with dark gaps between them,
+      // each clump catching the light at its own angle, with small see-through holes in the crown
+      shader.fragmentShader = 'varying vec3 vFLoc;\nvarying float vFLeaf;\n' +
+        'float frH3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }\n' +
+        'float frN3(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);\n' +
+        '  return mix(mix(mix(frH3(i), frH3(i + vec3(1,0,0)), f.x), mix(frH3(i + vec3(0,1,0)), frH3(i + vec3(1,1,0)), f.x), f.y),\n' +
+        '             mix(mix(frH3(i + vec3(0,0,1)), frH3(i + vec3(1,0,1)), f.x), mix(frH3(i + vec3(0,1,1)), frH3(i + vec3(1,1,1)), f.x), f.y), f.z); }\n' +
+        shader.fragmentShader
+          .replace('#include <clipping_planes_fragment>', [
+            '#include <clipping_planes_fragment>',
+            'float frClump = 0.0, frFine = 0.0, frNear = 1.0 - smoothstep(60.0, 420.0, length(vViewPosition));',
+            'if (vFLeaf > 0.5) {',
+            '  frClump = frN3(vFLoc * 1.15);',
+            '  frFine = frN3(vFLoc * 4.3 + 7.1);',
+            '  if (frFine * 0.7 + frClump * 0.3 < 0.2 * frNear) discard;',
+            '}'
+          ].join('\n'))
+          .replace('#include <color_fragment>', [
+            '#include <color_fragment>',
+            'if (vFLeaf > 0.5) {',
+            '  diffuseColor.rgb *= mix(1.0, 0.5 + 0.75 * frClump * (0.75 + 0.5 * frFine), 0.35 + 0.65 * frNear);',
+            '  diffuseColor.rgb *= mix(vec3(1.0), vec3(1.08, 1.0, 0.82) + vec3(-0.12, 0.0, 0.2) * frN3(vFLoc * 0.31), 0.7);',
+            '}'
+          ].join('\n'))
+          .replace('#include <normal_fragment_maps>', [
+            '#include <normal_fragment_maps>',
+            'if (vFLeaf > 0.5) {',
+            '  vec3 frJ = vec3(frN3(vFLoc * 2.1 + 1.3), frN3(vFLoc * 2.1 + 9.7), frN3(vFLoc * 2.1 + 4.4)) - 0.5;',
+            '  normal = normalize(normal + frJ * 1.1 * (0.4 + 0.6 * frNear));',
+            '}'
+          ].join('\n'));
     };
     // shadows follow the same motion (so bare winter trees don't cast full-crown shadows)
     var forestDepthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
@@ -18277,6 +18605,103 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
     }
 
+
+    /* ---------------- FAR TERRAIN: the world out to the horizon ----------------
+       The streamed chunks only reach ~1.3 km, which used to force a thick white haze to hide the
+       edge of the world. This is one coarse 16 km heightfield built from the same height, colour,
+       biome and forest functions as the chunks, drawn underneath them: a hole is cut where the
+       detailed chunks are, and it dips a few metres near the hole so it can never poke through.
+       Forest stands are baked in as dark canopy so distant woods still read as woods. It is
+       rebuilt in the background, a few rows a frame, whenever you fly 2 km from its centre. */
+    var FT = { N: GFX_IS_TOUCH ? 150 : 200, SIZE: 16000, STEP: 2000, mesh: null, job: null, cx: 1e9, cz: 1e9 };
+    var ftHoleU = { value: new THREE.Vector4(0, 0, 1000, 0) };
+    var ftMat = terrainMaterial.clone();
+    ftMat.normalMap = null;
+    ftMat.polygonOffset = false;
+    ftMat.onBeforeCompile = function(shader, r) {
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', [
+        '#include <begin_vertex>',
+        '{ vec2 ftW = (modelMatrix * vec4(transformed, 1.0)).xz;',
+        '  float ftD = max(abs(ftW.x - uFtHole.x), abs(ftW.y - uFtHole.y)) - uFtHole.z;',
+        '  transformed.y -= 2.0 + 14.0 * (1.0 - smoothstep(0.0, 1400.0, ftD)); }'
+      ].join('\n'));
+      terrainMaterial.onBeforeCompile.call(this, shader, r);
+      shader.uniforms.uFtHole = ftHoleU;
+      shader.vertexShader = 'uniform vec4 uFtHole;\n' + shader.vertexShader;
+      shader.fragmentShader = 'uniform vec4 uFtHole;\n' + shader.fragmentShader.replace('void main() {',
+        'void main() {\n  if (max(abs(vGfxWorldPos.x - uFtHole.x), abs(vGfxWorldPos.z - uFtHole.y)) < uFtHole.z) discard;');
+    };
+    ftMat.customProgramCacheKey = function() { return 'farTerrain'; };
+    function ftStart(cx, cz) {
+      var N = FT.N, W = N + 3;
+      FT.job = { cx: cx, cz: cz, row: 0, stage: 0, i: 0, h: new Float32Array(W * W), W: W,
+        pos: new Float32Array((N + 1) * (N + 1) * 3), nor: new Float32Array((N + 1) * (N + 1) * 3),
+        col: new Float32Array((N + 1) * (N + 1) * 3), bio: new Float32Array((N + 1) * (N + 1) * 3), uv: new Float32Array((N + 1) * (N + 1) * 2) };
+    }
+    var _ftC = new THREE.Color(), _ftBio = [0, 0, 0];
+    function ftStep(budget) {
+      var j = FT.job, N = FT.N, W = j.W, st = FT.SIZE / N, half = FT.SIZE / 2, t0 = performance.now();
+      while (j.stage === 0) {
+        var gz = j.row - 1;
+        for (var gx = -1; gx <= N + 1; gx++) j.h[(gz + 1) * W + gx + 1] = getTerrainHeight(j.cx - half + gx * st, j.cz - half + gz * st);
+        if (++j.row > N + 2) j.stage = 1;
+        if (performance.now() - t0 > budget) return false;
+      }
+      while (j.stage === 1) {
+        var iz = Math.floor(j.i / (N + 1));
+        for (var ix = 0; ix <= N; ix++) {
+          var k = iz * (N + 1) + ix, g = (iz + 1) * W + ix + 1, h = j.h[g];
+          var wx = j.cx - half + ix * st, wz = j.cz - half + iz * st;
+          j.pos[k * 3] = wx - j.cx; j.pos[k * 3 + 1] = h; j.pos[k * 3 + 2] = wz - j.cz;
+          var nx = j.h[g - 1] - j.h[g + 1], nz = j.h[g - W] - j.h[g + W], ny = 2 * st, nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+          j.nor[k * 3] = nx / nl; j.nor[k * 3 + 1] = ny / nl; j.nor[k * 3 + 2] = nz / nl;
+          colorForHeight(h, _ftC);
+          var fd = forestDensityAt(wx, wz, h);
+          if (fd > 0.01) { _ftC.r *= 1 - fd * 0.72; _ftC.g *= 1 - fd * 0.55; _ftC.b *= 1 - fd * 0.72; }
+          _ftBio[0] = _ftBio[1] = _ftBio[2] = 0;
+          regColor(wx, wz, h, _ftC, _ftBio);
+          var jit = 1 + (smoothNoise(wx * 0.004, wz * 0.004) - 0.5) * 0.25 + (smoothNoise(wx * 0.017, wz * 0.017) - 0.5) * 0.12;
+          j.col[k * 3] = Math.min(1, _ftC.r * jit); j.col[k * 3 + 1] = Math.min(1, _ftC.g * jit); j.col[k * 3 + 2] = Math.min(1, _ftC.b * jit);
+          j.bio[k * 3] = _ftBio[0]; j.bio[k * 3 + 1] = _ftBio[1]; j.bio[k * 3 + 2] = _ftBio[2];
+          j.uv[k * 2] = ix / N; j.uv[k * 2 + 1] = 1 - iz / N;
+        }
+        j.i += N + 1;
+        if (j.i >= (N + 1) * (N + 1)) j.stage = 2;
+        else if (performance.now() - t0 > budget) return false;
+      }
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(j.pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(j.nor, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(j.col, 3));
+      geo.setAttribute('aBio', new THREE.BufferAttribute(j.bio, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(j.uv, 2));
+      var IA = (N + 1) * (N + 1) > 65535 ? Uint32Array : Uint16Array, idx = new IA(N * N * 6), q = 0;
+      for (var z = 0; z < N; z++) for (var x = 0; x < N; x++) {
+        var a = z * (N + 1) + x, b = a + N + 1;
+        idx[q++] = a; idx[q++] = b; idx[q++] = a + 1; idx[q++] = a + 1; idx[q++] = b; idx[q++] = b + 1;
+      }
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+      geo.computeBoundingSphere();
+      if (!FT.mesh) {
+        FT.mesh = new THREE.Mesh(geo, ftMat);
+        FT.mesh.receiveShadow = false; FT.mesh.castShadow = false;
+        scene.add(FT.mesh);
+      } else { FT.mesh.geometry.dispose(); FT.mesh.geometry = geo; }
+      FT.mesh.position.set(j.cx, 0, j.cz);
+      FT.cx = j.cx; FT.cz = j.cz; FT.job = null;
+      return true;
+    }
+    function ftUpdate() {
+      var px = camera.position.x, pz = camera.position.z;
+      if (!FT.job && (Math.abs(px - FT.cx) > FT.STEP || Math.abs(pz - FT.cz) > FT.STEP))
+        ftStart(Math.round(px / FT.STEP) * FT.STEP, Math.round(pz / FT.STEP) * FT.STEP);
+      if (FT.job) ftStep(FT.mesh ? 2.0 : Infinity);
+      // the hole covers the chunks that are built for sure (all but the outer streaming ring)
+      if (lastCCX !== null) ftHoleU.value.set(lastCCX * CHUNK_SIZE, lastCCZ * CHUNK_SIZE, (VIEW_RADIUS - 0.5) * CHUNK_SIZE, 0);
+    }
+    camera.far = 15000;
+    camera.updateProjectionMatrix();
+    ftStart(0, 0); ftStep(Infinity);
 
     /* ---------------- AIRCRAFT: smooth tessellated hulls, panel lines, weathered paint ---------------- */
     function gfxMakePanelTextures() {
