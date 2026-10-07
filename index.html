@@ -7865,7 +7865,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         mtnU.sunCol.value.copy(sunLight.color).multiplyScalar(sunLight.intensity);
         mtnU.ambCol.value.copy(hemiLight.color).multiplyScalar(hemiLight.intensity);
         // distant air reads blue-grey against the pale horizon, not white
-        mtnU.hazeCol.value.copy(scene.fog.color).lerp(sky.material.uniforms.topColor.value, 0.5).multiplyScalar(0.72);
+        mtnU.hazeCol.value.copy(scene.fog.color).lerp(sky.material.uniforms.topColor.value, 0.5).multiplyScalar(0.72 * (0.45 + 0.55 * THREE.MathUtils.clamp(sunLight.intensity, 0, 1)));   // dark silhouettes at night
         mtnU.haze.value = THREE.MathUtils.clamp(0.62 + scene.fog.density * 300, 0.62, 0.98);
         mtnU.dens.value = scene.fog.density; mtnU.hk.value = ATM.layer.w;
         mtnU.snowLine.value = typeof SEASON !== 'undefined' && SEASON.name === 'winter' ? 300 : 1250;
@@ -8442,8 +8442,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       boltLight.position.copy(bolt.ground).lerp(bolt.top, bolt.cloud ? 0.5 : 0.25);
       boltFlashSprite.position.copy(bolt.ground);
       // thunder arrives at the speed of sound
-      var syn = tndPrepare();
-      var loud = THREE.MathUtils.clamp(1.35 - syn.dmin / 2600, 0.12, 1.25) * (bolt.cloud ? 0.6 : 1);
+      var syn = tndPrepare(); tndQueue(syn);
+      var loud = THREE.MathUtils.clamp(1.35 - syn.dmin / 3200, 0.2, 1.25) * (bolt.cloud ? 0.6 : 1);
       pendingThunder.push({ t: Math.max(0.02, syn.tmin + bolt.leader), loud: loud, near: !bolt.cloud && syn.dmin < 550, syn: syn });
       if (bolt.hitYou) kjOnLightning(true);
     }
@@ -8453,6 +8453,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       return e;
     }
     function updateLightning(dt) {
+      if (stormActive && audioCtx && !TND.echo && soundEnabled) tndEcho();
       if (stormActive) {
         lightningTimer -= dt;
         if (lightningTimer <= 0) {
@@ -8552,15 +8553,29 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var cam = camera.position, e = camera.matrixWorld.elements;
       var rx = e[0], ry = e[1], rz = e[2];
       var segs = [], tmin = 1e9, dmin = 1e9;
-      (bolt.paths || []).forEach(function(L) {
-        var pts = L[0], w = L[1];
+      // a real flash also runs for kilometres sideways inside the cloud (you don't see it, you hear
+      // it): that hidden channel is what makes thunder roll on for ten seconds and more
+      var paths = (bolt.paths || []).slice(), tp = bolt.top;
+      var nArms = 2 + Math.floor(Math.random() * 3);
+      for (var ar = 0; ar < nArms; ar++) {
+        var ang = Math.random() * Math.PI * 2, len = 1200 + Math.random() * 2600, n = 40;
+        var arm = [tp.clone()], cx = tp.x, cz = tp.z, cy = tp.y;
+        for (var q = 1; q <= n; q++) {
+          ang += (Math.random() - 0.5) * 0.7;
+          cx += Math.sin(ang) * len / n; cz += Math.cos(ang) * len / n; cy += (Math.random() - 0.5) * 30;
+          arm.push(new THREE.Vector3(cx, cy, cz));
+        }
+        paths.push([arm, 0.3, true]);
+      }
+      paths.forEach(function(L) {
+        var pts = L[0], w = L[1], hidden = !!L[2];
         for (var i = 0; i < pts.length - 1; i++) {
           var a = pts[i], b = pts[i + 1];
           var mx = (a.x + b.x) / 2 - cam.x, my = (a.y + b.y) / 2 - cam.y, mz = (a.z + b.z) / 2 - cam.z;
           var d = Math.sqrt(mx * mx + my * my + mz * mz), len = a.distanceTo(b);
           var pan = (mx * rx + my * ry + mz * rz) / Math.max(d, 1);
           segs.push(d / 343, w * len / Math.max(d, 35), pan, d);
-          tmin = Math.min(tmin, d / 343); dmin = Math.min(dmin, d);
+          tmin = Math.min(tmin, d / 343); if (!hidden) dmin = Math.min(dmin, d);
         }
       });
       return { segs: segs, tmin: tmin, dmin: dmin, cloud: bolt.cloud, hitYou: bolt.hitYou, ground: bolt.ground.clone() };
@@ -8568,13 +8583,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function tndImpulse() {
       // the hills and the cloud deck: a few discrete slap-backs, then a long, darkening tail
       if (TND.ir) return TND.ir;
-      var sr = audioCtx.sampleRate, n = Math.round(sr * 5.5), ir = audioCtx.createBuffer(2, n, sr);
+      var sr = audioCtx.sampleRate, n = Math.round(sr * 7.5), ir = audioCtx.createBuffer(2, n, sr);
       for (var c = 0; c < 2; c++) {
         var d = ir.getChannelData(c), lp = 0;
         for (var i = 0; i < n; i++) {
           var t = i / sr, k = 0.35 + 0.6 * Math.exp(-t * 0.8);         // highs die first
           lp += ((Math.random() * 2 - 1) - lp) * k * 0.5;
-          d[i] = lp * Math.exp(-t * 1.05) * 0.5;
+          d[i] = lp * Math.exp(-t * 0.62) * 0.5;
         }
         [0.38, 0.71, 1.15, 1.6, 2.3].forEach(function(t, j) {
           var p = Math.round((t + (c ? 0.031 : 0) + Math.random() * 0.05) * sr);
@@ -8583,61 +8598,110 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       return (TND.ir = ir);
     }
-    function tndPlay(syn, loud) {
-      var segs = syn.segs, nS = segs.length / 4;
-      var near = syn.dmin < 700, mid = syn.dmin < 1800;
-      // haptics and shake happen even with the sound off
-      // a close strike needs the full band for its crack; a distant roll is all lows anyway
-      var sr = near && audioCtx ? audioCtx.sampleRate : 22050;
-      var tmax = 0;
-      for (var i = 0; i < nS; i++) tmax = Math.max(tmax, segs[i * 4] - syn.tmin);
-      var dur = Math.min(13, tmax + 1.2);
-      // ---- the pulse train, in stereo ----
+    // the heavy part — building the pulse train, the rolling bed and the shake envelope — is a pure
+    // function, run in a worker the moment the flash happens (the sound always arrives later), so
+    // the main thread never stalls on it
+    function tndSynth(segs, tmin, dmin, sr, near, rate) {
+      var nS = segs.length / 4, tmax = 0, i;
+      for (i = 0; i < nS; i++) tmax = Math.max(tmax, segs[i * 4] - tmin);
+      var dur = Math.min(16, tmax + 2.5);
       var N = Math.round(sr * dur), L = new Float32Array(N), R = new Float32Array(N);
       for (var s = 0; s < nS; s++) {
-        var t0 = segs[s * 4] - syn.tmin, amp = segs[s * 4 + 1], pan = segs[s * 4 + 2], d = segs[s * 4 + 3];
+        var t0 = segs[s * 4] - tmin, amp = segs[s * 4 + 1], pan = segs[s * 4 + 2], d = segs[s * 4 + 3];
         var gl = Math.cos((pan + 1) * Math.PI / 4), gr = Math.sin((pan + 1) * Math.PI / 4);
-        // a few sub-pulses per segment: the channel is tortuous on every scale, which is the crackle
+        // a few sub-pulses per segment: the channel is tortuous on every scale — that's the crackle
         var subs = 2 + Math.floor(Math.random() * 3);
         for (var k = 0; k < subs; k++) {
           var w = 0.0012 + d * 0.0000045 + Math.random() * 0.0015;            // N-waves broaden with distance
           var st = Math.round((t0 + (k ? (Math.random() - 0.3) * 0.022 : 0)) * sr), wl = Math.max(3, Math.round(w * sr));
-          var a = amp * (k ? 0.25 + Math.random() * 0.45 : 1) * (Math.random() < 0.5 ? 1 : -1);
-          for (var q = 0; q < wl && st + q < N; q++) {
-            if (st + q < 0) continue;
-            var v = a * (1 - 2 * q / wl);
-            L[st + q] += v * gl; R[st + q] += v * gr;
-          }
+          var a = amp * (k ? 0.25 + Math.random() * 0.45 : 1) * (Math.random() < 0.5 ? 1 : -1), inv = 2 / wl;
+          var q0 = Math.max(0, -st), q1 = Math.min(wl, N - st);
+          for (var q = q0; q < q1; q++) { var v = a * (1 - q * inv); L[st + q] += v * gl; R[st + q] += v * gr; }
         }
       }
-      // ---- the rolling bed: brown noise riding the pulse train's own envelope ----
-      var env = new Float32Array(N), e1 = 0, br = 0, brR = 0, peakEnv = 1e-9;
-      var att = 1 - Math.exp(-1 / (sr * 0.012)), rel = 1 - Math.exp(-1 / (sr * 0.32));
+      // the rolling bed: brown noise riding the pulse train's own envelope
+      var env = new Float32Array(N), e1 = 0, peakEnv = 1e-9;
+      var att = 1 - Math.exp(-1 / (sr * 0.012)), rel = 1 - Math.exp(-1 / (sr * 0.9));
       for (var j = 0; j < N; j++) {
         var x = Math.abs(L[j]) + Math.abs(R[j]);
         e1 += (x - e1) * (x > e1 ? att : rel);
         env[j] = e1; if (e1 > peakEnv) peakEnv = e1;
       }
-      var bedK = near ? 1.6 : 2.6;
+      var bedK = (near ? 1.6 : 2.6) * peakEnv, br = 0, brR = 0, seed = (Math.random() * 4294967296) >>> 0, invN = 1 / N, invP = 1 / peakEnv;
       for (var j2 = 0; j2 < N; j2++) {
-        br = br * 0.985 + (Math.random() * 2 - 1) * 0.12; brR = brR * 0.985 + (Math.random() * 2 - 1) * 0.12;
-        var ev = env[j2] / peakEnv * Math.pow(1 - j2 / N, 0.6);
-        L[j2] += br * ev * bedK * peakEnv; R[j2] += brR * ev * bedK * peakEnv;
+        seed = (seed * 1664525 + 1013904223) >>> 0; br = br * 0.985 + (seed / 2147483648 - 1) * 0.12;
+        seed = (seed * 1664525 + 1013904223) >>> 0; brR = brR * 0.985 + (seed / 2147483648 - 1) * 0.12;
+        var ev = env[j2] * invP * Math.sqrt(1 - j2 * invN) * bedK;
+        L[j2] += br * ev; R[j2] += brR * ev;
       }
       var pk = 1e-9;
-      for (var j3 = 0; j3 < N; j3++) pk = Math.max(pk, Math.abs(L[j3]), Math.abs(R[j3]));
-      // shake follows the same envelope, sampled at 50 Hz
-      var step = Math.round(sr / TND.shakeRate), se = new Float32Array(Math.ceil(N / step));
-      for (var j4 = 0; j4 < se.length; j4++) se[j4] = env[Math.min(N - 1, j4 * step)] / peakEnv;
+      for (var j3 = 0; j3 < N; j3++) { var aL = L[j3] < 0 ? -L[j3] : L[j3], aR = R[j3] < 0 ? -R[j3] : R[j3]; if (aL > pk) pk = aL; if (aR > pk) pk = aR; }
+      var gk = 0.92 / pk;
+      for (var j5 = 0; j5 < N; j5++) { L[j5] *= gk; R[j5] *= gk; }
+      // the shake follows the same envelope, sampled at a few tens of Hz
+      var step = Math.round(sr / rate), se = new Float32Array(Math.ceil(N / step)), first = 0, best = 0;
+      for (var j4 = 0; j4 < se.length; j4++) {
+        se[j4] = env[Math.min(N - 1, j4 * step)] * invP;
+        if (best < 0.85 && se[j4] > best) { best = se[j4]; first = j4 / rate; }
+      }
+      return { L: L, R: R, se: se, first: first, sr: sr, dur: dur };
+    }
+    TND.worker = null; TND.jobs = {}; TND.jobId = 0;
+    try {
+      var tndSrc = tndSynth.toString() + '\nonmessage = function(e) { var d = e.data, r = tndSynth(d.segs, d.tmin, d.dmin, d.sr, d.near, d.rate);' +
+        ' postMessage({ id: d.id, L: r.L, R: r.R, se: r.se, first: r.first, sr: r.sr, dur: r.dur }, [r.L.buffer, r.R.buffer, r.se.buffer]); };';
+      TND.worker = new Worker(URL.createObjectURL(new Blob([tndSrc], { type: 'application/javascript' })));
+      TND.worker.onmessage = function(e) {
+        var job = TND.jobs[e.data.id]; delete TND.jobs[e.data.id];
+        if (!job) return;
+        job.res = e.data;
+        if (job.waiting) tndPlay(job, job.waiting);
+      };
+    } catch (e) { TND.worker = null; }
+    function tndQueue(syn) {
+      var near = syn.dmin < 700;
+      syn.sr = near && audioCtx ? audioCtx.sampleRate : 22050;
+      if (!TND.worker) return;
+      var id = ++TND.jobId; TND.jobs[id] = syn;
+      TND.worker.postMessage({ id: id, segs: new Float32Array(syn.segs), tmin: syn.tmin, dmin: syn.dmin, sr: syn.sr, near: near, rate: TND.shakeRate });
+    }
+    // one shared echo for all thunder: loading a convolver's impulse stalls the main thread, so it
+    // is built once and every strike just feeds it
+    function tndEcho(comp) {
+      if (!TND.echo) {
+        TND.echo = audioCtx.createConvolver(); TND.echo.buffer = tndImpulse();
+        TND.echoOut = audioCtx.createGain(); TND.echo.connect(TND.echoOut);
+        TND.echoLim = audioCtx.createDynamicsCompressor();
+        TND.echoLim.threshold.value = -14; TND.echoLim.ratio.value = 8; TND.echoLim.attack.value = 0.005; TND.echoLim.release.value = 0.6;
+        TND.echoOut.connect(TND.echoLim).connect(tndBus());
+      }
+      return TND.echo;
+    }
+    function tndBus() {
+      if (!TND.bus) {
+        TND.bus = audioCtx.createDynamicsCompressor();
+        TND.bus.threshold.value = -4; TND.bus.knee.value = 2; TND.bus.ratio.value = 20; TND.bus.attack.value = 0.001; TND.bus.release.value = 0.25;
+        TND.busOut = audioCtx.createGain(); TND.busOut.gain.value = 0.82;
+        TND.bus.connect(TND.busOut).connect(audioCtx.destination);
+      }
+      return TND.bus;
+    }
+    function tndPlay(syn, loud) {
+      if (!syn.res) {
+        if (TND.worker) { syn.waiting = loud; return; }                      // still cooking: plays the moment it's ready
+        syn.res = tndSynth(syn.segs, syn.tmin, syn.dmin, syn.sr || 22050, syn.dmin < 700, TND.shakeRate);
+      }
+      syn.waiting = 0;
+      var res = syn.res, se = res.se;
+      var near = syn.dmin < 700, mid = syn.dmin < 1800;
       TND.shakeEnv = se; TND.shakeT = 0;
       TND.shakeAmp = THREE.MathUtils.clamp(loud * (near ? 1.0 : mid ? 0.55 : 0.22), 0, 1.25) * (syn.cloud ? 0.5 : 1);
-      tndFeel(syn, loud, near, mid, se);
+      tndFeel(syn, loud, near, mid, se);                                   // haptics and shake happen even with the sound off
       if (!audioCtx || !soundEnabled) return;
       var now = audioCtx.currentTime + 0.02;
-      var buf = audioCtx.createBuffer(2, N, sr);
-      var gainK = 0.92 / pk;
-      var bl = buf.getChannelData(0), brc = buf.getChannelData(1);
-      for (var j5 = 0; j5 < N; j5++) { bl[j5] = L[j5] * gainK; brc[j5] = R[j5] * gainK; }
+      var buf = audioCtx.createBuffer(2, res.L.length, res.sr);
+      if (buf.copyToChannel) { buf.copyToChannel(res.L, 0); buf.copyToChannel(res.R, 1); }
+      else { buf.getChannelData(0).set(res.L); buf.getChannelData(1).set(res.R); }
       var src = audioCtx.createBufferSource(); src.buffer = buf;
       // the air eats the highs: ~12 kHz at 200 m, a few hundred Hz at 5 km
       var lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass';
@@ -8646,29 +8710,27 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var lp2 = audioCtx.createBiquadFilter(); lp2.type = 'lowpass'; lp2.frequency.value = lp.frequency.value * 1.4; lp2.Q.value = 0.5;
       var low = audioCtx.createBiquadFilter(); low.type = 'lowshelf'; low.frequency.value = 120; low.gain.value = near ? 7 : 10;
       var comp = audioCtx.createDynamicsCompressor();
-      comp.threshold.value = -16; comp.knee.value = 8; comp.ratio.value = 10; comp.attack.value = 0.002; comp.release.value = 0.5;
-      var out = audioCtx.createGain(); out.gain.value = THREE.MathUtils.clamp(loud, 0.08, 1.3) * 1.15;
+      // a limiter, not a squasher: the crack of a close one has to stay a crack
+      comp.threshold.value = -6; comp.knee.value = 3; comp.ratio.value = 20; comp.attack.value = 0.001; comp.release.value = 0.35;
+      var out = audioCtx.createGain(); out.gain.value = THREE.MathUtils.clamp(loud, 0.08, 1.3) * 0.8;
       var dry = audioCtx.createGain(); dry.gain.value = near ? 1 : 0.75;
-      var wet = audioCtx.createGain(); wet.gain.value = near ? 0.32 : 0.55;
-      var conv = audioCtx.createConvolver(); conv.buffer = tndImpulse();
+      var wet = audioCtx.createGain(); wet.gain.value = (near ? 0.38 : 0.75) * THREE.MathUtils.clamp(loud, 0.08, 1.3) * 0.8;   // the echo is as far away as the strike
       src.connect(lp).connect(lp2).connect(low);
       low.connect(dry).connect(comp);
-      low.connect(conv).connect(wet).connect(comp);
+      low.connect(wet).connect(tndEcho(comp));
       // the sub-bass pressure wave: felt in the chest, arriving with the bulk of the channel
-      var firstBulk = 0, bestE = 0;
-      for (var j6 = 0; j6 < se.length; j6++) if (se[j6] > bestE) { bestE = se[j6]; firstBulk = j6 / TND.shakeRate; if (bestE > 0.85) break; }
       var sub = audioCtx.createOscillator(); sub.type = 'sine';
       var sg = audioCtx.createGain(), subAmt = (near ? 0.95 : mid ? 0.6 : 0.28) * (syn.cloud ? 0.55 : 1);
-      var sb = now + Math.max(0, firstBulk - 0.02);
+      var sb = now + Math.max(0, res.first - 0.02);
       sub.frequency.setValueAtTime(58, sb); sub.frequency.exponentialRampToValueAtTime(31, sb + 1.6);
       sg.gain.setValueAtTime(0.0001, now); sg.gain.setValueAtTime(0.0001, sb);
       sg.gain.exponentialRampToValueAtTime(subAmt, sb + 0.05);
       sg.gain.exponentialRampToValueAtTime(subAmt * 0.35, sb + 0.7);
       sg.gain.exponentialRampToValueAtTime(0.0001, sb + 3.2);
       sub.connect(sg).connect(comp);
-      comp.connect(out).connect(audioCtx.destination);
+      comp.connect(out).connect(tndBus());
       src.start(now); sub.start(now); sub.stop(sb + 3.4);
-      src.stop(now + dur + 0.1);
+      src.stop(now + res.dur + 0.1);
       // everything else ducks under a close one for a moment
       if (gpBus && (near || mid)) {
         var dk = near ? 0.25 : 0.55;
@@ -8759,7 +8821,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       currentLayerH += (layerHT - currentLayerH) * f;
       currentBanks += (weatherTarget.banks - currentBanks) * f;
 
-      scene.fog.density = currentFogDensity * FOG_FAR_K;
+      // by day the far terrain lets the haze thin right out; at night it closes back in (you'd see
+      // little that far in the dark anyway, and the dark fog is what keeps the night properly dark)
+      var fogNight = 1 - THREE.MathUtils.clamp(sunLight.intensity * 2.2, 0, 1);
+      scene.fog.density = currentFogDensity * (FOG_FAR_K + (0.75 - FOG_FAR_K) * fogNight);
       ATM.layer.x = currentLayer;
       ATM.layer.y = 0;
       ATM.layer.z = 1 / currentLayerH;
