@@ -5012,78 +5012,151 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var matGlass = new THREE.MeshStandardMaterial({ color: 0x1c2430, flatShading: true, roughness: 0.08, metalness: 0.9, envMapIntensity: 1.4 });
     var matWingWhite = new THREE.MeshPhysicalMaterial({ color: activePaint.wing, flatShading: true, roughness: 0.36, metalness: 0.25, clearcoat: 0.5, clearcoatRoughness: 0.3, side: THREE.DoubleSide });
 
-    // fuselage: chiseled angular radome -> widening forward body -> narrowing aft body -> exhaust nozzle
-    // low-poly (6-sided) cones/cylinders read as sharp, faceted metal panels rather than a smooth round tube
-    var noseCone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.5, 6), matRed);
-    noseCone.rotation.x = -Math.PI / 2;
-    noseCone.rotation.y = Math.PI / 6; // orient a flat facet up top instead of an edge, for a crisper highlight
-    noseCone.position.z = -2.45;
-    noseCone.castShadow = true;
-    jetBody.add(noseCone);
-
-    var forwardBody = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.22, 1.8, 6), matWhite);
-    forwardBody.rotation.x = Math.PI / 2;
-    forwardBody.rotation.y = Math.PI / 6;
-    forwardBody.position.z = -0.8;
-    forwardBody.castShadow = true;
-    jetBody.add(forwardBody);
-
-    var aftBody = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.5, 2.6, 6), matWhite);
-    aftBody.rotation.x = Math.PI / 2;
-    aftBody.rotation.y = Math.PI / 6;
-    aftBody.position.z = 1.4;
-    aftBody.castShadow = true;
-    jetBody.add(aftBody);
-
-    var exhaustNozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.28, 0.5, 8), matDark);
-    exhaustNozzle.rotation.x = Math.PI / 2;
-    exhaustNozzle.position.z = 2.95;
-    exhaustNozzle.castShadow = true;
-    jetBody.add(exhaustNozzle);
-
-    // air intakes low on either side of the mid-fuselage
-    var intakeL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.34, 1.1), matDark);
-    intakeL.position.set(-0.46, -0.12, -0.35);
-    intakeL.castShadow = true;
-    jetBody.add(intakeL);
-    var intakeR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.34, 1.1), matDark);
-    intakeR.position.set(0.46, -0.12, -0.35);
-    intakeR.castShadow = true;
-    jetBody.add(intakeR);
-
-    // swept, tapered delta wings — flat double-sided quads (winding/normals verified upward),
-    // reshaped with a sharper wingtip point and a straighter leading edge for a knife-like silhouette
-    function buildWingGeometry(sign) {
-      var A = new THREE.Vector3(0.40 * sign, 0, -1.15);
-      var B = new THREE.Vector3(3.75 * sign, 0, 0.45);
-      var C = new THREE.Vector3(3.75 * sign, 0, 0.85);
-      var D = new THREE.Vector3(0.40 * sign, 0, 1.4);
-      var positions = new Float32Array([
-        A.x, A.y, A.z, B.x, B.y, B.z, C.x, C.y, C.z, D.x, D.y, D.z
-      ]);
-      var indices = sign > 0 ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
-      var geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      geo.setIndex(indices);
-      geo.computeVertexNormals();
-      return geo;
+    // ---- the airframe is built from real surfaces, not primitives: a lofted fuselage with chined
+    // edges, airfoil-section wings and tail surfaces with knife-sharp leading edges, a bubble canopy
+    // with its frame and seat, angled intakes and a petal nozzle ----
+    // loft: stations [z, halfWidth, top, bottom, centreY, squareness]; squareness > 2 pushes the
+    // section toward a chined, flat-sided shape
+    function acLoft(st, seg, rings) {
+      var pos = [], idx = [], P = [];
+      function at(z) {
+        for (var i = 0; i < st.length - 1; i++) if (z <= st[i + 1][0] || i === st.length - 2) {
+          var a = st[i], b = st[i + 1], t = Math.min(1, Math.max(0, (z - a[0]) / (b[0] - a[0])));
+          t = t * t * (3 - 2 * t) * 0.35 + t * 0.65;
+          var o = []; for (var k = 0; k < 6; k++) o.push(a[k] + (b[k] - a[k]) * t);
+          return o;
+        }
+      }
+      var z0 = st[0][0], z1 = st[st.length - 1][0];
+      for (var r = 0; r <= rings; r++) {
+        var u = r / rings, z = z0 + (z1 - z0) * (1 - Math.cos(u * Math.PI)) / 2;   // denser rings at both ends
+        var s = at(z);
+        for (var j = 0; j <= seg; j++) {
+          var a = j / seg * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a), e = 2 / s[5];
+          var x = s[1] * Math.sign(c) * Math.pow(Math.abs(c), e);
+          var y = s[4] + (sn > 0 ? s[2] : s[3]) * Math.sign(sn) * Math.pow(Math.abs(sn), e);
+          pos.push(x, y, z);
+        }
+      }
+      for (var r2 = 0; r2 < rings; r2++) for (var j2 = 0; j2 < seg; j2++) {
+        var i0 = r2 * (seg + 1) + j2, i1 = i0 + seg + 1;
+        idx.push(i0, i0 + 1, i1, i0 + 1, i1 + 1, i1);
+      }
+      var g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setIndex(idx); g.computeVertexNormals();
+      return g;
     }
-    var wingR = new THREE.Mesh(buildWingGeometry(1), matWingWhite);
-    wingR.castShadow = true;
-    jetBody.add(wingR);
-    var wingL = new THREE.Mesh(buildWingGeometry(-1), matWingWhite);
-    wingL.castShadow = true;
-    jetBody.add(wingL);
+    // airfoil surface between a root and a tip section. spanAxis 'x' for wings, 'y' for fins.
+    // root/tip: [span, leadingEdgeZ, trailingEdgeZ, offset]; t: thickness/chord; mirror: -1 for the left side
+    function acWing(root, tip, t, mirror, spanAxis, nSpan, nChord) {
+      nSpan = nSpan || 8; nChord = nChord || 18;
+      var pos = [], idx = [], cols = nChord * 2;
+      function foil(xc) { return 5 * (0.2969 * Math.sqrt(xc) - 0.126 * xc - 0.3516 * xc * xc + 0.2843 * xc * xc * xc - 0.1036 * xc * xc * xc * xc); }
+      for (var i = 0; i <= nSpan; i++) {
+        var f = i / nSpan, sp = root[0] + (tip[0] - root[0]) * f, le = root[1] + (tip[1] - root[1]) * f, te = root[2] + (tip[2] - root[2]) * f;
+        var off = root[3] + (tip[3] - root[3]) * f, ch = te - le, th = t[0] + (t[1] - t[0]) * f;
+        for (var k = 0; k < cols; k++) {
+          // around the section: upper surface LE->TE, then lower surface TE->LE
+          var up = k < nChord, q = up ? k / (nChord - 1) : 1 - (k - nChord) / (nChord - 1);
+          var xc = (1 - Math.cos(q * Math.PI)) / 2;                 // cosine spacing: fine at the edges
+          var hh = foil(xc) * th * ch * (up ? 1 : -0.82);
+          var z = le + xc * ch;
+          if (spanAxis === 'x') pos.push(sp * mirror, off + hh, z);
+          else pos.push(hh * mirror, sp, z);
+        }
+      }
+      for (var i2 = 0; i2 < nSpan; i2++) for (var k2 = 0; k2 < cols; k2++) {
+        var a0 = i2 * cols + k2, a1 = i2 * cols + (k2 + 1) % cols, b0 = a0 + cols, b1 = a1 + cols;
+        if (mirror > 0 === (spanAxis === 'x')) idx.push(a0, b0, a1, a1, b0, b1); else idx.push(a0, a1, b0, a1, b1, b0);
+      }
+      // tip cap
+      var base = nSpan * cols;
+      for (var k3 = 1; k3 < nChord - 1; k3++) {
+        var u0 = base + k3, u1 = base + k3 + 1, l0 = base + cols - 1 - k3, l1 = base + cols - 2 - k3;
+        if (mirror > 0 === (spanAxis === 'x')) idx.push(u0, u1, l0, u1, l1, l0); else idx.push(u0, l0, u1, u1, l0, l1);
+      }
+      var g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setIndex(idx); g.computeVertexNormals();
+      return g;
+    }
+    function acAdd(geo, mat, parent, shadow) { var m = new THREE.Mesh(geo, mat); m.castShadow = shadow !== false; m.receiveShadow = true; (parent || jetBody).add(m); return m; }
 
-    // trailing-edge flaps: small hinged panels near the wing root that rotate down when
-    // deployed (visual only — the actual lift/drag effect lives in the physics update)
+    // fuselage: radome (trim colour) and body (body colour), with chines that fade into a blended wing root
+    var JET_ST = [
+      [-3.3, 0.0, 0.0, 0.0, 0.08, 2.2],
+      [-3.0, 0.11, 0.08, 0.07, 0.08, 2.4],
+      [-2.4, 0.27, 0.2, 0.17, 0.08, 2.7],
+      [-1.75, 0.42, 0.33, 0.27, 0.09, 3.0],
+      [-1.0, 0.56, 0.42, 0.33, 0.1, 3.1],
+      [-0.25, 0.8, 0.4, 0.36, 0.06, 3.4],
+      [0.6, 0.86, 0.36, 0.34, 0.04, 3.6],
+      [1.5, 0.74, 0.33, 0.31, 0.04, 3.2],
+      [2.3, 0.54, 0.3, 0.29, 0.05, 2.8],
+      [2.78, 0.4, 0.28, 0.27, 0.05, 2.4]
+    ];
+    var noseCone = acAdd(acLoft(JET_ST.slice(0, 4), 40, 22), matRed);
+    var forwardBody = acAdd(acLoft(JET_ST.slice(3), 40, 46), matWhite);
+    var aftBody = forwardBody;
+    // a thin pitot probe on the nose
+    acAdd(new THREE.CylinderGeometry(0.012, 0.02, 0.55, 8).rotateX(Math.PI / 2).translate(0, 0.08, -3.55), matDark, null, false);
+
+    // intakes: raked boxes under the chines with a dark duct mouth
+    function acIntake(sign) {
+      var g = new THREE.BoxGeometry(0.34, 0.46, 1.5, 1, 1, 1), p = g.attributes.position;
+      for (var i = 0; i < p.count; i++) {
+        if (p.getZ(i) < 0) p.setZ(i, p.getZ(i) + (p.getY(i) < 0 ? 0.28 : 0));      // raked mouth
+        if (p.getX(i) * sign < 0) p.setX(i, p.getX(i) * 0.6);
+      }
+      g.computeVertexNormals();
+      var m = acAdd(g, matWhite); m.position.set(0.66 * sign, -0.12, -0.25);
+      var duct = acAdd(new THREE.PlaneGeometry(0.26, 0.38), matDark, m, false);
+      duct.position.set(0, 0, -0.6); duct.rotation.x = -0.55; duct.rotation.y = Math.PI;
+      return m;
+    }
+    var intakeL = acIntake(-1), intakeR = acIntake(1);
+
+    // petal nozzle
+    var nozPts = [];
+    [[0.36, 0], [0.37, 0.12], [0.34, 0.4], [0.3, 0.62], [0.27, 0.64], [0.29, 0.4], [0.31, 0.12]].forEach(function(p) { nozPts.push(new THREE.Vector2(p[0], p[1])); });
+    var nozGeo = new THREE.LatheGeometry(nozPts, 32); nozGeo.rotateX(Math.PI / 2); nozGeo.translate(0, 0.05, 2.72);
+    var nozMat = new THREE.MeshStandardMaterial({ color: 0x3b3a38, roughness: 0.42, metalness: 0.85 });
+    var exhaustNozzle = acAdd(nozGeo, nozMat);
+    for (var pti = 0; pti < 14; pti++) {
+      var pa = pti / 14 * Math.PI * 2;
+      var petal = acAdd(new THREE.BoxGeometry(0.012, 0.012, 0.55), matDark, null, false);
+      petal.position.set(Math.cos(pa) * 0.335, 0.05 + Math.sin(pa) * 0.335, 3.05); petal.rotation.z = pa;
+    }
+    var nozHole = acAdd(new THREE.CircleGeometry(0.27, 24).rotateY(Math.PI).translate(0, 0.05, 2.95), new THREE.MeshBasicMaterial({ color: 0x050505 }), null, false);
+
+    // wings: root at the blended body, thin airfoil with a sharp leading edge, slight anhedral
+    var WING_ROOT = [0.6, -1.25, 1.45, 0.0], WING_TIP = [3.75, 0.38, 0.98, -0.12];
+    var wingR = acAdd(acWing(WING_ROOT, WING_TIP, [0.055, 0.035], 1, 'x', 10, 20), matWingWhite);
+    var wingL = acAdd(acWing(WING_ROOT, WING_TIP, [0.055, 0.035], -1, 'x', 10, 20), matWingWhite);
+    // trim bands near the tips, laid over the skin
+    function acBand(a, b, mirror) {
+      var f0 = (a - WING_ROOT[0]) / (WING_TIP[0] - WING_ROOT[0]), f1 = (b - WING_ROOT[0]) / (WING_TIP[0] - WING_ROOT[0]);
+      function sec(f) { return [WING_ROOT[0] + (WING_TIP[0] - WING_ROOT[0]) * f, WING_ROOT[1] + (WING_TIP[1] - WING_ROOT[1]) * f - 0.004, WING_ROOT[2] + (WING_TIP[2] - WING_ROOT[2]) * f + 0.004, WING_ROOT[3] + (WING_TIP[3] - WING_ROOT[3]) * f]; }
+      var tk = 0.055 + (0.035 - 0.055) * f0, tk2 = 0.055 + (0.035 - 0.055) * f1;
+      return acAdd(acWing(sec(f0), sec(f1), [tk * 1.06, tk2 * 1.06], mirror, 'x', 2, 20), matRed, null, false);
+    }
+    var wingStripeR = acBand(2.55, 3.0, 1), wingStripeL = acBand(2.55, 3.0, -1);
+    // wingtip launch rails
+    [-1, 1].forEach(function(sg) {
+      var rail = acAdd(new THREE.BoxGeometry(0.06, 0.07, 1.0), matDark); rail.position.set(3.78 * sg, -0.13, 0.58);
+    });
+    // nav lights: red to port, green to starboard
+    var navR = acAdd(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshStandardMaterial({ color: 0x0a3a12, emissive: 0x21ff5a, emissiveIntensity: 1.6 }), null, false); navR.position.set(3.7, -0.1, 0.42);
+    var navL = acAdd(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshStandardMaterial({ color: 0x3a0a0a, emissive: 0xff2a1a, emissiveIntensity: 1.6 }), null, false); navL.position.set(-3.7, -0.1, 0.42);
+
+    // trailing-edge flaps: thin airfoil panels hinged under the trailing edge near the root,
+    // rotated down when deployed (visual only — the lift/drag effect lives in the physics update)
     function buildFlapPanel(sign) {
       var group = new THREE.Group();
-      var panel = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.05, 0.55), matWingWhite);
-      panel.position.set(0, 0, 0.28); // offset so the panel hangs behind the hinge line
-      panel.castShadow = true;
-      group.add(panel);
-      group.position.set(1.85 * sign, -0.02, 0.9); // sits along the wing's trailing edge, near the root
+      var panel = acAdd(acWing([-0.65, 0, 0.42, 0], [0.65, 0.04, 0.4, 0], [0.09, 0.09], 1, 'x', 2, 10), matWingWhite, group);
+      panel.position.set(0, 0, 0);
+      group.position.set(1.65 * sign, -0.05, 1.02);
       return group;
     }
     var flapR = buildFlapPanel(1);
@@ -5093,116 +5166,41 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var FLAP_DEPLOY_ANGLE = THREE.MathUtils.degToRad(28); // visual hinge-down angle when fully deployed
     var flapVisualPos = 0; // 0..1, eased toward flapsDeployed target each frame
 
-    var wingStripeR = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.05, 0.55), matRed);
-    wingStripeR.position.set(2.75, 0.01, 0.75);
-    wingStripeR.rotation.y = -0.35;
-    wingStripeR.castShadow = true;
-    jetBody.add(wingStripeR);
-    var wingStripeL = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.05, 0.55), matRed);
-    wingStripeL.position.set(-2.75, 0.01, 0.75);
-    wingStripeL.rotation.y = 0.35;
-    wingStripeL.castShadow = true;
-    jetBody.add(wingStripeL);
+    // all-moving stabilators
+    var stabR = acAdd(acWing([0.42, 2.05, 3.05, 0.02], [1.75, 2.78, 3.2, -0.04], [0.05, 0.04], 1, 'x', 5, 14), matWhite);
+    var stabL = acAdd(acWing([0.42, 2.05, 3.05, 0.02], [1.75, 2.78, 3.2, -0.04], [0.05, 0.04], -1, 'x', 5, 14), matWhite);
+    // swept vertical fin with a dark rudder line and a tip light
+    var fin = acAdd(acWing([0.3, 1.0, 2.75, 0], [2.05, 2.25, 2.95, 0], [0.06, 0.045], 1, 'y', 8, 16), matRed);
+    var finTip = acAdd(new THREE.BoxGeometry(0.05, 0.05, 0.34), matDark, null, false); finTip.position.set(0, 2.06, 2.62);
 
-    // small horizontal stabilizers near the tail
-    var stabR = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.08, 0.55), matWhite);
-    stabR.position.set(0.62, 0.05, 2.55);
-    stabR.rotation.y = -0.25;
-    stabR.castShadow = true;
-    jetBody.add(stabR);
-    var stabL = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.08, 0.55), matWhite);
-    stabL.position.set(-0.62, 0.05, 2.55);
-    stabL.rotation.y = 0.25;
-    stabL.castShadow = true;
-    jetBody.add(stabL);
+    // bubble canopy with frame, seat and a headrest showing through the glass
+    var canopyGeo = new THREE.SphereGeometry(1, 40, 20, 0, Math.PI * 2, 0, Math.PI / 2);
+    canopyGeo.scale(0.36, 0.42, 1.25);
+    var canopy = acAdd(canopyGeo, matGlass, null, false);
+    canopy.position.set(0, 0.36, -1.12);
+    var canFrame = acAdd(new THREE.TorusGeometry(0.37, 0.025, 8, 32, Math.PI), matDark, null, false);
+    canFrame.position.set(0, 0.36, -0.75); canFrame.scale.set(1, 1.1, 1);
+    var canSill = acAdd(new THREE.TorusGeometry(1, 0.018, 6, 48), matDark, null, false);
+    canSill.rotation.x = Math.PI / 2; canSill.scale.set(0.365, 1.255, 1); canSill.position.set(0, 0.37, -1.12);
+    var seat = acAdd(new THREE.BoxGeometry(0.34, 0.5, 0.32), matDark, null, false); seat.position.set(0, 0.52, -0.82); seat.rotation.x = -0.25;
+    var helmet = acAdd(new THREE.SphereGeometry(0.12, 16, 12), new THREE.MeshStandardMaterial({ color: 0x2c3138, roughness: 0.35, metalness: 0.2 }), null, false); helmet.position.set(0, 0.68, -1.0);
+    var hudGlass = acAdd(new THREE.PlaneGeometry(0.22, 0.16), new THREE.MeshBasicMaterial({ color: 0x3aff8a, transparent: true, opacity: 0.25, depthWrite: false }), null, false);
+    hudGlass.position.set(0, 0.6, -1.55); hudGlass.rotation.x = -0.5;
 
-    // single swept vertical fin — sheared box (starts from a known-correct primitive, so
-    // normals stay sane even after reshaping), tip pulled thinner and further back for a rakish point
-    var finGeo = new THREE.BoxGeometry(0.1, 1.55, 1.3, 1, 1, 1);
-    var finPos = finGeo.attributes.position;
-    for (var fpi = 0; fpi < finPos.count; fpi++) {
-      var fx = finPos.getX(fpi), fy = finPos.getY(fpi), fz = finPos.getZ(fpi);
-      if (fy > 0) {
-        finPos.setZ(fpi, fz < 0 ? -0.15 : 0.55);
-        finPos.setX(fpi, fx * 0.35); // taper the top edge to a near-knife-edge point
-      }
+    // landing gear: oleo struts, torque links, proper wheels with hubs
+    var tyreMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.85, metalness: 0.0 });
+    var hubMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.35, metalness: 0.85 });
+    // every tyre touches y = -1, like every other airframe's wheels
+    function addWheel(x, z, r, topY) {
+      var cy = -1 + r, stH = topY - cy;
+      var strut = acAdd(new THREE.CylinderGeometry(0.045, 0.045, stH, 12), hubMat); strut.position.set(x, cy + stH / 2, z);
+      var link = acAdd(new THREE.BoxGeometry(0.03, 0.18, 0.12), matDark, null, false); link.position.set(x, cy + r + 0.1, z + 0.06);
+      var wheel = acAdd(new THREE.CylinderGeometry(r, r, 0.14, 24), tyreMat); wheel.rotation.z = Math.PI / 2; wheel.position.set(x, cy, z);
+      var hub = acAdd(new THREE.CylinderGeometry(r * 0.55, r * 0.55, 0.15, 16), hubMat, null, false); hub.rotation.z = Math.PI / 2; hub.position.set(x, cy, z);
     }
-    finGeo.computeVertexNormals();
-    var fin = new THREE.Mesh(finGeo, matRed);
-    fin.position.set(0, 0.55, 2.35);
-    fin.castShadow = true;
-    jetBody.add(fin);
-
-    // angular wedge canopy — custom low-poly prism: flat teardrop footprint tapering to a
-    // point at the nose end, sloped canopy-glass roof, flat belly — sits directly on the
-    // fuselage spine over the cockpit station instead of a rotated/flattened cone
-    // simpler, robust construction: an octahedron-like wedge built from two mirrored
-    // triangle fans off a central ridge line (nose tip -> canopy peak), closed with a flat floor
-    function buildCanopyGeometry() {
-      var hw = 0.30;    // half-width at the widest point
-      var len = 1.3;    // nose-to-tail length
-      var h = 0.42;     // canopy height above the spine
-
-      var nose   = new THREE.Vector3(0, 0.02, len * 0.58);
-      var peak   = new THREE.Vector3(0, h, -len * 0.30);
-      var tail   = new THREE.Vector3(0, 0.05, -len * 0.42);
-      var baseFL = new THREE.Vector3(-hw, -0.06, len * 0.02);
-      var baseFR = new THREE.Vector3(hw, -0.06, len * 0.02);
-      var baseBL = new THREE.Vector3(-hw * 0.9, -0.06, -len * 0.42);
-      var baseBR = new THREE.Vector3(hw * 0.9, -0.06, -len * 0.42);
-
-      var v = [nose, peak, tail, baseFL, baseFR, baseBL, baseBR];
-      var positions = [];
-      v.forEach(function(p) { positions.push(p.x, p.y, p.z); });
-
-      // triangles, wound so normals face outward (right-hand rule, viewed from outside)
-      var faces = [
-        // left glass slope: nose -> peak -> baseFL, peak -> baseBL -> baseFL
-        0, 1, 3,
-        1, 5, 3,
-        // right glass slope (mirror)
-        1, 0, 4,
-        1, 4, 6,
-        // top ridge cap between peak and tail, left & right
-        1, 6, 5,
-        // tail cap
-        1, 2, 6,
-        2, 1, 5,
-        // flat floor (viewed from below, wound to face down/outward)
-        3, 5, 6,
-        3, 6, 4,
-        // front floor triangle closing nose to the base edge
-        0, 3, 4
-      ];
-
-      var geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-      geo.setIndex(faces);
-      geo.computeVertexNormals();
-      return geo;
-    }
-    var canopy = new THREE.Mesh(buildCanopyGeometry(), matGlass);
-    canopy.position.set(0, 0.52, -0.55); // centered over the cockpit station, sitting on the spine
-    jetBody.add(canopy);
-
-    // landing gear
-    function addWheel(x, z) {
-      var strut = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 6), matDark);
-      strut.position.set(x, -0.55, z);
-      jetBody.add(strut);
-      var wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.14, 10), matDark);
-      wheel.rotation.x = Math.PI / 2;
-      wheel.position.set(x, -0.8, z);
-      jetBody.add(wheel);
-    }
-    addWheel(-0.75, -0.2);
-    addWheel(0.75, -0.2);
-    var noseStrut = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.42, 6), matDark);
-    noseStrut.position.set(0, -0.4, -1.9);
-    jetBody.add(noseStrut);
-    var noseWheel = new THREE.Mesh(new THREE.SphereGeometry(0.11, 6, 6), matDark);
-    noseWheel.position.set(0, -0.6, -1.9);
-    jetBody.add(noseWheel);
+    addWheel(-0.85, 0.25, 0.2, -0.28);
+    addWheel(0.85, 0.25, 0.2, -0.28);
+    addWheel(0, -2.0, 0.13, -0.22);
 
     // afterburner glow — additive sprite at the nozzle exit, brightens with speed/boost
     var engineGlowTexture = makeRadialGlowTexture('225,240,255', '70,130,255');
@@ -5210,7 +5208,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       map: engineGlowTexture, transparent: true, depthWrite: false, fog: false,
       blending: THREE.AdditiveBlending, opacity: 0
     }));
-    engineGlow.position.z = 3.15;
+    engineGlow.position.set(0, 0.05, 3.4);
     engineGlow.scale.set(0.7, 0.7, 1);
     jetBody.add(engineGlow);
 
@@ -5219,7 +5217,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var flameCoreTexture = makeRadialGlowTexture('255,255,240', '255,120,20');
     var flameTipTexture = makeRadialGlowTexture('255,200,80', '255,60,10');
     var engineFlame = new THREE.Group();
-    engineFlame.position.z = 3.2;
+    engineFlame.position.set(0, 0.05, 3.45);
     var flameCore = new THREE.Sprite(new THREE.SpriteMaterial({
       map: flameCoreTexture, transparent: true, depthWrite: false, fog: false,
       blending: THREE.AdditiveBlending, opacity: 0
@@ -5648,126 +5646,86 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var droneBody = new THREE.Group();
     plane.add(droneBody);
 
-    var droneMat      = new THREE.MeshStandardMaterial({ color: 0x8a8f7a, flatShading: true, roughness: 0.55, metalness: 0.25 });
-    var droneMatDark  = new THREE.MeshStandardMaterial({ color: 0x2a2c26, flatShading: true, roughness: 0.5, metalness: 0.3 });
-    var droneMatGlass = new THREE.MeshStandardMaterial({ color: 0x14181a, flatShading: true, roughness: 0.1, metalness: 0.8 });
-    var droneMatProp  = new THREE.MeshStandardMaterial({ color: 0x18191c, flatShading: true, roughness: 0.6, metalness: 0.3 });
+    var droneMat      = new THREE.MeshStandardMaterial({ color: 0x8a8f7a, roughness: 0.55, metalness: 0.25 });
+    var droneMatDark  = new THREE.MeshStandardMaterial({ color: 0x2a2c26, roughness: 0.5, metalness: 0.3 });
+    var droneMatGlass = new THREE.MeshStandardMaterial({ color: 0x14181a, roughness: 0.06, metalness: 0.9 });
+    var droneMatProp  = new THREE.MeshStandardMaterial({ color: 0x18191c, roughness: 0.55, metalness: 0.3 });
 
-    // long, slender, gently tapered fuselage — bulbous forward section housing avionics,
-    // tapering to a thin tail boom (the Reaper's signature "flying cigar" profile)
-    var droneNose = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.9, 8), droneMat);
-    droneNose.rotation.x = -Math.PI / 2;
-    droneNose.position.z = -2.65;
-    droneNose.castShadow = true;
-    droneBody.add(droneNose);
+    // the "flying cigar": a smooth lofted fuselage, bulbous forward (avionics + satcom dish under
+    // the dorsal hump), tapering to a slim tail cone with the engine bay underneath
+    acAdd(acLoft([
+      [-3.1, 0.0, 0.0, 0.0, -0.02, 2.0],
+      [-2.85, 0.18, 0.17, 0.16, -0.02, 2.0],
+      [-2.4, 0.3, 0.32, 0.27, 0.0, 2.1],
+      [-1.8, 0.34, 0.46, 0.31, 0.02, 2.2],     // satcom hump
+      [-1.1, 0.34, 0.38, 0.32, 0.0, 2.2],
+      [0.0, 0.31, 0.32, 0.33, -0.02, 2.2],
+      [1.2, 0.26, 0.27, 0.3, -0.02, 2.1],
+      [2.4, 0.17, 0.18, 0.19, 0.0, 2.0],
+      [3.3, 0.1, 0.1, 0.1, 0.0, 2.0]
+    ], 32, 40), droneMat, droneBody);
+    // engine air scoop and exhaust
+    var dScoop = acAdd(new THREE.BoxGeometry(0.16, 0.08, 0.6), droneMatDark, droneBody); dScoop.position.set(0, 0.3, 1.6);
+    var dExh = acAdd(new THREE.CylinderGeometry(0.05, 0.06, 0.3, 12).rotateZ(Math.PI / 2), droneMatDark, droneBody); dExh.position.set(0.22, 0.02, 2.3);
 
-    var droneForwardBody = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.30, 2.0, 8), droneMat);
-    droneForwardBody.rotation.x = Math.PI / 2;
-    droneForwardBody.position.z = -1.35;
-    droneForwardBody.castShadow = true;
-    droneBody.add(droneForwardBody);
+    // gimballed sensor ball under the nose, with its lens windows
+    var dMount = acAdd(new THREE.CylinderGeometry(0.1, 0.12, 0.2, 16), droneMatDark, droneBody); dMount.position.set(0, -0.35, -2.15);
+    var dBall = acAdd(new THREE.SphereGeometry(0.2, 24, 16), droneMat, droneBody); dBall.position.set(0, -0.56, -2.15);
+    var dLens = acAdd(new THREE.CylinderGeometry(0.075, 0.075, 0.05, 20).rotateX(Math.PI / 2), droneMatGlass, droneBody, false); dLens.position.set(0.05, -0.58, -2.34);
+    var dLens2 = acAdd(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 16).rotateX(Math.PI / 2), droneMatGlass, droneBody, false); dLens2.position.set(-0.08, -0.52, -2.33);
 
-    var droneTailBoom = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.10, 3.6, 8), droneMat);
-    droneTailBoom.rotation.x = Math.PI / 2;
-    droneTailBoom.position.z = 1.55;
-    droneTailBoom.castShadow = true;
-    droneBody.add(droneTailBoom);
+    // long, slender high-aspect wings mounted low: thin airfoils, a little dihedral
+    var DW_R = [0.25, -1.55, -0.3, -0.16], DW_T = [5.6, -1.12, -0.66, 0.1];
+    acAdd(acWing(DW_R, DW_T, [0.13, 0.11], 1, 'x', 12, 18), droneMat, droneBody);
+    acAdd(acWing(DW_R, DW_T, [0.13, 0.11], -1, 'x', 12, 18), droneMat, droneBody);
+    // hardpoints under each wing
+    [-1, 1].forEach(function(sg) { [1.6, 3.0].forEach(function(x) {
+      var py = acAdd(new THREE.BoxGeometry(0.06, 0.12, 0.4), droneMatDark, droneBody); py.position.set(x * sg, -0.26, -1.0);
+    }); });
 
-    // sensor turret — the Reaper's distinctive ball camera/laser designator slung under the nose
-    var droneTurretMount = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.12, 0.22, 8), droneMatDark);
-    droneTurretMount.position.set(0, -0.42, -2.15);
-    droneBody.add(droneTurretMount);
-    var droneTurret = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), droneMatGlass);
-    droneTurret.position.set(0, -0.62, -2.15);
-    droneTurret.castShadow = true;
-    droneBody.add(droneTurret);
+    // inverted-V ruddervators: airfoil panels splayed down and out from the tail cone
+    [-1, 1].forEach(function(sg) {
+      var tg = new THREE.Group(); tg.position.set(0, -0.02, 0); droneBody.add(tg);
+      var t = acAdd(acWing([0.05, 2.45, 3.25, 0], [1.05, 3.0, 3.38, 0], [0.09, 0.08], 1, 'y', 5, 14), droneMat, tg);
+      tg.rotation.z = Math.PI + sg * THREE.MathUtils.degToRad(48);
+      tg.position.set(0, 0.0, 0);
+    });
+    // a small ventral fin below the tail, guarding the prop
+    acAdd(acWing([0.05, 2.8, 3.3, 0], [0.55, 3.08, 3.36, 0], [0.08, 0.08], 1, 'y', 3, 10), droneMat, droneBody).rotation.z = Math.PI;
 
-    // satcom bump on top, aft of the nose — the small dorsal hump real Reapers carry
-    var droneSatcom = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), droneMatDark);
-    droneSatcom.position.set(0, 0.34, -1.55);
-    droneBody.add(droneSatcom);
-
-    // high-aspect straight wings, mounted low and well forward — long and thin, unlike the
-    // swept delta wings on the jets, giving the Reaper's glider-like silhouette
-    function buildDroneWingGeometry(sign) {
-      var A = new THREE.Vector3(0.20 * sign, 0, -0.55);
-      var B = new THREE.Vector3(5.6 * sign, 0, -0.15);
-      var C = new THREE.Vector3(5.6 * sign, 0, 0.18);
-      var D = new THREE.Vector3(0.20 * sign, 0, 0.85);
-      var positions = new Float32Array([
-        A.x, A.y, A.z, B.x, B.y, B.z, C.x, C.y, C.z, D.x, D.y, D.z
-      ]);
-      var indices = sign > 0 ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
-      var geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      geo.setIndex(indices);
-      geo.computeVertexNormals();
-      return geo;
-    }
-    var droneWingR = new THREE.Mesh(buildDroneWingGeometry(1), droneMat);
-    droneWingR.position.set(0, -0.18, -1.05);
-    droneWingR.castShadow = true;
-    droneBody.add(droneWingR);
-    var droneWingL = new THREE.Mesh(buildDroneWingGeometry(-1), droneMat);
-    droneWingL.position.set(0, -0.18, -1.05);
-    droneWingL.castShadow = true;
-    droneBody.add(droneWingL);
-
-    // inverted-V ("ruddervator") tail — the Reaper's signature tail shape, two panels angled
-    // downward from the boom instead of one upright fin
-    function buildDroneTailFin(sign) {
-      var finGeo = new THREE.BoxGeometry(0.05, 0.95, 0.75, 1, 1, 1);
-      var finPos = finGeo.attributes.position;
-      for (var i = 0; i < finPos.count; i++) {
-        var fy = finPos.getY(i), fz = finPos.getZ(i);
-        if (fy < 0) finPos.setZ(i, fz < 0 ? fz * 0.4 : fz * 1.2); // taper the lower tip, sweep it back
-      }
-      finGeo.computeVertexNormals();
-      var fin = new THREE.Mesh(finGeo, droneMat);
-      fin.position.set(0.62 * sign, -0.05, 3.15);
-      fin.rotation.z = sign * THREE.MathUtils.degToRad(35); // splayed downward-and-outward, inverted-V
-      fin.castShadow = true;
-      return fin;
-    }
-    droneBody.add(buildDroneTailFin(1));
-    droneBody.add(buildDroneTailFin(-1));
-
-    // pusher propeller at the tail — Reapers push rather than pull, unlike a nose-prop plane
-    var dronePropHub = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.16, 8), droneMatDark);
-    dronePropHub.rotation.x = Math.PI / 2;
-    dronePropHub.position.z = 3.4;
-    droneBody.add(dronePropHub);
+    // pusher propeller: spinner and three twisted, tapered blades
+    var dSpin = new THREE.LatheGeometry([new THREE.Vector2(0.11, 0), new THREE.Vector2(0.1, 0.08), new THREE.Vector2(0.06, 0.2), new THREE.Vector2(0.0, 0.28)], 20);
+    dSpin.rotateX(Math.PI / 2); dSpin.translate(0, 0, 3.3);
+    acAdd(dSpin, droneMatDark, droneBody);
     var dronePropPivot = new THREE.Group();
     dronePropPivot.position.z = 3.42;
     droneBody.add(dronePropPivot);
-    [0, Math.PI / 2, Math.PI, Math.PI * 1.5].forEach(function(a) {
-      var blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.62, 0.03), droneMatProp);
-      blade.position.y = 0.31;
-      var bladeGroup = new THREE.Group();
-      bladeGroup.rotation.z = a;
-      bladeGroup.add(blade);
-      dronePropPivot.add(bladeGroup);
+    var dBladeGeo = new THREE.BoxGeometry(0.11, 0.66, 0.025, 1, 6, 1), dbp = dBladeGeo.attributes.position;
+    for (var dbi = 0; dbi < dbp.count; dbi++) {
+      var by = dbp.getY(dbi) + 0.33, bf = by / 0.66;                      // 0 at the root, 1 at the tip
+      dbp.setX(dbi, dbp.getX(dbi) * (1.1 - bf * 0.55));
+      var tw = 0.7 - bf * 0.5, bx = dbp.getX(dbi), bz = dbp.getZ(dbi);
+      dbp.setX(dbi, bx * Math.cos(tw) - bz * Math.sin(tw)); dbp.setZ(dbi, bx * Math.sin(tw) + bz * Math.cos(tw));
+    }
+    dBladeGeo.translate(0, 0.33, 0); dBladeGeo.computeVertexNormals();
+    [0, 1, 2].forEach(function(k) {
+      var bladeGroup = new THREE.Group(); bladeGroup.rotation.z = k * Math.PI * 2 / 3;
+      acAdd(dBladeGeo, droneMatProp, bladeGroup); dronePropPivot.add(bladeGroup);
     });
 
-    // fixed, non-retracting landing gear — Reapers fly at low speed for very long durations
-    // and simply don't retract their gear
-    function addDroneWheel(x, z) {
-      var strut = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.42, 6), droneMatDark);
-      strut.position.set(x, -0.5, z);
-      droneBody.add(strut);
-      var wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 10), droneMatDark);
-      wheel.rotation.x = Math.PI / 2;
-      wheel.position.set(x, -0.72, z);
-      droneBody.add(wheel);
+    // fixed tricycle gear: sprung main legs out of the wing roots, a nose leg with its wheel
+    var dHub = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.35, metalness: 0.85 });
+    var dTyre = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.85, metalness: 0.0 });
+    function addDroneWheel(x, z, r, topY) {
+      var cy = -0.87 + r;
+      var leg = acAdd(new THREE.CylinderGeometry(0.028, 0.03, topY - cy, 10), dHub, droneBody); leg.position.set(x, (topY + cy) / 2, z);
+      if (x) leg.rotation.z = -Math.sign(x) * 0.25;
+      var w = acAdd(new THREE.CylinderGeometry(r, r, 0.1, 20).rotateZ(Math.PI / 2), dTyre, droneBody); w.position.set(x + (x ? Math.sign(x) * 0.08 : 0), cy, z);
+      var h = acAdd(new THREE.CylinderGeometry(r * 0.5, r * 0.5, 0.11, 14).rotateZ(Math.PI / 2), dHub, droneBody, false); h.position.copy(w.position);
     }
-    addDroneWheel(-0.55, -1.2);
-    addDroneWheel(0.55, -1.2);
-    var droneNoseStrut = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.36, 6), droneMatDark);
-    droneNoseStrut.position.set(0, -0.34, -2.35);
-    droneBody.add(droneNoseStrut);
-    var droneNoseWheel = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), droneMatDark);
-    droneNoseWheel.position.set(0, -0.5, -2.35);
-    droneBody.add(droneNoseWheel);
+    addDroneWheel(-0.5, -1.0, 0.15, -0.25);
+    addDroneWheel(0.5, -1.0, 0.15, -0.25);
+    addDroneWheel(0, -2.4, 0.1, -0.28);
 
     droneBody.visible = false;
 
@@ -6837,8 +6795,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         return m;
       }
 
-      // ---- fuselage: [z, halfWidth, topY, bottomY]
+      // ---- fuselage: [z, halfWidth, topY, bottomY] -> a smooth lofted cabin with a red cowling
       var FUS = [
+        [-3.40, 0.16, 0.80, 0.52],
         [-3.30, 0.34, 0.92, 0.38],
         [-3.02, 0.50, 1.04, 0.22],
         [-2.30, 0.56, 1.14, 0.10],
@@ -6847,39 +6806,57 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         [ 0.40, 0.58, 1.42, 0.12],
         [ 1.20, 0.46, 1.30, 0.36],
         [ 2.60, 0.24, 1.16, 0.80],
-        [ 3.70, 0.09, 1.10, 1.00]
+        [ 3.70, 0.09, 1.10, 1.00],
+        [ 3.78, 0.0, 1.06, 1.04]
       ];
-      loft(FUS, function(s) {
-        var z = s[0], hw = s[1], t = s[2], b = s[3], h = t - b;
-        return [[0, b, z], [hw * 0.75, b + h * 0.04, z], [hw, b + h * 0.35, z], [hw, b + h * 0.72, z],
-                [hw * 0.7, t, z], [-hw * 0.7, t, z], [-hw, b + h * 0.72, z], [-hw, b + h * 0.35, z], [-hw * 0.75, b + h * 0.04, z]];
-      }, function(seg, face) {
-        if (seg < 2) return matRed;                                   // cowling
-        if ((face === 2 || face === 6) && seg >= 2 && seg <= 6) return matRed; // cheatline
-        return matWhite;
-      }, 0);
+      function fusSt(f, sq, inflate) { return [f[0], f[1] * inflate, (f[2] - f[3]) / 2 * inflate, (f[2] - f[3]) / 2 * inflate, (f[2] + f[3]) / 2, sq]; }
+      acAdd(acLoft(FUS.slice(0, 4).map(function(f) { return fusSt(f, 2.6, 1); }), 32, 14), matRed, seaBody);
+      acAdd(acLoft(FUS.slice(3).map(function(f) { return fusSt(f, 2.6, 1); }), 32, 40), matWhite, seaBody);
+      // cheatline: a thin red band down each side
+      [-1, 1].forEach(function(sd) {
+        var pts = [];
+        for (var bz = -2.3; bz <= 2.6; bz += 0.1) {
+          var f0 = FUS.find(function(f, i) { return FUS[i + 1] && FUS[i + 1][0] >= bz; }) || FUS[0];
+          var i0 = FUS.indexOf(f0), f1 = FUS[Math.min(FUS.length - 1, i0 + 1)], t = (bz - f0[0]) / Math.max(1e-3, f1[0] - f0[0]);
+          var hw = f0[1] + (f1[1] - f0[1]) * t, mid = ((f0[2] + f0[3]) + ((f1[2] + f1[3]) - (f0[2] + f0[3])) * t) / 2;
+          pts.push([hw, mid, bz]);
+        }
+        var pos = [], idx = [];
+        pts.forEach(function(q, i) { pos.push(sd * (q[0] + 0.006), q[1] - 0.05, q[2], sd * (q[0] + 0.006), q[1] + 0.05, q[2]); if (i) { var o = i * 2; if (sd > 0) idx.push(o - 2, o, o - 1, o - 1, o, o + 1); else idx.push(o - 2, o - 1, o, o - 1, o + 1, o); } });
+        var bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); bg.setIndex(idx); bg.computeVertexNormals();
+        acAdd(bg, matRed, seaBody, false);
+      });
 
       // glazing: sloped windshield, side windows, rear quarter windows
       box(0.98, 0.04, 0.5, 0, 1.24, -2.1, matGlass, -0.55);
       [-1, 1].forEach(function(sd) {
         var w = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.36), matGlass);
-        w.position.set(sd * 0.605, 1.18, -0.95); w.rotation.y = sd * Math.PI / 2;
+        w.position.set(sd * 0.612, 1.18, -0.95); w.rotation.y = sd * Math.PI / 2;
         seaBody.add(w);
         var q = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.26), matGlass);
-        q.position.set(sd * 0.58, 1.16, 0.62); q.rotation.y = sd * Math.PI / 2;
+        q.position.set(sd * 0.59, 1.16, 0.62); q.rotation.y = sd * Math.PI / 2;
         seaBody.add(q);
       });
 
-      // engine: spinner + two-blade prop, exhaust stub
+      // engine: spinner + two shaped, twisted blades with painted tips, exhaust stub
       var pivot = new THREE.Group();
       pivot.position.set(0, 0.66, -3.36);
-      var spinner = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.42, 12), seaMatMetal);
-      spinner.rotation.x = -Math.PI / 2; spinner.position.z = -0.16; pivot.add(spinner);
+      var spinGeo = new THREE.LatheGeometry([new THREE.Vector2(0.2, 0), new THREE.Vector2(0.18, 0.12), new THREE.Vector2(0.11, 0.3), new THREE.Vector2(0.0, 0.42)], 24);
+      spinGeo.rotateX(-Math.PI / 2);
+      var spinner = new THREE.Mesh(spinGeo, seaMatMetal); spinner.castShadow = true; pivot.add(spinner);
+      var sbGeo = new THREE.BoxGeometry(0.17, 1.0, 0.035, 1, 8, 1), sbp = sbGeo.attributes.position;
+      for (var sbi = 0; sbi < sbp.count; sbi++) {
+        var syy = sbp.getY(sbi) + 0.5, sf = syy;                       // 0 root .. 1 tip
+        var wdt = sf < 0.15 ? 0.6 + sf * 2.4 : 1.0 - (sf - 0.15) * 0.55;
+        sbp.setX(sbi, sbp.getX(sbi) * wdt);
+        var tw2 = 0.75 - sf * 0.55, bx2 = sbp.getX(sbi), bz2 = sbp.getZ(sbi);
+        sbp.setX(sbi, bx2 * Math.cos(tw2) - bz2 * Math.sin(tw2)); sbp.setZ(sbi, bx2 * Math.sin(tw2) + bz2 * Math.cos(tw2));
+      }
+      sbGeo.translate(0, 0.5, 0); sbGeo.computeVertexNormals();
       for (var bi = 0; bi < 2; bi++) {
-        var blade = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.0, 0.04), seaMatDark);
-        blade.position.y = 0.52; blade.rotation.y = 0.3;
-        var tipPaint = new THREE.Mesh(new THREE.BoxGeometry(0.155, 0.12, 0.045), matRed);
-        tipPaint.position.y = 0.96; tipPaint.rotation.y = 0.3;
+        var blade = new THREE.Mesh(sbGeo, seaMatDark); blade.castShadow = true;
+        var tipPaint = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.1, 0.04), matRed);
+        tipPaint.position.y = 0.95; tipPaint.rotation.y = 0.2;
         var arm = new THREE.Group(); arm.rotation.z = bi * Math.PI; arm.add(blade); arm.add(tipPaint);
         pivot.add(arm);
       }
@@ -6887,18 +6864,20 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       seaProps.push(pivot);
       box(0.1, 0.08, 0.3, 0.3, 0.3, -2.7, seaMatDark);
 
-      // high wing with slightly red tips, on diagonal lift struts
-      box(10.4, 0.12, 1.36, 0, 1.49, -0.9, matWingWhite);
+      // high wing: a thick high-lift airfoil with red tips, on diagonal lift struts
+      var SW_R = [0.0, -1.6, -0.22, 1.49], SW_T = [5.2, -1.5, -0.32, 1.53];
+      acAdd(acWing(SW_R, SW_T, [0.14, 0.13], 1, 'x', 10, 18), matWingWhite, seaBody);
+      acAdd(acWing(SW_R, SW_T, [0.14, 0.13], -1, 'x', 10, 18), matWingWhite, seaBody);
       [-1, 1].forEach(function(sd) {
-        box(0.35, 0.13, 1.36, sd * 5.3, 1.49, -0.9, matRed);
+        acAdd(acWing([4.85, -1.51, -0.3, 1.528], [5.22, -1.49, -0.33, 1.533], [0.15, 0.14], sd, 'x', 1, 18), matRed, seaBody, false);
         rod([sd * 0.56, 0.36, -0.8], [sd * 2.95, 1.43, -0.8], 0.04, matWhite);
         rod([sd * 0.56, 0.36, -0.5], [sd * 2.95, 1.43, -0.3], 0.03, matWhite);
       });
 
-      // tail: fin with red stripe, stabiliser with elevators
-      var fin = box(0.08, 1.2, 1.05, 0, 1.72, 3.25, matWhite, -0.32);
-      box(0.09, 0.2, 0.9, 0, 2.1, 3.42, matRed, -0.32);
-      box(3.4, 0.08, 0.85, 0, 1.12, 3.28, matWingWhite);
+      // tail: swept airfoil fin with a red band, airfoil stabiliser
+      var fin = acAdd(acWing([1.05, 2.55, 3.78, 0], [2.3, 3.2, 3.9, 0], [0.09, 0.08], 1, 'y', 6, 14), matWhite, seaBody);
+      acAdd(acWing([2.0, 2.98, 3.86, 0], [2.25, 3.17, 3.9, 0], [0.1, 0.09], 1, 'y', 1, 14), matRed, seaBody, false);
+      [-1, 1].forEach(function(sd) { acAdd(acWing([0.08, 2.86, 3.72, 1.12], [1.7, 3.1, 3.68, 1.12], [0.09, 0.08], sd, 'x', 5, 14), matWingWhite, seaBody); });
 
       // ---- floats: [z, halfWidth, topY, keelY, chineY]
       var FLT = [
@@ -11159,10 +11138,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         return new THREE.Mesh(g, mat);
       }
       [-1, 1].forEach(function(sd) {
-        var w = plate([[0.9 * sd, -1.4], [7.8 * sd, 2.6], [7.8 * sd, 3.5], [0.9 * sd, 2.3]], 0.2, AWX.skin);
-        w.position.y = -0.25; sh(w);
-        var t = plate([[0.3 * sd, 5.6], [3.2 * sd, 7.2], [3.2 * sd, 7.75], [0.3 * sd, 7.4]], 0.12, AWX.skin);
-        t.position.y = 0.75; sh(t);
+        // airfoil-section wing and tailplane (thin, sharp-edged, a little dihedral)
+        sh(new THREE.Mesh(acWing([0.9, -1.4, 2.3, -0.15], [7.8, 2.6, 3.5, 0.2], [0.12, 0.09], sd, 'x', 12, 20), AWX.skin));
+        sh(new THREE.Mesh(acWing([0.3, 5.6, 7.4, 0.81], [3.2, 7.2, 7.75, 0.95], [0.09, 0.08], sd, 'x', 6, 16), AWX.skin));
         [2.6, 4.7].forEach(function(x) {
           var zLE = -1.4 + (x - 0.9) / 6.9 * 4.0;
           var nac = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.3, 2.1, 14), AWX.dark);
@@ -11174,9 +11152,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
       // fin
       var fin = new THREE.Shape(); fin.moveTo(0, 0); fin.lineTo(2.1, 0); fin.lineTo(3.2, 3.0); fin.lineTo(2.3, 3.0); fin.lineTo(0, 0);
-      var fgm = new THREE.ExtrudeGeometry(fin, { depth: 0.16, bevelEnabled: false });
-      fgm.rotateY(-Math.PI / 2); fgm.translate(0.08, 1.2, 4.9);
-      sh(new THREE.Mesh(fgm, AWX.skin));
+      sh(new THREE.Mesh(acWing([1.05, 4.9, 7.0, 0], [4.2, 7.2, 8.1, 0], [0.1, 0.08], 1, 'y', 8, 16), AWX.skin));
       // rotodome on two raked struts
       [[1.1, 0.95], [2.6, -0.95]].forEach(function(z) {
         var st = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.7, 0.7), AWX.skin); st.position.set(0, 2.15, z[0]); st.rotation.x = 0.18 * z[1]; sh(st);
@@ -18841,35 +18817,84 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       cache.set(g.uuid, out);
       return out;
     }
-    function gfxUpgradeAircraft(root, geoCache, seenMats) {
+    // the skin: panel seams, rivet rows and slightly mismatched panel paint drawn by the shader in
+    // the part's own space (triplanar), so every panel is the same real size on every part of every
+    // aircraft, whatever its UVs. Lines are anti-aliased against their own screen size: razor-sharp
+    // up close, fading out cleanly instead of shimmering when the aircraft is small on screen.
+    var GFX_SKIN_FRAG = [
+      'varying vec3 vSkP; varying vec3 vSkN;',
+      'float skH(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }',
+      'vec3 skPanel(vec2 uv, vec2 cell) {',
+      '  vec2 c = uv / cell; float row = floor(c.y); c.x += skH(vec2(row, 3.7)) * 0.8;',
+      '  vec2 id = floor(c); vec2 f = fract(c);',
+      '  vec2 d = min(f, 1.0 - f) * cell; float e = min(d.x, d.y);',
+      '  float aa = max(length(fwidth(uv)), 1e-5);',
+      '  float line = 1.0 - smoothstep(0.004, 0.004 + aa * 1.2, e);',
+      '  float fade = 1.0 - smoothstep(0.006, 0.03, aa);',
+      '  float along = d.x < d.y ? c.y * cell.y : c.x * cell.x;',
+      '  float rv = 1.0 - smoothstep(0.0032, 0.0032 + aa, length(vec2((fract(along / 0.05) - 0.5) * 0.05, e - 0.02)));',
+      '  float rfade = 1.0 - smoothstep(0.0025, 0.009, aa);',
+      '  return vec3(line * fade, rv * rfade, (skH(id + cell * 17.0) - 0.5) * fade);',
+      '}',
+      'vec3 skSample() {',
+      '  vec3 n = abs(normalize(vSkN)); n = pow(n, vec3(4.0)); n /= (n.x + n.y + n.z + 1e-5);',
+      '  vec3 a = skPanel(vSkP.zy, vec2(0.62, 0.38));',
+      '  vec3 b = skPanel(vSkP.xz, vec2(0.38, 0.62));',
+      '  vec3 c = skPanel(vSkP.xy, vec2(0.5, 0.42));',
+      '  return a * n.x + b * n.y + c * n.z;',
+      '}'
+    ].join('\n');
+    function gfxSkin(m, k) {
+      if (m.userData.gfxSkin) return;
+      m.userData.gfxSkin = true;
+      k = k || 1;
+      if (m.map === gfxPanelTex.map) m.map = null;
+      if (m.roughnessMap === gfxPanelTex.rough) m.roughnessMap = null;
+      m.extensions = m.extensions || {}; m.extensions.derivatives = true;
+      var prev = m.onBeforeCompile;
+      m.onBeforeCompile = function(sh, r) {
+        if (prev) prev.call(this, sh, r);
+        sh.vertexShader = 'varying vec3 vSkP; varying vec3 vSkN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvSkP = position; vSkN = objectNormal;');
+        sh.fragmentShader = GFX_SKIN_FRAG + '\n' + sh.fragmentShader
+          .replace('#include <color_fragment>', '#include <color_fragment>\nvec3 skS = skSample();\ndiffuseColor.rgb *= (1.0 - ' + (0.42 * k).toFixed(3) + ' * skS.x - ' + (0.3 * k).toFixed(3) + ' * skS.y) * (1.0 + skS.z * ' + (0.07 * k).toFixed(3) + ');')
+          .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + skS.x * 0.25 + skS.z * 0.12, 0.04, 1.0);');
+      };
+      var prevKey = m.customProgramCacheKey;
+      m.customProgramCacheKey = function() { return 'skin' + k + (prevKey ? prevKey.call(this) : ''); };
+      m.needsUpdate = true;
+    }
+    function gfxUpgradeAircraft(root, geoCache, seenMats, skinK, keepShape) {
       root.traverse(function(o) {
         if (!o.isMesh) return;
-        o.geometry = gfxRetessellate(o.geometry, geoCache);
+        if (!keepShape) o.geometry = gfxRetessellate(o.geometry, geoCache);
         o.castShadow = true;
         o.receiveShadow = true;
         var mats = Array.isArray(o.material) ? o.material : [o.material];
         mats.forEach(function(m) {
           if (!m || seenMats.has(m)) return;
           seenMats.add(m);
-          if (m.flatShading) { m.flatShading = false; m.needsUpdate = true; }
-          if (!m.isMeshStandardMaterial || m.transparent || m.map) return;
+          if (m.flatShading && !keepShape) { m.flatShading = false; m.needsUpdate = true; }
+          if (!m.isMeshStandardMaterial || m.transparent || (m.map && m.map !== gfxPanelTex.map)) return;
           var isGlass = m.metalness >= 0.8 && m.roughness <= 0.15;
           var glow = m.emissive ? (m.emissive.r + m.emissive.g + m.emissive.b) * (m.emissiveIntensity || 1) : 0;
-          if (isGlass) { m.envMapIntensity = 1.8; m.needsUpdate = true; return; }
+          if (isGlass) { m.envMapIntensity = 2.0; m.roughness = 0.04; m.needsUpdate = true; return; }
           if (glow > 0.3) return;
-          m.map = gfxPanelTex.map;
-          m.roughnessMap = gfxPanelTex.rough;
-          m.roughness = Math.min(1, Math.max(m.roughness, 0.45) * 1.25);
-          if (m.isMeshPhysicalMaterial && m.clearcoat > 0.2) { m.clearcoat = 0.2; m.clearcoatRoughness = 0.4; }
-          m.needsUpdate = true;
+          // crisp paint: a tight specular highlight and a clear coat that actually reflects
+          m.roughness = Math.min(0.75, Math.max(m.roughness, 0.28));
+          m.envMapIntensity = 1.25;
+          if (m.isMeshPhysicalMaterial) { m.clearcoat = Math.max(m.clearcoat, 0.55); m.clearcoatRoughness = 0.1; }
+          gfxSkin(m, skinK);
         });
       });
     }
+    var gfxAcGeo = new Map(), gfxAcSeen = new Set();
     (function() {
-      var geoCache = new Map(), seen = new Set();
-      [jetBody, heliBody, droneBody].forEach(function(b) { if (b) gfxUpgradeAircraft(b, geoCache, seen); });
-      // the car keeps its smooth clear-coated paint (no riveted aircraft panels), but gets proper shadows
-      carBody.traverse(function(o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      [jetBody, heliBody, droneBody, typeof seaBody !== 'undefined' ? seaBody : null, typeof awacsBody !== 'undefined' ? awacsBody : null].forEach(function(b) { if (b) gfxUpgradeAircraft(b, gfxAcGeo, gfxAcSeen); });
+      // the car keeps its smooth paint (no riveted aircraft panels), but gets crisp clear-coat and shadows
+      carBody.traverse(function(o) {
+        if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true;
+        var m = o.material; if (m && m.isMeshPhysicalMaterial) { m.clearcoat = Math.max(m.clearcoat, 0.8); m.clearcoatRoughness = 0.06; m.envMapIntensity = 1.3; m.flatShading = false; m.needsUpdate = true; }
+      });
       // the stealth bomber has its own skin and materials; it just needs shadows
       if (stealthBody) stealthBody.traverse(function(o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     })();
@@ -29492,6 +29517,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       });
       thBody.scale.setScalar(0.82);
     })();
+    if (typeof gfxUpgradeAircraft === 'function') gfxUpgradeAircraft(thBody, gfxAcGeo, gfxAcSeen, 1, true);
     PLANE_TYPES.thopter = {
       name: 'Ornithopter', tagline: 'four pairs of beating wings — hovers like an insect, jet-glides like a bird',
       maxSpeedKmh: 430, engineAccel: 16, boostAccel: 26, stallSpeedKmh: 0, takeoffSpeedKmh: 0,
@@ -33667,6 +33693,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       matWhite.color.setHex(paint.body);
       matRed.color.setHex(paint.trim);
       matWingWhite.color.setHex(paint.wing);
+      // military rotorcraft and drones wear flat paint; jets and tourers a glossy clear coat
+      var mattePaint = !!(preset.isHelicopter || preset.isDrone);
+      [matWhite, matRed, matWingWhite].forEach(function(m) {
+        if (!m.isMeshPhysicalMaterial) return;
+        m.clearcoat = mattePaint ? 0.06 : 0.55; m.clearcoatRoughness = mattePaint ? 0.5 : 0.1;
+        m.roughness = mattePaint ? 0.62 : 0.3; m.envMapIntensity = mattePaint ? 0.7 : 1.25;
+      });
       carBodyMat.color.setHex(paint.body);
       droneMat.color.setHex(paint.body);
       droneMatDark.color.setHex(paint.trim);
