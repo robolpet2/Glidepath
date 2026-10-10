@@ -7022,6 +7022,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     /* ============================================================
        NPC TRAFFIC — simplified jets that fly in, land, and taxi to the apron
        ============================================================ */
+    // flat swept wing panel used by the ambient NPC planes
+    function buildWingGeometry(sign) {
+      var positions = new Float32Array([
+        0.40 * sign, 0, -1.15,  3.75 * sign, 0, 0.45,  3.75 * sign, 0, 0.85,  0.40 * sign, 0, 1.4
+      ]);
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setIndex(sign > 0 ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3]);
+      geo.computeVertexNormals();
+      return geo;
+    }
     function createNpcPlaneMesh() {
       var group = new THREE.Group();
       group.rotation.order = 'YXZ';
@@ -7848,7 +7859,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         mtnU.haze.value = THREE.MathUtils.clamp(0.62 + scene.fog.density * 300, 0.62, 0.98);
         mtnU.dens.value = scene.fog.density; mtnU.hk.value = ATM.layer.w;
         mtnU.snowLine.value = typeof SEASON !== 'undefined' && SEASON.name === 'winter' ? 300 : 1250;
-        if (Math.abs(px - lastMx) + Math.abs(pz - lastMz) < 60) return;
+        if (Math.abs(px - lastMx) + Math.abs(pz - lastMz) < 350) return;
         lastMx = px; lastMz = pz;
         for (var s = 0; s <= SEG; s++) {
           var a = (s % SEG) / SEG * Math.PI * 2;
@@ -9779,7 +9790,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             var grade = wi === 2 ? 'OK 3-WIRE' : wi === 1 ? 'FAIR 2-WIRE' : wi === 3 ? '4-WIRE — LATE' : '1-WIRE — SHORT';
             samToast('TRAP! ' + grade, wi === 2 ? '#7dff8a' : '#ffd36a', 2.6);
             if (typeof cv2OnTrap === 'function') cv2OnTrap(wi + 1);
-            if (typeof cameraShake === 'function') cameraShake(0.4);
+            fxShake = Math.max(fxShake, 0.8);
             break;
           }
         }
@@ -9853,7 +9864,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           throttle = MAX_SPEED; if (throttleSlider) throttleSlider.value = Math.round(MAX_SPEED * 3.6);
           cat.s = 0; cat.v = 0;
           if (Math.random() < dt * 14) { var pw = carrierToWorld(ct2.u0 + 2 + Math.random() * 6, ct2.v); cvPuff(pw.x, CARRIER.deckY + 0.3, pw.z, 0.6); }
-          if (cat.t > 1.7) { cat.phase = 'stroke'; samToast('LAUNCH!', '#ffffff', 1.4); if (typeof cameraShake === 'function') cameraShake(0.5); }
+          if (cat.t > 1.7) { cat.phase = 'stroke'; samToast('LAUNCH!', '#ffffff', 1.4); fxShake = Math.max(fxShake, 1.0); }
         } else {
           // hard shove (~2.5-4 g): reaches end speed a bit over halfway down the stroke
           var acc = cat.vEnd * cat.vEnd / (2 * cat.len * 0.6);
@@ -16967,7 +16978,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (!wasGrounded && !crashing && !isHelicopterMode) {
           if (!hasBrokenSonic && speed >= SONIC_SPEED) {
             hasBrokenSonic = true;
-            triggerSonicBoom(position, horizForward);
+            // horizForward is only set on the flight branch; the car can get here airborne off a ramp
+            var boomDir = new THREE.Vector3(-Math.sin(heading), 0, -Math.cos(heading));
+            triggerSonicBoom(position, boomDir);
           } else if (hasBrokenSonic && speed < SONIC_SPEED * 0.94) {
             hasBrokenSonic = false;
           }
@@ -17289,7 +17302,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       sndUpdate(dt);
       wfUpdate(dt);
       actUpdate(dt);
-      ostUpdate(dt); thUpdate(dt); ftUpdate(); tndUpdate(dt);
+      ostUpdate(dt); thUpdate(dt); ftUpdate(); tndUpdate(dt); sbUpdate(dt);
       dtUpdate(dt);
       perfRun('wx2', wx2Update, dt);
       perfRun('wl', wlUpdate, dt);
@@ -17310,7 +17323,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       netUpdate(dt);
       updatePvP(dt);
       mapAccum += dt;
-      if (mapAccum > 0.05) { mapAccum = 0; if (!miniMapWrapEl.classList.contains('hidden')) drawMiniMap(); }
+      if (mapAccum > 0.1) { mapAccum = 0; if (!miniMapWrapEl.classList.contains('hidden')) drawMiniMap(); }
       updateWaterSplash(dt);
       updateSonicBoom(dt, position, forwardVec);
       wreckUpdate(dt);
@@ -19209,7 +19222,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function gfxCullScan() {
       var L = GFX_CULL.list, F = GFX_CULL.fade; L.length = 0; F.length = 0;
       scene.traverse(function(o) {
-        if (!(o.isMesh || o.isLine || o.isPoints || o.isSprite) || o.isInstancedMesh || o === water) return;
+        if (!(o.isMesh || o.isLine || o.isPoints || o.isSprite) || o.isInstancedMesh || o === water || (SB && SB.of.has(o))) return;
         var m = o.material;
         if (m && !Array.isArray(m) && m.transparent) F.push(o);
         if (o.frustumCulled === false || (o.isSprite && m && m.sizeAttenuation === false)) return;
@@ -19219,6 +19232,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (!g.boundingSphere || !(g.boundingSphere.radius > 0) || !isFinite(g.boundingSphere.radius)) return;
         var unlit = !!(m && (m.isMeshBasicMaterial || m.isPointsMaterial || m.isLineBasicMaterial || m.isSpriteMaterial));
         o.userData.gfxUnlit = unlit;  // lamps, glows and light beads stay visible much further (they shine at night)
+        // fully hazed out = fog colour; safe to skip, except the terrain (the far terrain has holes under
+        // the near chunks) and anything that ignores fog
+        o.userData.gfxFogCull = !!(m && !Array.isArray(m) && m.fog !== false && m !== terrainMaterial);
         L.push(o);
       });
     }
@@ -19230,6 +19246,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // radius / distance -> size on screen in pixels
       var pxK = renderer.getDrawingBufferSize(_gfxCullSz).y * 0.5 / Math.tan(THREE.MathUtils.degToRad(cam.fov * 0.5));
       var budget = Math.min(n, 700);
+      // the same haze the fog shader applies: optical depth (density * d)^2 * mean height falloff
+      var fogD = scene.fog && scene.fog.density ? scene.fog.density : 0, fogK = ATM.layer.w, camY = Math.max(C.cam.y, 0);
+      var eA = Math.exp(-fogK * camY);
       for (i = 0; i < budget; i++) {
         if (C.idx >= n) C.idx = 0;
         o = L[C.idx++];
@@ -19239,7 +19258,15 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var r = bs.radius * o.matrixWorld.getMaxScaleOnAxis();
         var d = Math.max(C.c.distanceTo(C.cam) - r, 0.01);
         var px = r / d * pxK;
-        var mask = o.userData.gfxUnlit ? (px < 0.35 ? 0 : px < 3 ? 4 : 1) : (px < 1.2 ? 0 : px < 5 ? 4 : 1);
+        // the mirror is a third of screen res and rippled: under ~5 of its pixels an object is just noise there
+        var mask = o.userData.gfxUnlit ? (px < 0.35 ? 0 : px < 3 ? 4 : 1) : (px < 1.2 ? 0 : px < 15 ? 4 : 1);
+        if (mask && fogD > 0 && o.userData.gfxFogCull) {
+          // judged at the object's nearest point and its top, where the haze is thinnest
+          var y1 = Math.max(C.c.y + r, 0), dk = (y1 - camY) * fogK;
+          var hAvg = Math.abs(dk) < 0.001 ? eA : (eA - Math.exp(-fogK * y1)) / dk;
+          var od = fogD * d; od *= od; od *= Math.max(hAvg, 0.18);
+          if (od > 5.5) mask = 0;                       // > 99.6% fog
+        }
         o.userData.gfxMask = mask;
         if (!o.userData.gfxFaded && o.layers.mask !== mask) o.layers.mask = mask;
       }
@@ -29637,6 +29664,118 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       for (var k = 0; k < THO.jets.length; k++) THO.jets[k].scale.set(1, 0.6 + jet * 0.8, 1);
       thSound(THO.glide);
     }
+
+    /* ============================================================
+       STATIC BATCHING — draw only what's needed. The aircraft (and the carrier's deck clutter) are
+       built from dozens of small parts, and every part is a draw call in the main view, again in the
+       shadow map and again in the water's mirror. Parts that sit still are merged, per parent and per
+       material, into one mesh; the originals stay in place (so code that moves, hides or measures them
+       still works) but drop out of rendering via layer mask 0. Nothing is guessed: a part is only
+       merged after it has held still for a couple of seconds, and the moment any part of a batch
+       moves, hides, swaps material or rewrites its geometry, that batch is split back into its parts
+       for good — gear, flaps, rotors, flapping wings and blinking lights keep working untouched.
+       ============================================================ */
+    var SB = { roots: [], batches: [], scanT: 0, seen: new Map(), of: new WeakMap() };
+    // everything about a part that would make its merged copy wrong if it changed
+    function sbSig(o, out) {
+      var p = o.position, q = o.quaternion, k = o.scale, g = o.geometry;
+      out = out || new Float64Array(18);
+      out[0] = p.x; out[1] = p.y; out[2] = p.z; out[3] = q.x; out[4] = q.y; out[5] = q.z; out[6] = q.w; out[7] = k.x; out[8] = k.y; out[9] = k.z;
+      out[10] = o.visible ? 1 : 0; out[11] = o.material ? o.material.id : -1; out[12] = g ? g.id : -1;
+      out[13] = g && g.attributes.position ? g.attributes.position.version : -1; out[14] = g && g.index ? g.index.version : -1;
+      out[15] = (o.castShadow ? 1 : 0) + (o.receiveShadow ? 2 : 0); out[16] = o.renderOrder; out[17] = o.parent ? o.parent.id : -1;
+      return out;
+    }
+    var _sbTmp = new Float64Array(18);
+    function sbSame(o, sig) { sbSig(o, _sbTmp); for (var i = 0; i < 18; i++) if (_sbTmp[i] !== sig[i]) return false; return true; }
+    function sbCandidate(o) {
+      if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || o.children.length || !o.visible || o.userData.sbNo || SB.of.has(o)) return false;
+      var m = o.material, g = o.geometry;
+      if (!m || Array.isArray(m) || m.transparent || !g || !g.isBufferGeometry || !g.attributes.position || g.morphAttributes.position) return false;
+      // layer masks 0/1/4 are the culler's own; anything else was set on purpose by the game
+      if (isFinite(g.drawRange.count) || !(o.layers.mask === 1 || o.layers.mask === 4 || o.layers.mask === 0) || !o.frustumCulled) return false;
+      if (o.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender) return false;
+      return true;
+    }
+    function sbAttrKey(g) {
+      // X: an attribute this merge can't copy (interleaved or not float)
+      return Object.keys(g.attributes).sort().map(function(n) { var a = g.attributes[n]; return a.isInterleavedBufferAttribute || !(a.array instanceof Float32Array) ? 'X' : n + a.itemSize; }).join('|');
+    }
+    function sbMerge(parent, members) {
+      var names = Object.keys(members[0].geometry.attributes), nv = 0, ni = 0, i, j, a;
+      members.forEach(function(o) { var g = o.geometry; nv += g.attributes.position.count; ni += g.index ? g.index.count : g.attributes.position.count; });
+      var out = {}; names.forEach(function(n) { out[n] = new Float32Array(nv * members[0].geometry.attributes[n].itemSize); });
+      var idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+      var v = new THREE.Vector3(), nm = new THREE.Matrix3(), vo = 0, io = 0;
+      members.forEach(function(o) {
+        o.updateMatrix();
+        var g = o.geometry, M = o.matrix, cnt = g.attributes.position.count, flip = M.determinant() < 0;
+        nm.getNormalMatrix(M);
+        names.forEach(function(n) {
+          var src = g.attributes[n], dst = out[n], sz = src.itemSize;
+          for (i = 0; i < cnt; i++) {
+            if (n === 'position') { v.fromBufferAttribute(src, i).applyMatrix4(M); dst[(vo + i) * 3] = v.x; dst[(vo + i) * 3 + 1] = v.y; dst[(vo + i) * 3 + 2] = v.z; }
+            else if (n === 'normal') { v.fromBufferAttribute(src, i).applyMatrix3(nm).normalize(); dst[(vo + i) * 3] = v.x; dst[(vo + i) * 3 + 1] = v.y; dst[(vo + i) * 3 + 2] = v.z; }
+            else for (j = 0; j < sz; j++) dst[(vo + i) * sz + j] = src.array[i * sz + j];
+          }
+        });
+        var n = g.index ? g.index.count : cnt;
+        for (i = 0; i < n; i += 3) {
+          a = g.index ? [g.index.getX(i), g.index.getX(i + 1), g.index.getX(i + 2)] : [i, i + 1, i + 2];
+          idx[io++] = vo + a[0]; idx[io++] = vo + (flip ? a[2] : a[1]); idx[io++] = vo + (flip ? a[1] : a[2]);
+        }
+        vo += cnt;
+      });
+      var geo = new THREE.BufferGeometry();
+      names.forEach(function(n) { var s0 = members[0].geometry.attributes[n]; geo.setAttribute(n, new THREE.BufferAttribute(out[n], s0.itemSize)); });
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+      geo.computeBoundingSphere(); geo.computeBoundingBox();
+      var o0 = members[0], mesh = new THREE.Mesh(geo, o0.material);
+      mesh.castShadow = o0.castShadow; mesh.receiveShadow = o0.receiveShadow; mesh.renderOrder = o0.renderOrder;
+      mesh.name = 'sbBatch'; mesh.userData.sbNo = true;
+      parent.add(mesh);
+      var b = { parent: parent, mesh: mesh, members: members, sigs: members.map(function(o) { return sbSig(o); }) };
+      members.forEach(function(o) { SB.of.set(o, b); o.layers.mask = 0; o.clone = sbClone; });
+      SB.batches.push(b);
+    }
+    // a copy of a merged part is a normal, drawn object of its own
+    function sbClone(recursive) { var c = THREE.Mesh.prototype.clone.call(this, recursive); c.layers.mask = 1; delete c.clone; c.userData.sbNo = false; return c; }
+    function sbSplit(b) {
+      b.members.forEach(function(o) { SB.of.delete(o); o.userData.sbNo = true; delete o.clone; if (o.layers.mask === 0) o.layers.mask = 1; });
+      if (b.mesh.parent) b.mesh.parent.remove(b.mesh);
+      b.mesh.geometry.dispose();
+      b.dead = true;
+    }
+    function sbScan() {
+      var groups = new Map(), now = new Map();
+      SB.roots.forEach(function(root) {
+        if (!root || !root.visible) return;
+        root.traverseVisible(function(o) {
+          if (!sbCandidate(o)) return;
+          var prev = SB.seen.get(o); now.set(o, sbSig(o));
+          if (!prev || !sbSame(o, prev)) return;         // new, or moved since the last look: not yet
+          var key = o.parent.id + '/' + o.material.id + '/' + o.castShadow + o.receiveShadow + o.renderOrder + '/' + sbAttrKey(o.geometry);
+          var L = groups.get(key); if (!L) groups.set(key, L = []); L.push(o);
+        });
+      });
+      SB.seen = now;
+      groups.forEach(function(L) { if (L.length >= 2 && sbAttrKey(L[0].geometry).indexOf('X') < 0) sbMerge(L[0].parent, L); });
+    }
+    function sbUpdate(dt) {
+      var B = SB.batches, i, j;
+      for (i = B.length - 1; i >= 0; i--) {
+        var b = B[i], ok = true;
+        for (j = 0; j < b.members.length && ok; j++) {
+          var o = b.members[j];
+          if (o.parent !== b.parent || o.layers.mask !== 0 || !sbSame(o, b.sigs[j])) ok = false;
+        }
+        if (!ok || b.mesh.parent !== b.parent) { sbSplit(b); B.splice(i, 1); }
+      }
+      SB.scanT -= dt;
+      if (SB.scanT <= 0) { SB.scanT = 2; sbScan(); }
+    }
+    SB.roots.push(plane);
+    if (typeof carrierGroup !== 'undefined' && carrierGroup) SB.roots.push(carrierGroup);
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
