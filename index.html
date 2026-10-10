@@ -7022,6 +7022,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     /* ============================================================
        NPC TRAFFIC — simplified jets that fly in, land, and taxi to the apron
        ============================================================ */
+    // flat swept wing panel used by the ambient NPC planes
+    function buildWingGeometry(sign) {
+      var positions = new Float32Array([
+        0.40 * sign, 0, -1.15,  3.75 * sign, 0, 0.45,  3.75 * sign, 0, 0.85,  0.40 * sign, 0, 1.4
+      ]);
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setIndex(sign > 0 ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3]);
+      geo.computeVertexNormals();
+      return geo;
+    }
     function createNpcPlaneMesh() {
       var group = new THREE.Group();
       group.rotation.order = 'YXZ';
@@ -9779,7 +9790,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             var grade = wi === 2 ? 'OK 3-WIRE' : wi === 1 ? 'FAIR 2-WIRE' : wi === 3 ? '4-WIRE — LATE' : '1-WIRE — SHORT';
             samToast('TRAP! ' + grade, wi === 2 ? '#7dff8a' : '#ffd36a', 2.6);
             if (typeof cv2OnTrap === 'function') cv2OnTrap(wi + 1);
-            if (typeof cameraShake === 'function') cameraShake(0.4);
+            fxShake = Math.max(fxShake, 0.8);
             break;
           }
         }
@@ -9853,7 +9864,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           throttle = MAX_SPEED; if (throttleSlider) throttleSlider.value = Math.round(MAX_SPEED * 3.6);
           cat.s = 0; cat.v = 0;
           if (Math.random() < dt * 14) { var pw = carrierToWorld(ct2.u0 + 2 + Math.random() * 6, ct2.v); cvPuff(pw.x, CARRIER.deckY + 0.3, pw.z, 0.6); }
-          if (cat.t > 1.7) { cat.phase = 'stroke'; samToast('LAUNCH!', '#ffffff', 1.4); if (typeof cameraShake === 'function') cameraShake(0.5); }
+          if (cat.t > 1.7) { cat.phase = 'stroke'; samToast('LAUNCH!', '#ffffff', 1.4); fxShake = Math.max(fxShake, 1.0); }
         } else {
           // hard shove (~2.5-4 g): reaches end speed a bit over halfway down the stroke
           var acc = cat.vEnd * cat.vEnd / (2 * cat.len * 0.6);
@@ -16967,7 +16978,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (!wasGrounded && !crashing && !isHelicopterMode) {
           if (!hasBrokenSonic && speed >= SONIC_SPEED) {
             hasBrokenSonic = true;
-            triggerSonicBoom(position, horizForward);
+            // horizForward is only set on the flight branch; the car can get here airborne off a ramp
+            var boomDir = new THREE.Vector3(-Math.sin(heading), 0, -Math.cos(heading));
+            triggerSonicBoom(position, boomDir);
           } else if (hasBrokenSonic && speed < SONIC_SPEED * 0.94) {
             hasBrokenSonic = false;
           }
