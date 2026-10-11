@@ -17302,7 +17302,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       sndUpdate(dt);
       wfUpdate(dt);
       actUpdate(dt);
-      ostUpdate(dt); thUpdate(dt); ftUpdate(); tndUpdate(dt); sbUpdate(dt);
+      ostUpdate(dt); thUpdate(dt); ftUpdate(); tndUpdate(dt); sbUpdate(dt); uicUpdate(dt);
       dtUpdate(dt);
       perfRun('wx2', wx2Update, dt);
       perfRun('wl', wlUpdate, dt);
@@ -29776,6 +29776,139 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
     SB.roots.push(plane);
     if (typeof carrierGroup !== 'undefined' && carrierGroup) SB.roots.push(carrierGroup);
+
+    /* ============================================================
+       CLEAN HUD — the screen shows what you need right now, nothing else.
+         · keyboard / mouse players don't get the touch controls (every one has a key)
+         · night vision, camera, cockpit view, full screen and sound fold into one ⋯ menu;
+           pause stays out. An incoming codec call still shows its ringing button.
+         · the flight card keeps speed and clearance; fuel, airframe and g only appear
+           when they need your attention (throttle shows on keyboard, where there's no slider)
+         · respawn, eject, autopilot, cruise and flaps move into the MORE drawer
+         · the weapons strip fades away when you aren't using weapons
+       ============================================================ */
+    var UIC = { t: 0, wpnT: 6, calmT: 4, tools: null, open: false, kb: !GFX_IS_TOUCH };
+    (function uicInit() {
+      var css = document.createElement('style');
+      css.textContent = [
+        // keyboard: no touch furniture
+        'body.ui-kb #fireBtn,body.ui-kb #flareBtn,body.ui-kb #flareAutoBtn,body.ui-kb #boostBtn,body.ui-kb #rollBtns,body.ui-kb #wpnBtn,',
+        'body.ui-kb #throttleWrap,body.ui-kb #droneCamBtn,body.ui-kb #gunBtn,body.ui-kb #aamBtn,body.ui-kb #thGlide,body.ui-kb #qbFilt,',
+        'body.ui-kb #actDrawer>#respawnBtn,body.ui-kb #actDrawer>#ejectBtn,body.ui-kb #actDrawer>#apBtn,body.ui-kb #actDrawer>#cruiseBtn,body.ui-kb #actDrawer>#flapsBtn{display:none!important}',
+        // flight card: only what matters
+        'body.ui-clean #hud #fuelGauge:not(.ui-on),body.ui-clean #hud #kjWearGauge:not(.ui-on),body.ui-clean #hud #gGauge:not(.ui-on),',
+        'body.ui-clean #hud #kjPulse,body.ui-clean #hud .stats,body.ui-clean #hud .ringStats{display:none!important}',
+        'body.ui-clean:not(.ui-kb) #hud #throttleGauge{display:none!important}',
+        // top cluster folds into ⋯
+        '#uiTools{position:fixed;z-index:13;display:flex;align-items:center;justify-content:center;border-radius:50%;padding:0;',
+        'background:rgba(15,17,20,.62);border:1px solid rgba(255,255,255,.12);color:var(--off);font:700 18px/1 system-ui,sans-serif;cursor:pointer;',
+        '-webkit-tap-highlight-color:transparent;transition:background .15s}',
+        '#uiTools.open{background:rgba(232,230,223,.9);color:#15171a}#uiTools:active{transform:scale(.92)}',
+        '#uiTools.ring::after{content:"";position:absolute;top:2px;right:2px;width:9px;height:9px;border-radius:50%;background:#7dff9a;animation:kjBlink 1s steps(2) infinite}',
+        'body.ui-clean:not(.ui-tools) #soundToggle,body.ui-clean:not(.ui-tools) #fsToggle,body.ui-clean:not(.ui-tools) #viewToggle,',
+        'body.ui-clean:not(.ui-tools):not(.ui-ring) #kjBtns{display:none!important}',
+        'body.ui-tools #soundToggle,body.ui-tools #fsToggle,body.ui-tools #viewToggle,body.ui-tools #kjBtns{z-index:13!important;transition:none}',
+        
+        // touch controls settle back to a ghost of themselves between touches
+        'body.ui-clean #throttleLabel{display:none}',
+        '#fireBtn,#flareBtn,#flareAutoBtn,#boostBtn,#rollBtns,#wpnBtn,#throttleWrap,#gunBtn,#aamBtn,#droneCamBtn,#thGlide,#actBtn{transition:opacity .5s ease}',
+        'body.ui-calm #fireBtn,body.ui-calm #flareBtn,body.ui-calm #boostBtn,body.ui-calm #rollBtns,body.ui-calm #wpnBtn,body.ui-calm #gunBtn,',
+        'body.ui-calm #aamBtn,body.ui-calm #droneCamBtn,body.ui-calm #thGlide,body.ui-calm #actBtn{opacity:.42}',
+        'body.ui-calm #throttleWrap{opacity:.6}body.ui-calm #flareAutoBtn{opacity:.3}',
+        // weapons strip fades when idle
+        '#arsPanel,#qbFilt{transition:opacity .45s ease}',
+        'body.ui-wpnIdle #arsPanel,body.ui-wpnIdle #qbFilt{opacity:0!important;pointer-events:none!important}',
+        // MORE sits under the minimap now that the left column is gone
+        'body.ui-clean #actBtn{left:calc(20px + env(safe-area-inset-left));top:calc(166px + env(safe-area-inset-top));bottom:auto}',
+        'body.ui-clean #actDrawer{left:calc(20px + env(safe-area-inset-left));top:calc(214px + env(safe-area-inset-top));bottom:auto;flex-direction:column;max-height:calc(100vh - 230px);overflow:auto}',
+        '@media (orientation: landscape) and (max-height: 500px){',
+        ' body.ui-clean #actBtn{left:calc(122px + env(safe-area-inset-left));top:calc(8px + env(safe-area-inset-top))}',
+        ' body.ui-clean #actDrawer{left:calc(122px + env(safe-area-inset-left));top:calc(44px + env(safe-area-inset-top));max-height:calc(100vh - 56px)}}'
+      ].join('');
+      document.head.appendChild(css);
+      document.body.classList.add('ui-clean');
+      if (UIC.kb) document.body.classList.add('ui-kb');
+      // a touch anywhere means touch controls are wanted after all (tablets with keyboards, touch laptops)
+      window.addEventListener('touchstart', function() {
+        UIC.calmT = 4;
+        if (UIC.kb) { UIC.kb = false; document.body.classList.remove('ui-kb'); }
+      }, { passive: true, capture: true });
+
+      // the flight action buttons join the MORE drawer
+      if (typeof ACT !== 'undefined' && ACT.dr) {
+        ['flapsBtn', 'cruiseBtn', 'apBtn', 'ejectBtn', 'respawnBtn'].forEach(function(id) {
+          var el = document.getElementById(id); if (el) ACT.dr.insertBefore(el, ACT.dr.firstChild);
+        });
+        // eject / respawn fire on touchstart (no click follows), so close the drawer on any release inside it
+        ACT.dr.addEventListener('touchend', function() { setTimeout(function() { if (ACT.open) actToggle(false); }, 150); });
+      }
+
+      var b = document.createElement('button'); b.id = 'uiTools'; b.type = 'button'; b.setAttribute('aria-label', 'More controls'); b.textContent = '⋯';
+      b.style.display = 'none';
+      document.body.appendChild(b); UIC.tools = b;
+      b.addEventListener('click', function(e) { e.stopPropagation(); uicTools(!UIC.open); });
+      window.addEventListener('mousemove', function() { if (UIC.kb) UIC.calmT = 4; }, { passive: true });
+      document.addEventListener('pointerdown', function(e) {
+        if (!UIC.open || b.contains(e.target)) return;
+        var inMenu = ['soundToggle', 'fsToggle', 'viewToggle', 'kjBtns'].some(function(id) { var el = document.getElementById(id); return el && el.contains(e.target); });
+        if (inMenu) setTimeout(function() { uicTools(false); }, 180); else uicTools(false);
+      }, true);
+
+      // anything weapon-related wakes the weapons strip
+      var WK = { Space: 1, KeyM: 1, KeyX: 1, KeyB: 1, KeyT: 1, KeyJ: 1, KeyK: 1, KeyN: 1, Tab: 1, BracketLeft: 1, BracketRight: 1 };
+      window.addEventListener('keydown', function(e) { if (WK[e.code] || /^Digit[0-9]$/.test(e.code)) UIC.wpnT = 6; }, true);
+      document.addEventListener('pointerdown', function(e) {
+        if (e.target && e.target.closest && e.target.closest('#wpnBtn,#fireBtn,#gunBtn,#aamBtn,#arsPanel,#qbFilt')) UIC.wpnT = 6;
+      }, true);
+    })();
+    function uicTools(on) {
+      UIC.open = on;
+      UIC.tools.classList.toggle('open', on);
+      document.body.classList.toggle('ui-tools', on);
+      var ids = ['soundToggle', 'fsToggle', 'viewToggle', 'kjBtns'];
+      if (!on) { ids.forEach(function(id) { var el = document.getElementById(id); if (el) { el.style.top = el.style.left = el.style.right = ''; } }); return; }
+      // lay them out in a row to the left of pause (the flight card sits below ⋯)
+      var pr = document.getElementById('pauseToggle').getBoundingClientRect(), x = pr.left - 8;
+      ids.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (!el || el.classList.contains('hidden') || getComputedStyle(el).display === 'none') return;
+        x -= el.offsetWidth;
+        el.style.right = 'auto'; el.style.left = x + 'px'; el.style.top = (pr.top + pr.height / 2 - el.offsetHeight / 2) + 'px';
+        x -= 8;
+      });
+    }
+    function uicUpdate(dt) {
+      UIC.wpnT -= dt; UIC.calmT -= dt;
+      if ((UIC.t -= dt) > 0) return;
+      document.body.classList.toggle('ui-calm', UIC.calmT <= 0 && !UIC.open && !(typeof ACT !== 'undefined' && ACT.open));
+      UIC.t = 0.25;
+      var body = document.body;
+      // ⋯ takes the sound button's place, beside pause, and lives as long as pause does
+      var pause = document.getElementById('pauseToggle'), snd = document.getElementById('soundToggle');
+      var live = pause && !pause.classList.contains('hidden');
+      if (snd) {
+        var cs = getComputedStyle(snd);
+        UIC.tools.style.top = cs.top; UIC.tools.style.right = cs.right; UIC.tools.style.width = cs.width; UIC.tools.style.height = cs.height;
+      }
+      UIC.tools.style.display = live ? 'flex' : 'none';
+      if (!live && UIC.open) uicTools(false);
+      // a codec call rings through the fold
+      var kj = document.getElementById('kjBtns'), ring = !!(kj && kj.querySelector('button.ring'));
+      body.classList.toggle('ui-ring', ring && !UIC.open);
+      UIC.tools.classList.toggle('ring', ring && !UIC.open);
+      if (ring && !UIC.open && kj && pause) { var tr = pause.getBoundingClientRect(); kj.style.right = 'auto'; kj.style.left = (tr.left - kj.offsetWidth - 8) + 'px'; kj.style.top = tr.top + 'px'; }
+      else if (!UIC.open && kj && kj.style.left) { kj.style.left = kj.style.top = kj.style.right = ''; }
+      // flight card: show the warnings only
+      var num = function(id) { var e = document.getElementById(id); return e ? parseFloat(e.textContent) : NaN; };
+      var fuelG = document.getElementById('fuelGauge'), wearG = document.getElementById('kjWearGauge'), gG = document.getElementById('gGauge');
+      var fuelV = num('fuelVal'), wearV = num('kjWearVal'), gV = num('gVal');
+      if (fuelG) fuelG.classList.toggle('ui-on', !(fuelV > 35));
+      if (wearG) wearG.classList.toggle('ui-on', !(wearV > 70));
+      if (gG) gG.classList.toggle('ui-on', Math.abs(gV) > 3.5);
+      // weapons: shown while in use or locked on, faded otherwise
+      var ars = document.getElementById('arsPanel'), locked = !!(ars && /LOCK|TRACK|GUIDING|IMPACT/.test(ars.textContent));
+      body.classList.toggle('ui-wpnIdle', UIC.wpnT <= 0 && !locked);
+    }
 
     /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
