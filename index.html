@@ -3858,10 +3858,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // this canvas is square; stretch it to a 45 x 50 m tile
       rwTex.repeat.set(1, (HL * 2) / 50);
       var rwMat = new THREE.MeshStandardMaterial({ map: rwTex, roughness: 0.82, metalness: 0.02 });
+      rwMat.userData.asphalt = true;
       var rw = new THREE.Mesh(new THREE.PlaneGeometry(HW * 2, HL * 2), rwMat);
       rw.rotation.x = -Math.PI / 2; rw.position.y = 0.05; rw.receiveShadow = true; root.add(rw);
       var shoulderMat = new THREE.MeshStandardMaterial({ roughness: 0.9, map: cityTex(function(c, S) { asphaltNoise(c, S, '#5b5b58'); }, 128) });
-      shoulderMat.map.repeat.set(1, 60);
+      shoulderMat.map.repeat.set(1, 60); shoulderMat.userData.asphalt = true;
       [-1, 1].forEach(function(s) {
         var sh = new THREE.Mesh(new THREE.PlaneGeometry(7.5, HL * 2 + 60), shoulderMat);
         sh.rotation.x = -Math.PI / 2; sh.position.set(s * (HW + 3.75), 0.045, 0); sh.receiveShadow = true; root.add(sh);
@@ -3874,6 +3875,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }, 256);
       [-1, 1].forEach(function(s) {
         var bp = new THREE.Mesh(new THREE.PlaneGeometry(HW * 2, 30), new THREE.MeshStandardMaterial({ map: blastTex, roughness: 0.9 }));
+        bp.material.userData.asphalt = true;
         bp.rotation.x = -Math.PI / 2; bp.rotation.z = s > 0 ? Math.PI : 0; bp.position.set(0, 0.05, s * (HL + 15)); bp.receiveShadow = true; root.add(bp);
       });
       function thresholdTex(num) {
@@ -3898,6 +3900,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       // south end = runway 36 (landing north), north end = runway 18 (landing south)
       [['36', -1], ['18', 1]].forEach(function(e) {
         var m = new THREE.Mesh(new THREE.PlaneGeometry(HW * 2, 70), new THREE.MeshStandardMaterial({ map: thresholdTex(e[0]), roughness: 0.82, polygonOffset: true, polygonOffsetFactor: -2 }));
+        m.material.userData.asphalt = true;
         m.rotation.x = -Math.PI / 2; m.rotation.z = e[1] > 0 ? Math.PI : 0;
         m.position.set(0, 0.06, e[1] * (HL - 35)); m.receiveShadow = true; root.add(m);
       });
@@ -17302,7 +17305,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       sndUpdate(dt);
       wfUpdate(dt);
       actUpdate(dt);
-      ostUpdate(dt); thUpdate(dt); ftUpdate(); tndUpdate(dt); sbUpdate(dt); uicUpdate(dt);
+      ostUpdate(dt); thUpdate(dt); ftUpdate(); tndUpdate(dt); sbUpdate(dt); uicUpdate(dt); grsUpdate(dt); refpUpdate(); wetUpdate(dt);
       dtUpdate(dt);
       perfRun('wx2', wx2Update, dt);
       perfRun('wl', wlUpdate, dt);
@@ -17936,6 +17939,86 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     terrainMaterial.normalScale.set(0.75, 0.75);
     terrainMaterial.flatShading = false;
     terrainMaterial.roughness = 0.95;
+
+    /* ---------------- REAL TEXTURES — photo-scanned CC0 surfaces (Poly Haven) ----------------
+       assets/*.jpg are greyscale detail plates made from real scans (lighting flattened, mean 0.5):
+         leafy_grass (2 m) · aerial_grass_rock (15 m) · rocky_terrain_02 (90 m) · rock_face (2.4 m)
+         coast_sand_01 (15 m) · snow_field_aerial (80 m) · asphalt_01 (3 m) · aerial_asphalt_01 (30 m)
+       They keep the island's own colours and add real-world surface detail. Three plates are packed
+       into the colour channels of one texture at load, so the terrain needs only two more samplers.
+       Missing files, a page opened straight from disk (images can't reach WebGL there) or a GPU
+       short of texture units all leave the procedural detail in place. */
+    // ground wetness 0..1: soaks in under rain, dries slowly after (set by wetUpdate)
+    var GFX_WET = { value: 0 };
+    var REALTEX = (function() {
+      var grey = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat);
+      grey.needsUpdate = true;
+      return { ok: renderer.capabilities.maxTextures >= 16, lite: GFX_IS_TOUCH,
+               a: { value: grey }, b: { value: grey }, asph: { value: grey }, on: { value: 0 } };
+    })();
+    function realTexLoad() {
+      if (!REALTEX.ok) return;
+      var names = ['leafy_grass', 'aerial_grass_rock', 'rocky_terrain_02', 'rock_face', 'coast_sand_01', 'snow_field_aerial', 'asphalt_01', 'aerial_asphalt_01'];
+      var imgs = {}, left = names.length;
+      names.forEach(function(n) {
+        var im = new Image();
+        im.onload = function() { imgs[n] = im; if (--left === 0) setTimeout(packAll, 0); };
+        im.onerror = function() { if (--left === 0) setTimeout(packAll, 0); };
+        im.src = 'assets/' + n + '.jpg';
+      });
+      // three grey plates -> the R, G and B of one tiling texture
+      function pack(ids) {
+        var S = 1024, c = document.createElement('canvas'); c.width = c.height = S;
+        var x = c.getContext('2d', { willReadFrequently: true }), out = x.createImageData(S, S), o = out.data, i;
+        for (i = 0; i < o.length; i++) o[i] = (i & 3) === 3 ? 255 : 128;
+        ids.forEach(function(id, ch) {
+          if (!id) return;
+          x.clearRect(0, 0, S, S); x.drawImage(imgs[id], 0, 0, S, S);
+          var d = x.getImageData(0, 0, S, S).data;              // throws if the image is cross-origin
+          for (var k = 0; k < d.length; k += 4) o[k + ch] = d[k];
+        });
+        x.putImageData(out, 0, 0);
+        var t = new THREE.CanvasTexture(c);
+        t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = gfxAniso;
+        return t;
+      }
+      function has(list) { return list.every(function(n) { return imgs[n]; }); }
+      function packAll() {
+        try {
+          if (has(names.slice(0, 6))) {
+            REALTEX.a.value = pack(['leafy_grass', 'aerial_grass_rock', 'rocky_terrain_02']);
+            setTimeout(function() {
+              try {
+                REALTEX.b.value = pack(['rock_face', 'coast_sand_01', 'snow_field_aerial']);
+                REALTEX.on.value = 1;
+              } catch (e) { REALTEX.on.value = 0; }
+            }, 0);
+          }
+          if (has(['asphalt_01', 'aerial_asphalt_01'])) setTimeout(function() {
+            try { REALTEX.asph.value = pack(['asphalt_01', 'aerial_asphalt_01', null]); } catch (e) {}
+          }, 0);
+        } catch (e) { REALTEX.on.value = 0; }
+      }
+    }
+    // runway, shoulders, blast pads and thresholds: real asphalt grain over the painted markings
+    function realTexAsphalt(m) {
+      if (!REALTEX.ok || m.userData.realAsph) return;
+      m.userData.realAsph = true;
+      var prev = m.onBeforeCompile;
+      m.onBeforeCompile = function(sh, r) {
+        if (prev) prev.call(this, sh, r);
+        sh.uniforms.uAsph = REALTEX.asph;
+        sh.vertexShader = 'varying vec3 vAsW;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvAsW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+        sh.fragmentShader = 'varying vec3 vAsW;\nuniform sampler2D uAsph;\n' + sh.fragmentShader.replace('#include <map_fragment>', [
+          '#include <map_fragment>',
+          '{ float aD = length(vViewPosition);',
+          '  float aN = texture2D(uAsph, vAsW.xz / 3.0).r, aM = texture2D(uAsph, vAsW.xz / 30.0 + 0.4).g;',
+          '  diffuseColor.rgb *= mix(1.0, aN * 2.0, 0.55 * (1.0 - smoothstep(30.0, 180.0, aD))) * mix(1.0, aM * 2.0, 0.5); }'
+        ].join('\n'));
+      };
+      m.needsUpdate = true;
+    }
+
     terrainMaterial.onBeforeCompile = function(shader) {
       shader.uniforms.uScorch = { value: NUKE_SCORCH };
       shader.uniforms.uCloudSh = cloudShadowU.tex; shader.uniforms.uCloudShO = cloudShadowU.o; shader.uniforms.uCloudShK = cloudShadowU.k;
@@ -17948,7 +18031,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           'vGfxWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;',
           'vGfxWorldNormal = normalize(mat3(modelMatrix) * objectNormal);'
         ].join('\n'));
-      shader.fragmentShader = 'varying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\nvarying vec3 vBio;\nuniform vec4 uScorch[2];\nuniform float uTime;\nuniform vec4 uSeason;\nuniform sampler2D uCloudSh;\nuniform vec3 uCloudShO;\nuniform float uCloudShK;\n' +
+      if (REALTEX.ok) {
+        shader.uniforms.uRealA = REALTEX.a; shader.uniforms.uRealB = REALTEX.b; shader.uniforms.uRealOn = REALTEX.on;
+        shader.fragmentShader = '#define GFX_REAL\n' + (REALTEX.lite ? '#define GFX_REAL_LITE\n' : '') +
+          'uniform sampler2D uRealA;\nuniform sampler2D uRealB;\nuniform float uRealOn;\n' +
+          // bump from a height field via screen-space derivatives (three's perturbNormalArb)
+          '#ifdef USE_NORMALMAP\nvec3 gfxBump(vec3 sp, vec3 sn, vec2 dh) { vec3 sx = dFdx(sp), sy = dFdy(sp); vec3 r1 = cross(sy, sn), r2 = cross(sn, sx);\n' +
+          '  float det = dot(sx, r1); vec3 g = sign(det) * (dh.x * r1 + dh.y * r2); return normalize(abs(det) * sn - g); }\n#endif\n' +
+          shader.fragmentShader;
+      }
+      shader.uniforms.uWet = GFX_WET;
+      shader.fragmentShader = 'uniform float uWet;\nvarying vec3 vGfxWorldPos;\nvarying vec3 vGfxWorldNormal;\nvarying vec3 vBio;\nuniform vec4 uScorch[2];\nuniform float uTime;\nuniform vec4 uSeason;\nuniform sampler2D uCloudSh;\nuniform vec3 uCloudShO;\nuniform float uCloudShK;\n' +
         shader.fragmentShader
           .replace('#include <map_fragment>', '')
           .replace('#include <color_fragment>', [
@@ -18006,15 +18099,57 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             '    gEmber += vec3(1.0, 0.28, 0.05) * burn * sc.w * sc.w * smoothstep(0.55, 0.8, gNear + gMid * 0.4) * fl * 1.4;',
             '  }',
             '}',
+            // rain: soil darkens, and water pools in the flat hollows
+            'float gPud = 0.0;',
+            'if (uWet > 0.001) {',
+            '  float gFlat = 1.0 - smoothstep(0.02, 0.08, gSlope);',
+            '  gPud = smoothstep(0.67, 0.73, gMid + (gNear - 0.5) * 0.35) * gFlat * smoothstep(0.4, 1.0, uWet) * (1.0 - gSnow);',
+            '  gBase *= mix(1.0, 0.68, uWet * (1.0 - gSnow)) * mix(1.0, 0.75, gPud);',
+            '}',
+            'float gBumpH = 0.0;',
+            '#ifdef GFX_REAL',
+            'if (uRealOn > 0.5) {',
+            '  float rD = length(vViewPosition);',
+            '  float rWn = 1.0 - smoothstep(25.0, 110.0, rD), rWm = 1.0 - smoothstep(500.0, 1700.0, rD);',
+            '  vec4 rA90 = texture2D(uRealA, gUv / 90.0 + 0.57), rA410 = texture2D(uRealA, gUv / 410.0 + 0.13);',
+            '  vec4 rB80 = texture2D(uRealB, gUv / 80.0 + 0.43);',
+            '  float rGn = 0.5, rGm = 0.5, rRn = 0.5, rRm = 0.5, rSn = 0.5, rSm = 0.5, rWs2 = 0.5;',
+            '  if (rWm > 0.0) {',
+            '    rGm = texture2D(uRealA, gUv / 15.0 + 0.31).g;',
+            '    rSm = texture2D(uRealB, gUv / 15.0 + 0.19).g;',
+            '    rWs2 = texture2D(uRealB, gUv / 11.0 + 0.77).b;',
+            '    #ifdef GFX_REAL_LITE',
+            '    rRm = texture2D(uRealB, gUv / 19.0 + 0.2).r;',
+            '    #else',
+            // rock is projected along whichever axis faces it, so cliffs don't smear
+            '    vec3 rTw = pow(abs(gWn), vec3(4.0)); rTw /= rTw.x + rTw.y + rTw.z;',
+            '    rRm = texture2D(uRealB, vGfxWorldPos.zy / 19.0 + 0.2).r * rTw.x + texture2D(uRealB, gUv / 19.0 + 0.2).r * rTw.y + texture2D(uRealB, vGfxWorldPos.xy / 19.0 + 0.2).r * rTw.z;',
+            '    if (rWn > 0.0) rRn = texture2D(uRealB, vGfxWorldPos.zy / 2.4).r * rTw.x + texture2D(uRealB, gUv / 2.4).r * rTw.y + texture2D(uRealB, vGfxWorldPos.xy / 2.4).r * rTw.z;',
+            '    #endif',
+            '    if (rWn > 0.0) { rGn = texture2D(uRealA, gUv / 2.0).r; rSn = texture2D(uRealB, gUv / 3.1 + 0.61).g; }',
+            '  }',
+            '  float dVeg = mix(1.0, rGn * 2.0, 0.6 * rWn) * mix(1.0, rGm * 2.0, 0.55 * rWm) * mix(1.0, rA90.b * 2.0, 0.5) * mix(1.0, rA410.b * 2.0, 0.35) * mix(1.0, gFar * 2.0, 0.3);',
+            '  float dRock = mix(1.0, rRn * 2.0, 0.7 * rWn) * mix(1.0, rRm * 2.0, 0.65 * rWm) * mix(1.0, rA90.b * 2.0, 0.4) * mix(1.0, gFar * 2.0, 0.3);',
+            '  float dSand = mix(1.0, rSn * 2.0, 0.45 * rWn) * mix(1.0, rSm * 2.0, 0.5 * rWm) * mix(1.0, rA410.b * 2.0, 0.25);',
+            '  float dSnow = mix(1.0, rWs2 * 2.0, 0.25 * rWm) * mix(1.0, rB80.b * 2.0, 0.3);',
+            '  float rSand = smoothstep(-0.01, 0.07, vColor.r - vColor.g) * (1.0 - gRock);',
+            '  gDetail = mix(mix(mix(dVeg, dSand, rSand), dRock, gRock), dSnow, gSnow);',
+            '  gBumpH = (rRn * 0.06 * rWn + rRm * 0.5 * rWm) * gRock + (rGn * 0.02 * rWn + rGm * 0.12 * rWm) * (1.0 - gRock) * (1.0 - gSnow);',
+            '}',
+            '#endif',
+            'gBumpH *= 1.0 - gPud;',
             'diffuseColor.rgb *= gBase * gDetail;',
             'float gCloudSh = texture2D(uCloudSh, vec2((vGfxWorldPos.x - uCloudShO.x) / uCloudShO.z + 0.5, 0.5 - (vGfxWorldPos.z - uCloudShO.y) / uCloudShO.z)).r * uCloudShK;'
           ].join('\n'))
+          .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#if defined(GFX_REAL) && defined(USE_NORMALMAP)\n{ vec2 gBd = vec2(dFdx(gBumpH), dFdy(gBumpH)); normal = gfxBump(-vViewPosition, normal, gBd); }\n#endif')
           .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directDiffuse *= 1.0 - gCloudSh;\nreflectedLight.directSpecular *= 1.0 - gCloudSh;')
           .replace('#include <roughnessmap_fragment>',
-            'float roughnessFactor = roughness * mix(1.0, 0.55, gShore) * mix(1.0, 0.8, gSnow);')
+            'float roughnessFactor = roughness * mix(1.0, 0.55, gShore) * mix(1.0, 0.8, gSnow) * mix(1.0, 0.86, uWet * (1.0 - gSnow)) * mix(1.0, 0.1, gPud);')
           .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += gEmber;');
     };
     terrainMaterial.needsUpdate = true;
+    realTexLoad();
+    scene.traverse(function(o) { if (o.isMesh && o.material && o.material.userData && o.material.userData.asphalt) realTexAsphalt(o.material); });
     // existing chunks (if any were built already) switch to the new material automatically;
     // new chunks get the seamless analytic normals from buildChunk
 
@@ -19267,6 +19402,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           var od = fogD * d; od *= od; od *= Math.max(hAvg, 0.18);
           if (od > 5.5) mask = 0;                       // > 99.6% fog
         }
+        if (o.userData.probe) mask |= 8;                // layer 3: the aircraft reflection probe's big shapes
         o.userData.gfxMask = mask;
         if (!o.userData.gfxFaded && o.layers.mask !== mask) o.layers.mask = mask;
       }
@@ -29911,6 +30047,305 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     /* ============================================================
+       GRASS — real blades near the ground. Clumps of tapered, curved blades are instanced on a
+       tile that wraps around the camera (positions live in the vertex shader, so nothing is
+       rebuilt as you move). Each clump stands on the terrain's own 7.5 m vertex grid, read from a
+       small heightmap that also carries the ground colour and how grassy the spot is (no grass on
+       water, rock, snow, sand, desert, lava, towns or paving). The texture wraps too, so moving
+       one grid step only computes one new row. Blades sway in the wind, flatten under rotor
+       downwash and jet blast, take on the season, and fade out with distance — and the whole
+       thing switches off above ~180 m, where a blade is smaller than a pixel.
+       ============================================================ */
+    var GRS = { on: false, N: 32, step: CHUNK_SIZE / CHUNK_SEGMENTS, meshes: [], mesh: null,
+                tex: null, data: null, gx0: null, gz0: null, lvl: -1, cam: new THREE.Vector3(),
+                u: { cam: { value: new THREE.Vector2() }, wash: { value: new THREE.Vector4() }, wind: { value: 0 }, ap: { value: [] } } };
+    GRS.ok = !!(renderer.capabilities.isWebGL2 && renderer.capabilities.vertexTextures);
+    function grsClump(blades, segs) {
+      var pos = [], nor = [], uv = [], idx = [], rnd = mulberry32(4242);
+      for (var b = 0; b < blades; b++) {
+        var a = rnd() * Math.PI * 2, lean = 0.05 + rnd() * 0.16, ox = (rnd() - 0.5) * 0.36, oz = (rnd() - 0.5) * 0.36;
+        var hgt = 0.2 + rnd() * 0.3, w = 0.022 + rnd() * 0.02, ca = Math.cos(a), sa = Math.sin(a);
+        var base = pos.length / 3;
+        for (var k = 0; k <= segs; k++) {
+          var t = k / segs, bend = lean * t * t, ww = w * (1 - t * 0.85);
+          var cx = ox + ca * bend, cz = oz + sa * bend, y = hgt * t * (1 - lean * 0.25 * t);
+          if (k < segs) {
+            pos.push(cx - sa * ww, y, cz + ca * ww, cx + sa * ww, y, cz - ca * ww);
+            nor.push(ca, 0.4, sa, ca, 0.4, sa);
+            uv.push(0, t, 1, t);
+          } else { pos.push(cx, y, cz); nor.push(ca, 0.4, sa); uv.push(0.5, 1); }
+        }
+        for (k = 0; k < segs - 1; k++) { var r0 = base + k * 2; idx.push(r0, r0 + 1, r0 + 2, r0 + 1, r0 + 3, r0 + 2); }
+        var lr = base + (segs - 1) * 2; idx.push(lr, lr + 1, lr + 2);
+      }
+      var g = new THREE.InstancedBufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      return g;
+    }
+    function grsBuild(lvl) {
+      GRS.meshes.forEach(function(m) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); });
+      GRS.meshes = []; GRS.mesh = null;
+      GRS.lvl = lvl;
+      if (!GRS.ok || lvl <= 0) return;
+      var hi = lvl >= 2 && !GFX_IS_TOUCH, touch = GFX_IS_TOUCH;
+      // a dense tile right around you, and a sparser one that carries the meadow out to ~50 m
+      var layers = [
+        { T: 40, R: 19, Rin: 0, count: hi ? 9000 : touch ? 3200 : 5000, blades: hi ? 7 : 5, segs: hi ? 3 : 2 },
+        { T: hi ? 112 : 84, R: hi ? 54 : 40, Rin: 15, count: hi ? 7000 : touch ? 2600 : 4000, blades: hi ? 5 : 4, segs: 2 }
+      ];
+      layers.forEach(function(L, li) {
+        var g = grsClump(L.blades, L.segs);
+        var off = new Float32Array(L.count * 2), rnd = new Float32Array(L.count * 3), r = mulberry32(777 + li * 31);
+        for (var i = 0; i < L.count; i++) {
+          off[i * 2] = r() * L.T; off[i * 2 + 1] = r() * L.T;
+          rnd[i * 3] = r(); rnd[i * 3 + 1] = r(); rnd[i * 3 + 2] = r();
+        }
+        g.setAttribute('aOff', new THREE.InstancedBufferAttribute(off, 2));
+        g.setAttribute('aRnd', new THREE.InstancedBufferAttribute(rnd, 3));
+        g.instanceCount = L.count;
+        var m = new THREE.Mesh(g, grsMaterial(L));
+        m.frustumCulled = false; m.receiveShadow = true; m.castShadow = false;
+        m.layers.mask = 4;                      // main view only: not in the water mirror or the reflection probe
+        m.renderOrder = 1; m.name = 'grass';
+        scene.add(m); GRS.meshes.push(m);
+      });
+      GRS.mesh = GRS.meshes[0];
+    }
+    function grsMaterial(L) {
+      var N = GRS.N;
+      if (!GRS.tex) {
+        GRS.data = new Float32Array(N * N * 4);
+        GRS.tex = new THREE.DataTexture(GRS.data, N, N, THREE.RGBAFormat, THREE.FloatType);
+        GRS.tex.magFilter = GRS.tex.minFilter = THREE.NearestFilter; GRS.tex.generateMipmaps = false;
+        GRS.tex.needsUpdate = true;
+      }
+      var uT = { value: L.T }, uR = { value: L.R }, uRin = { value: L.Rin };
+      // paved airport ground stays clear (runway with shoulders and blast pads, taxiway, apron,
+      // hangar apron, connectors, and the terminal / car-park block)
+      var A = AIRPORT, cx = RUNWAY_CENTER_X, cz = RUNWAY_CENTER_Z, HW = RUNWAY_HALF_WIDTH, HL = RUNWAY_HALF_LENGTH;
+      var R = [[-HW - 10, -HL - 34, HW + 10, HL + 34], [A.taxiX - A.taxiHalfW - 4, -HL, A.taxiX + A.taxiHalfW + 4, HL],
+               [A.taxiX, A.apron.z0 - 4, A.apron.x1 + 4, A.apron.z1 + 4], [A.taxiX, 283, 279, 337],
+               [A.apron.x1, AIRPORT_PAD.z0 - 25, AIRPORT_PAD.x1 + 25, AIRPORT_PAD.z1 + 25]];
+      A.connectors.forEach(function(c) { R.push([0, c - A.taxiHalfW - 4, A.taxiX, c + A.taxiHalfW + 4]); });
+      GRS.u.ap.value = R.map(function(q) { return new THREE.Vector4(cx + q[0], cz + q[1], cx + q[2], cz + q[3]); });
+      var nAp = GRS.u.ap.value.length;
+      var m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.78, metalness: 0, side: THREE.DoubleSide });
+      m.onBeforeCompile = function(sh) {
+        sh.uniforms.uGrsTex = { value: GRS.tex }; sh.uniforms.uGrsCam = GRS.u.cam; sh.uniforms.uGrsWash = GRS.u.wash;
+        sh.uniforms.uGrsWind = GRS.u.wind; sh.uniforms.uGrsT = uT; sh.uniforms.uGrsR = uR; sh.uniforms.uGrsRin = uRin; sh.uniforms.uGrsAp = GRS.u.ap;
+        sh.uniforms.uSeason = SEASON_U; sh.uniforms.uTime = gfxTimeU;
+        sh.vertexShader = [
+          'attribute vec2 aOff;', 'attribute vec3 aRnd;',
+          'uniform sampler2D uGrsTex;', 'uniform vec2 uGrsCam;', 'uniform vec4 uGrsWash;', 'uniform float uGrsWind;',
+          'uniform float uGrsT;', 'uniform float uGrsR;', 'uniform float uGrsRin;', 'uniform vec4 uGrsAp[' + nAp + '];', 'uniform vec4 uSeason;', 'uniform float uTime;',
+          'varying vec3 vGrsCol;', 'varying float vGrsH;',
+          'const float GN = ' + N.toFixed(1) + ';', 'const float GS = ' + GRS.step.toFixed(4) + ';',
+          'vec3 grsDec(float p) { float r = floor(p / 65536.0); float g = floor((p - r * 65536.0) / 256.0); return vec3(r, g, p - r * 65536.0 - g * 256.0) / 255.0; }',
+          'vec4 grsAt(vec2 gi) { return texture2D(uGrsTex, (mod(gi, GN) + 0.5) / GN); }',
+          sh.vertexShader
+        ].join('\n')
+        .replace('#include <beginnormal_vertex>', [
+          'vec2 gP = aOff + floor((uGrsCam - aOff) / uGrsT + 0.5) * uGrsT;',
+          'vec2 gG = gP / GS, gI = floor(gG), gF = gG - gI;',
+          'vec4 t00 = grsAt(gI), t10 = grsAt(gI + vec2(1.0, 0.0)), t01 = grsAt(gI + vec2(0.0, 1.0)), t11 = grsAt(gI + vec2(1.0, 1.0));',
+          'float gH = mix(mix(t00.r, t10.r, gF.x), mix(t01.r, t11.r, gF.x), gF.y);',
+          'float gDen = mix(mix(t00.g, t10.g, gF.x), mix(t01.g, t11.g, gF.x), gF.y) * (1.0 - uSeason.x);',
+          'vec3 gCol = mix(mix(grsDec(t00.b), grsDec(t10.b), gF.x), mix(grsDec(t01.b), grsDec(t11.b), gF.x), gF.y);',
+          'float gD = length(gP - uGrsCam);',
+          'float gK = step(aRnd.y, gDen) * (1.0 - smoothstep(uGrsR * 0.6, uGrsR, gD)) * smoothstep(uGrsRin, uGrsRin + 4.0, gD);',
+          'for (int i = 0; i < ' + nAp + '; i++) { vec4 q = uGrsAp[i]; if (gP.x > q.x && gP.x < q.z && gP.y > q.y && gP.y < q.w) gK = 0.0; }',
+          'float gPatch = 0.5 + 0.5 * sin(gP.x * 0.13 + sin(gP.y * 0.07) * 2.0) * sin(gP.y * 0.11 + sin(gP.x * 0.05) * 2.0);',
+          'float gSc = gK * (0.65 + aRnd.z * 0.55) * (0.6 + 0.9 * gPatch);',
+          'float gCa = cos(aRnd.x * 6.2832), gSa = sin(aRnd.x * 6.2832);',
+          'vec3 objectNormal = normalize(mix(vec3(gCa * normal.x + gSa * normal.z, normal.y, -gSa * normal.x + gCa * normal.z), vec3(0.0, 1.0, 0.0), 0.6));',
+          // season: autumn dries it to straw, spring greens it — the same tint the ground gets
+          'gCol = mix(gCol, gCol * vec3(1.45, 1.08, 0.55) + vec3(0.012, 0.006, 0.0), uSeason.y * 0.75);',
+          'gCol = mix(gCol, gCol * vec3(0.82, 1.22, 0.78), uSeason.z * 0.6);',
+          'vGrsCol = gCol * (0.85 + aRnd.z * 0.3) * mix(vec3(1.0), vec3(1.06, 1.04, 0.86), aRnd.x);',
+          'vGrsH = uv.y;'
+        ].join('\n'))
+        .replace('#include <begin_vertex>', [
+          'vec3 transformed = vec3(gCa * position.x + gSa * position.z, position.y, -gSa * position.x + gCa * position.z) * gSc;',
+          'float gT = uv.y * uv.y;',
+          'vec2 gW = vec2(sin(uTime * 1.9 + gP.x * 0.17 + gP.y * 0.11), cos(uTime * 1.4 + gP.x * 0.09 - gP.y * 0.15)) * (0.06 + 0.16 * uGrsWind);',
+          'gW += vec2(sin(uTime * 4.7 + aRnd.x * 30.0), 0.0) * 0.015;',
+          'vec2 gAw = gP - uGrsWash.xy; float gAl = length(gAw);',
+          'gW += gAw / max(gAl, 0.2) * uGrsWash.w * (1.0 - smoothstep(0.0, uGrsWash.z, gAl)) * (0.8 + 0.2 * sin(uTime * 13.0 + gAl));',
+          'float gWl = min(length(gW), 0.9);',
+          'transformed.xz += gW * gT * gSc;',
+          'transformed.y *= 1.0 - gWl * gT * 0.55;',
+          'transformed += vec3(gP.x, gH - 0.1, gP.y);'
+        ].join('\n'));
+        sh.fragmentShader = 'varying vec3 vGrsCol;\nvarying float vGrsH;\n' + sh.fragmentShader.replace('#include <color_fragment>',
+          '#include <color_fragment>\ndiffuseColor.rgb *= vGrsCol * mix(0.72, 1.18, vGrsH);');
+      };
+      return m;
+    }
+    // one heightmap texel per terrain grid vertex: height, grassiness, packed ground colour
+    var _grsC = new THREE.Color(), _grsBio = [0, 0, 0];
+    function grsSample(gx, gz, o) {
+      var S = GRS.step, wx = gx * S, wz = gz * S, h = getTerrainHeight(wx, wz), d = GRS.data;
+      colorForHeight(h, _grsC);
+      var fd = forestDensityAt(wx, wz, h), lx = wx - RUNWAY_CENTER_X, lz = wz - RUNWAY_CENTER_Z;
+      var inPad = lx > AIRPORT_PAD.x0 - 25 && lx < AIRPORT_PAD.x1 + 25 && lz > AIRPORT_PAD.z0 - 25 && lz < AIRPORT_PAD.z1 + 25;
+      if (fd > 0.01 && !treeBlockedAt(wx, wz)) { _grsC.r *= 1 - fd * 0.5; _grsC.g *= 1 - fd * 0.36; _grsC.b *= 1 - fd * 0.52; }
+      regColor(wx, wz, h, _grsC, _grsBio);
+      var j = 1 + (smoothNoise(wx * 0.11, wz * 0.11) - 0.5) * 0.22 + (smoothNoise(wx * 0.31, wz * 0.29) - 0.5) * 0.09;
+      var r = Math.min(1, Math.max(0, _grsC.r * j)), g = Math.min(1, Math.max(0, _grsC.g * j)), b = Math.min(1, Math.max(0, _grsC.b * j));
+      var sl = Math.abs(getTerrainHeight(wx + S, wz) - h) / S + Math.abs(getTerrainHeight(wx, wz + S) - h) / S;
+      var den = 1 - Math.max(_grsBio[0], _grsBio[1], _grsBio[2]);
+      den *= THREE.MathUtils.clamp((h - WATER_LEVEL - 1.2) / 1.5, 0, 1);            // no grass on the beach or under water
+      den *= 1 - THREE.MathUtils.smoothstep(sl, 0.35, 0.6);                            // nor on rock
+      den *= 1 - THREE.MathUtils.smoothstep(h, 104, 118);                              // nor above the snow line
+      den *= 1 - THREE.MathUtils.smoothstep(r - g, -0.02, 0.04);                       // nor on sand, tracks and dry dirt
+      den *= 1 - fd * 0.55;                                                            // thinner under the trees
+      if (!inPad && treeBlockedAt(wx, wz)) den = 0;                                    // towns, bases, the highway...
+      d[o] = h; d[o + 1] = Math.max(0, Math.min(1, den)) * 0.92;
+      d[o + 2] = Math.round(r * 255) * 65536 + Math.round(g * 255) * 256 + Math.round(b * 255);
+      d[o + 3] = 1;
+    }
+    function grsRefresh(cx, cz) {
+      var N = GRS.N, S = GRS.step, gx0 = Math.floor(cx / S) - (N >> 1), gz0 = Math.floor(cz / S) - (N >> 1);
+      if (gx0 === GRS.gx0 && gz0 === GRS.gz0) return;
+      var px = GRS.gx0, pz = GRS.gz0, changed = false;
+      for (var gz = gz0; gz < gz0 + N; gz++) for (var gx = gx0; gx < gx0 + N; gx++) {
+        if (px !== null && gx >= px && gx < px + N && gz >= pz && gz < pz + N) continue;     // already there
+        var tx = ((gx % N) + N) % N, tz = ((gz % N) + N) % N;
+        grsSample(gx, gz, (tz * N + tx) * 4); changed = true;
+      }
+      GRS.gx0 = gx0; GRS.gz0 = gz0;
+      if (changed) GRS.tex.needsUpdate = true;
+    }
+    function grsLevel() {
+      if (typeof gpSet === 'undefined' || !gpSet) return 1;
+      if (gpSet.quality === 'low') return 0;
+      var f = gpSet.quality === 'auto' ? (GFX_IS_TOUCH ? 'medium' : 'high') : gpSet.forest;
+      return f === 'high' ? 2 : f === 'medium' ? 1 : 0;
+    }
+    var _grsF = new THREE.Vector3();
+    function grsUpdate(dt) {
+      var lvl = grsLevel();
+      if (lvl !== GRS.lvl) grsBuild(lvl);
+      if (!GRS.mesh) return;
+      camera.getWorldPosition(GRS.cam);
+      var agl = GRS.cam.y - Math.max(getTerrainHeight(GRS.cam.x, GRS.cam.z), WATER_LEVEL);
+      var show = started && agl < 180;
+      GRS.meshes.forEach(function(m) { m.visible = show; });
+      if (!show) return;
+      grsRefresh(GRS.cam.x, GRS.cam.z);
+      GRS.u.cam.value.set(GRS.cam.x, GRS.cam.z);
+      GRS.u.wind.value = typeof currentWind === 'number' ? currentWind : 0;
+      // rotor downwash flattens the grass under a helicopter; a jet's blast streams it out behind
+      var pAgl = position.y - getTerrainHeight(position.x, position.z), thr = MAX_SPEED > 0 ? Math.max(0, throttle) / MAX_SPEED : 0;
+      var W = GRS.u.wash.value;
+      if (isHelicopterMode) W.set(position.x, position.z, 14, 0.9 * THREE.MathUtils.clamp(1 - pAgl / 30, 0, 1));
+      else if (isCarMode) W.w = 0;
+      else {
+        _grsF.set(-Math.sin(heading), 0, -Math.cos(heading));
+        W.set(position.x - _grsF.x * 10, position.z - _grsF.z * 10, 9, 0.7 * thr * THREE.MathUtils.clamp(1 - pAgl / 12, 0, 1));
+      }
+    }
+
+    /* ---------- REFLECTION PROBE: your aircraft reflects the real world around it ----------
+       The sky-only environment map made a jet's belly mirror blue sky even over a forest. On high
+       and ultra (desktop), a small cube map of the actual scene — ground, sea, sky, mountains, clouds — is
+       captured around the aircraft, one face per frame, filtered, and given to the aircraft's
+       paint and glass every second or so. Only the big shapes are drawn into it. */
+    var REFP = { on: false, rt: null, cam: null, face: 0, wait: 0, env: null, pm: null, mats: new Set() };
+    function refpWanted() {
+      if (GFX_IS_TOUCH || typeof gpSet === 'undefined' || !gpSet) return false;
+      if (gpSet.quality === 'auto') return true;
+      return gpSet.refl === 'high' || gpSet.refl === 'ultra';
+    }
+    function refpMats(fn) {
+      plane.traverse(function(o) {
+        if (!o.isMesh) return;
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach(function(m) { if (m && m.isMeshStandardMaterial) fn(m); });
+      });
+    }
+    // every material that has ever had the probe gets each new capture (a hidden aircraft type must
+    // never be left holding a texture that has since been disposed)
+    function refpSet(tex) {
+      refpMats(function(m) { REFP.mats.add(m); });
+      REFP.mats.forEach(function(m) {
+        var was = m.envMap;
+        if (was === tex) return;
+        m.envMap = tex;
+        if (!!was !== !!tex || (was && tex && was.encoding !== tex.encoding)) m.needsUpdate = true;
+      });
+    }
+    var _refpP = new THREE.Vector3(), _refpQ = new THREE.Vector3();
+    // only the big shapes go into the probe (its own layer 3): ground, sea, sky, mountains, clouds —
+    // a handful of draws per face instead of the whole scene
+    function refpTag() {
+      function tag(o) { if (o && !o.userData.probe) { o.userData.probe = true; o.layers.enable(3); } }
+      for (var i = 0; i < scene.children.length; i++) {
+        var o = scene.children[i];
+        if (o.isMesh && (o.material === terrainMaterial || o.material === ftMat)) tag(o);
+      }
+      tag(water); tag(sky); tag(window.__distantMountains);
+      if (typeof clouds !== 'undefined') clouds.forEach(tag);
+    }
+    function refpUpdate() {
+      var want = refpWanted() && started;
+      if (!want) {
+        if (REFP.on) { REFP.on = false; refpSet(null); if (REFP.env) { REFP.env.dispose(); REFP.env = null; } }
+        return;
+      }
+      if (!REFP.rt) {
+        REFP.rt = new THREE.WebGLCubeRenderTarget(128, { format: THREE.RGBAFormat, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+        REFP.rt.texture.encoding = THREE.sRGBEncoding;
+        REFP.cam = new THREE.CubeCamera(2, 9000, REFP.rt);
+        REFP.cam.children.forEach(function(c) { c.layers.mask = 8; });
+        REFP.pm = new THREE.PMREMGenerator(renderer);
+      }
+      REFP.on = true;
+      // a respawn or a long jump makes the last capture wrong: start a fresh one straight away
+      plane.getWorldPosition(_refpQ);
+      if (REFP.face === 0 && REFP.wait > 0 && _refpQ.distanceToSquared(REFP.cam.position) > 150 * 150) REFP.wait = 0;
+      if (REFP.wait > 0) { REFP.wait--; return; }
+      var prevRT = renderer.getRenderTarget(), au = scene.autoUpdate, sh = renderer.shadowMap.autoUpdate, pv = plane.visible;
+      scene.autoUpdate = false; renderer.shadowMap.autoUpdate = false; plane.visible = false;
+      try {
+        if (REFP.face < 6) {
+          if (REFP.face === 0) { plane.getWorldPosition(_refpP); REFP.cam.position.copy(_refpP); REFP.cam.updateMatrixWorld(true); refpTag(); }
+          renderer.setRenderTarget(REFP.rt, REFP.face);
+          renderer.clear();
+          renderer.render(scene, REFP.cam.children[REFP.face]);
+          REFP.face++;
+        } else {
+          var out = REFP.pm.fromCubemap(REFP.rt.texture);
+          var old = REFP.env; REFP.env = out;
+          refpSet(out.texture);
+          if (old) old.dispose();
+          REFP.face = 0; REFP.wait = 60;               // about once a second
+        }
+      } finally {
+        plane.visible = pv; scene.autoUpdate = au; renderer.shadowMap.autoUpdate = sh;
+        renderer.setRenderTarget(prevRT);
+      }
+    }
+
+    /* ---------- WET GROUND: rain soaks the island, then it dries ---------- */
+    var WET = { mats: null };
+    function wetUpdate(dt) {
+      var rain = typeof currentRainIntensity === 'number' ? Math.min(1, currentRainIntensity) : 0;
+      var frozen = typeof SEASON !== 'undefined' && SEASON.snow > 0.5;
+      var w = GFX_WET.value, target = frozen ? 0 : rain;
+      GFX_WET.value = target > w ? Math.min(target, w + dt / 25) : Math.max(target, w - dt / 120);
+      if (!WET.mats) {
+        WET.mats = [];
+        scene.traverse(function(o) { if (o.isMesh && o.material && o.material.userData && o.material.userData.asphalt && WET.mats.indexOf(o.material) < 0) WET.mats.push(o.material); });
+        WET.mats.forEach(function(m) { m.userData.dryRough = m.roughness; });
+      }
+      var k = GFX_WET.value;
+      WET.mats.forEach(function(m) { m.roughness = m.userData.dryRough * (1 - 0.42 * k); m.color.setScalar(1 - 0.38 * k); });
+    }
+
+    /* ============================================================
        CSAR — COMBAT SEARCH AND RESCUE
        After an ejection, once the pilot is on the ground you can fly a
        rescue helicopter out from base: find the orange signal smoke, come
@@ -34237,8 +34672,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       quality: { t: 'seg', label: 'Quality', help: 'Auto adjusts detail to keep the frame rate smooth', opts: [['auto', 'Auto'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra'], ['custom', 'Custom']] },
       res: { t: 'range', label: 'Render resolution', help: 'Lower is faster; above 100% sharpens edges', min: 50, max: 150, step: 5, fmt: function(v) { return v + '%'; }, gfx: true },
       shadows: { t: 'seg', label: 'Shadows', opts: [['off', 'Off'], ['low', 'Low'], ['high', 'High'], ['ultra', 'Ultra']], gfx: true },
-      refl: { t: 'seg', label: 'Water reflections', help: 'Mirror image of the world on lakes and the sea', opts: [['off', 'Off'], ['low', 'Low'], ['high', 'High'], ['ultra', 'Ultra']], gfx: true },
-      forest: { t: 'seg', label: 'Forest detail', help: 'How far out trees keep their full shape', opts: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], gfx: true },
+      refl: { t: 'seg', label: 'Reflections', help: 'Mirror image of the world on lakes and the sea; on High and Ultra your aircraft reflects the real ground and sky too', opts: [['off', 'Off'], ['low', 'Low'], ['high', 'High'], ['ultra', 'Ultra']], gfx: true },
+      forest: { t: 'seg', label: 'Forest & grass', help: 'How far out trees keep their full shape, and how dense the grass is near the ground (Low: no grass)', opts: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], gfx: true },
       post: { t: 'switch', label: 'Bloom & lens effects', help: 'Glow on bright lights, sun rays and lens flare' },
       grain: { t: 'switch', label: 'Film grain' },
       fps: { t: 'switch', label: 'Frame counter', help: 'Frames per second and render resolution, top of the screen' },
