@@ -1,0 +1,15 @@
+Glidepath — surface detail textures
+
+Greyscale detail plates derived from Poly Haven textures (CC0 1.0, public domain).
+https://polyhaven.com/license
+
+leafy_grass.jpg  Leafy Grass — Charlotte Baglioni  https://polyhaven.com/a/leafy_grass
+aerial_grass_rock.jpg  Aerial Grass Rock — Rob Tuytel  https://polyhaven.com/a/aerial_grass_rock
+rocky_terrain_02.jpg  Rocky Terrain 02 — Amal Kumar  https://polyhaven.com/a/rocky_terrain_02
+rock_face.jpg  Rock Face — Greg Zaal, Dario Barresi  https://polyhaven.com/a/rock_face
+coast_sand_01.jpg  Coast Sand 01 — Rob Tuytel  https://polyhaven.com/a/coast_sand_01
+snow_field_aerial.jpg  Snow Field Aerial — Rob Tuytel  https://polyhaven.com/a/snow_field_aerial
+asphalt_01.jpg  Asphalt 01 — Dario Barresi, Charlotte Baglioni  https://polyhaven.com/a/asphalt_01
+aerial_asphalt_01.jpg  Aerial Asphalt 01 — Rob Tuytel  https://polyhaven.com/a/aerial_asphalt_01
+
+Processing: luminance only, low-frequency lighting removed (high-pass), normalised to mean 0.5, 1024 px.
